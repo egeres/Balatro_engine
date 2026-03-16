@@ -24,6 +24,7 @@ mod misc_jokers;
 mod planet_cards;
 mod rare_jokers;
 mod spectral_cards;
+mod stakes;
 mod stickers;
 mod tarot_cards;
 mod vouchers;
