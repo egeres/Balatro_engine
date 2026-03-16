@@ -1,11 +1,12 @@
-/// Tests for 29 misc jokers:
+/// Tests for misc jokers:
 /// Astronomer, Blueprint, Brainstorm, Cartomancer, Cavendish, Certificate, ChaosTheClown,
 /// Cloud9, CreditCard, DelayedGratification, DietCola, Dna, Drunkard, Dusk, Egg, EightBall,
 /// FacelessJoker, GiftCard, GoldenJoker, GoldenTicket, GrosMichel, Hallucination,
-/// InvisibleJoker, Juggler, LoyaltyCard, MailInRebate, MarbleJoker, Matador, MerryAndy
+/// InvisibleJoker, Juggler, LoyaltyCard, MailInRebate, MarbleJoker, Matador, MerryAndy,
+/// OopsAll6s, Showman
 
 use super::*;
-use crate::game::GameStateKind;
+use crate::game::{BlindKind, GameStateKind};
 
 // =========================================================
 // Astronomer: planet cards are free in the shop
@@ -279,15 +280,31 @@ fn test_cloud9_earns_money_per_nine_at_end_of_round() {
 }
 
 // =========================================================
-// CreditCard: money floor -$20
+// CreditCard: money floor -$20 (pure economic joker, no scoring effect)
 // =========================================================
 
 #[test]
-fn test_credit_card_joker_can_be_added() {
+fn test_credit_card_has_no_scoring_effect() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let jokers = vec![joker(0, JokerKind::CreditCard)];
+    let r = score(&played, &played, &jokers);
+    // CreditCard is purely economic; HC with Ace: chips=16, mult=1 → score=16
+    assert_eq!(r.final_score as i64, 16);
+}
+
+#[test]
+fn test_credit_card_does_not_modify_game_parameters() {
     let mut gs = make_game();
-    gs.jokers.push(joker(1, JokerKind::CreditCard));
-    assert_eq!(gs.jokers.len(), 1);
-    assert_eq!(gs.jokers[0].kind, JokerKind::CreditCard);
+    let base_hand_size = gs.effective_hand_size();
+    let base_discards = gs.effective_max_discards();
+    let base_hands = gs.effective_max_hands();
+    gs.jokers.push(joker(0, JokerKind::CreditCard));
+    assert_eq!(gs.effective_hand_size(), base_hand_size,
+        "CreditCard should not change hand size");
+    assert_eq!(gs.effective_max_discards(), base_discards,
+        "CreditCard should not change discard count");
+    assert_eq!(gs.effective_max_hands(), base_hands,
+        "CreditCard should not change hand count");
 }
 
 // =========================================================
@@ -897,24 +914,43 @@ fn test_marble_joker_adds_stone_card_on_blind_set() {
 }
 
 // =========================================================
-// Matador: $8 when boss blind effect is triggered (basic check)
+// Matador: $8 when boss blind effect is triggered
 // =========================================================
 
 #[test]
-fn test_matador_can_be_added_without_crash() {
-    // Matador's full effect requires boss blind triggering logic.
-    // Just verify it can be instantiated and doesn't break anything.
-    let mut gs = make_game();
-    gs.jokers.push(joker(1, JokerKind::Matador));
-    assert_eq!(gs.jokers.len(), 1);
-    assert_eq!(gs.jokers[0].kind, JokerKind::Matador);
-
-    // Verify scoring still works
+fn test_matador_has_no_scoring_effect() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
     let jokers = vec![joker(0, JokerKind::Matador)];
     let r = score(&played, &played, &jokers);
-    // Matador doesn't add chips/mult during scoring, just check no panic
-    assert!(r.final_score > 0.0);
+    // Matador earns $8 when boss blind fires, not during scoring
+    // HC with Ace: chips=16, mult=1 → score=16
+    assert_eq!(r.final_score as i64, 16);
+}
+
+#[test]
+fn test_matador_does_not_modify_game_parameters() {
+    let mut gs = make_game();
+    let base_hand_size = gs.effective_hand_size();
+    let base_discards = gs.effective_max_discards();
+    let base_hands = gs.effective_max_hands();
+    gs.jokers.push(joker(0, JokerKind::Matador));
+    assert_eq!(gs.effective_hand_size(), base_hand_size,
+        "Matador should not change hand size");
+    assert_eq!(gs.effective_max_discards(), base_discards,
+        "Matador should not change discard count");
+    assert_eq!(gs.effective_max_hands(), base_hands,
+        "Matador should not change hand count");
+}
+
+#[test]
+fn test_matador_does_not_crash_entering_boss_blind() {
+    let mut gs = make_game();
+    gs.current_blind = BlindKind::Boss;
+    gs.boss_blind = Some(BossBlind::TheClub);
+    gs.jokers.push(joker(0, JokerKind::Matador));
+    gs.select_blind().unwrap();
+    assert!(matches!(gs.state, GameStateKind::Round),
+        "Entering a boss blind with Matador should succeed and enter Round state");
 }
 
 // =========================================================
@@ -1047,6 +1083,40 @@ fn test_mr_bones_saves_run_at_quarter_goal() {
     // Mr. Bones should have saved: state is Shop not GameOver
     assert!(!matches!(gs.state, GameStateKind::GameOver),
         "MrBones should prevent GameOver when score >= 25% of goal");
+}
+
+// =========================================================
+// OopsAll6s: all played cards treated as 6s (no scoring effect yet)
+// =========================================================
+
+#[test]
+fn test_oops_all_6s_can_be_added() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(0, JokerKind::OopsAll6s));
+    assert_eq!(gs.jokers.len(), 1);
+    assert_eq!(gs.jokers[0].kind, JokerKind::OopsAll6s);
+}
+
+#[test]
+fn test_oops_all_6s_has_no_standalone_scoring_effect() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let jokers = vec![joker(0, JokerKind::OopsAll6s)];
+    let r = score(&played, &played, &jokers);
+    // OopsAll6s adds no chips or mult itself; HC with Ace: chips=16, mult=1 → score=16
+    assert_eq!(r.final_score as i64, 16);
+}
+
+#[test]
+fn test_oops_all_6s_does_not_crash_during_round() {
+    let mut gs = make_game();
+    let cards = vec![card(0, Rank::Ace, Suit::Spades), card(1, Rank::Six, Suit::Hearts)];
+    setup_round(&mut gs, cards, 2);
+    gs.jokers.push(joker(0, JokerKind::OopsAll6s));
+    gs.score_goal = 1.0;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    assert!(matches!(gs.state, GameStateKind::Shop),
+        "Playing with OopsAll6s should not crash and should complete the round");
 }
 
 // =========================================================
@@ -1245,14 +1315,31 @@ fn test_seltzer_decrements_counter_per_hand() {
 }
 
 // =========================================================
-// ShowMan: jokers can repeat in shop (existence check)
+// Showman: jokers/consumables can repeat in shop (no scoring effect)
 // =========================================================
 
 #[test]
-fn test_showman_can_be_added() {
+fn test_showman_has_no_scoring_effect() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let jokers = vec![joker(0, JokerKind::Showman)];
+    let r = score(&played, &played, &jokers);
+    // Showman is a shop-mechanic joker; HC with Ace: chips=16, mult=1 → score=16
+    assert_eq!(r.final_score as i64, 16);
+}
+
+#[test]
+fn test_showman_does_not_modify_game_parameters() {
     let mut gs = make_game();
-    gs.jokers.push(joker(1, JokerKind::Showman));
-    assert_eq!(gs.jokers[0].kind, JokerKind::Showman);
+    let base_hand_size = gs.effective_hand_size();
+    let base_discards = gs.effective_max_discards();
+    let base_hands = gs.effective_max_hands();
+    gs.jokers.push(joker(0, JokerKind::Showman));
+    assert_eq!(gs.effective_hand_size(), base_hand_size,
+        "Showman should not change hand size");
+    assert_eq!(gs.effective_max_discards(), base_discards,
+        "Showman should not change discard count");
+    assert_eq!(gs.effective_max_hands(), base_hands,
+        "Showman should not change hand count");
 }
 
 // =========================================================
