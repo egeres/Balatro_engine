@@ -139,6 +139,14 @@ impl GameState {
                         _ => {}
                     }
                     // Apply planet/tarot immediately? No - user uses it separately via use_consumable
+
+                    // Hallucination: 1/2 chance to create a tarot card when picking a consumable from a pack
+                    if self.jokers.iter().any(|j| j.kind == JokerKind::Hallucination && j.active) {
+                        if self.rng.next_bool_prob(0.5) && self.consumables.len() < self.consumable_slots as usize {
+                            let tarot = self.random_tarot();
+                            self.consumables.push(ConsumableCard::Tarot(tarot));
+                        }
+                    }
                 } else {
                     return Err(BalatroError::ConsumableSlotsFull);
                 }

@@ -155,6 +155,16 @@ impl GameState {
         // Post-scoring joker updates
         self.post_play_joker_updates(&result, &played_cards, &hand_cards);
 
+        // Cartomancer: create a tarot when playing a single-card hand
+        if played_cards.len() == 1 {
+            if self.jokers.iter().any(|j| j.kind == JokerKind::Cartomancer && j.active) {
+                if self.consumables.len() < self.consumable_slots as usize {
+                    let tarot = self.random_tarot();
+                    self.consumables.push(ConsumableCard::Tarot(tarot));
+                }
+            }
+        }
+
         // Earn dollars from scoring
         self.money += result.dollars_earned;
 
@@ -386,6 +396,34 @@ impl GameState {
                     // +0.25 Xmult for each joker sold
                     // (handled in sell_joker)
                 }
+                JokerKind::EightBall => {
+                    // 1/4 chance to create a tarot card when an 8 is scored
+                    let eights_scored = result.scoring_card_indices.iter()
+                        .filter(|&&idx| played[idx].rank == Rank::Eight)
+                        .count();
+                    for _ in 0..eights_scored {
+                        if self.rng.next_bool_prob(0.25) {
+                            if self.consumables.len() < self.consumable_slots as usize {
+                                let tarot = self.random_tarot();
+                                self.consumables.push(ConsumableCard::Tarot(tarot));
+                            }
+                        }
+                    }
+                }
+                JokerKind::Dna => {
+                    // On the first hand of a round, if only 1 card was played, add a permanent copy to deck
+                    let max_h = self.effective_max_hands();
+                    let was_first_hand = self.hands_remaining + 1 == max_h;
+                    if was_first_hand && played.len() == 1 {
+                        let card_to_copy = played[0].clone();
+                        let new_id = self.next_id();
+                        let mut new_card = card_to_copy;
+                        new_card.id = new_id;
+                        let deck_idx = self.deck.len();
+                        self.deck.push(new_card);
+                        self.draw_pile.push(deck_idx);
+                    }
+                }
                 _ => {}
             }
         }
@@ -427,6 +465,37 @@ impl GameState {
         }
         self.selected_indices.clear();
         self.discards_remaining -= 1;
+
+        // FacelessJoker: $5 if 3+ face cards were discarded
+        if discarded_cards.iter().filter(|c| c.rank.is_face()).count() >= 3 {
+            let count = self.jokers.iter().filter(|j| j.kind == JokerKind::FacelessJoker && j.active).count();
+            self.money += 5 * count as i32;
+        }
+
+        // MailInRebate: +$3 for each discarded card matching the tracked rank
+        for j_idx in 0..self.jokers.len() {
+            if self.jokers[j_idx].kind == JokerKind::MailInRebate && self.jokers[j_idx].active {
+                let rank_str = self.jokers[j_idx].counters.get("rank").and_then(|v| v.as_str()).unwrap_or("Two").to_string();
+                let target_rank = match rank_str.as_str() {
+                    "Two" => Rank::Two,
+                    "Three" => Rank::Three,
+                    "Four" => Rank::Four,
+                    "Five" => Rank::Five,
+                    "Six" => Rank::Six,
+                    "Seven" => Rank::Seven,
+                    "Eight" => Rank::Eight,
+                    "Nine" => Rank::Nine,
+                    "Ten" => Rank::Ten,
+                    "Jack" => Rank::Jack,
+                    "Queen" => Rank::Queen,
+                    "King" => Rank::King,
+                    "Ace" => Rank::Ace,
+                    _ => Rank::Two,
+                };
+                let matching = discarded_cards.iter().filter(|c| c.rank == target_rank).count();
+                self.money += 3 * matching as i32;
+            }
+        }
 
         // Post-discard joker updates
         for i in 0..self.jokers.len() {
@@ -502,6 +571,52 @@ impl GameState {
     fn win_round(&mut self) {
         let blind_dollars = self.blind_reward_dollars();
         self.money += blind_dollars;
+
+        // GoldenJoker: +$4 at end of round
+        let golden_joker_count = self.jokers.iter().filter(|j| j.kind == JokerKind::GoldenJoker && j.active).count();
+        self.money += 4 * golden_joker_count as i32;
+
+        // Cloud9: +$1 per 9 in full deck at end of round
+        let nines_in_deck = self.deck.iter().filter(|c| c.rank == Rank::Nine && !c.debuffed).count();
+        let cloud9_count = self.jokers.iter().filter(|j| j.kind == JokerKind::Cloud9 && j.active).count();
+        self.money += nines_in_deck as i32 * cloud9_count as i32;
+
+        // DelayedGratification: +$2 per available discard if no discards were used this round
+        let max_disc = self.effective_max_discards();
+        if self.discards_remaining == max_disc {
+            let dg_count = self.jokers.iter().filter(|j| j.kind == JokerKind::DelayedGratification && j.active).count();
+            self.money += max_disc as i32 * 2 * dg_count as i32;
+        }
+
+        // GrosMichel: 1/6 chance to be destroyed at end of round
+        let gm_positions: Vec<usize> = self.jokers.iter().enumerate()
+            .filter(|(_, j)| j.kind == JokerKind::GrosMichel && j.active && !j.eternal)
+            .map(|(i, _)| i)
+            .collect();
+        for pos in gm_positions.iter().rev() {
+            if self.rng.next_bool_prob(1.0 / 6.0) {
+                self.jokers.remove(*pos);
+            }
+        }
+
+        // InvisibleJoker: after 2 rounds, duplicate a random joker for free
+        for i in 0..self.jokers.len() {
+            if self.jokers[i].kind == JokerKind::InvisibleJoker && self.jokers[i].active {
+                let rounds = self.jokers[i].get_counter_i64("rounds") + 1;
+                self.jokers[i].set_counter_i64("rounds", rounds % 2);
+                if rounds >= 2 && self.jokers.len() < self.joker_slots as usize {
+                    // Find a random joker that is not InvisibleJoker itself
+                    let candidates: Vec<usize> = (0..self.jokers.len())
+                        .filter(|&j| j != i && self.jokers[j].active && self.jokers[j].kind != JokerKind::InvisibleJoker)
+                        .collect();
+                    if !candidates.is_empty() {
+                        let pick = self.rng.range_usize(0, candidates.len() - 1);
+                        let dup = self.jokers[candidates[pick]].clone();
+                        self.jokers.push(dup);
+                    }
+                }
+            }
+        }
 
         if self.deck_type == DeckType::Green {
             // Green deck: +$1 per remaining hand, +$1 per remaining discard; no interest

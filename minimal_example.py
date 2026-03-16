@@ -1,54 +1,24 @@
-balatro-environment
-====================
+"""
+Minimal demo script for the balatro-environment package.
 
-**balatro-environment** is a Python/Rust simulation engine for the game Balatro. It exposes a fast Rust core as a Python package so you can programmatically run games, test strategies, and build tooling around Balatro.
+It:
+- Starts a new game
+- Enters the first blind
+- Tries one discard
+- Then tries to play a hand (aiming for a flush if possible)
+- Reports whether the blind was beaten or the run ended.
+"""
 
-## Installation
-
-### Prerequisites
-
-- **Rust** and **Cargo** installed (recommended via `rustup`)
-- **Python** ≥ 3.12
-- `pip` available
-
-### Install with `pip` (recommended for users)
-
-From the project root (where `pyproject.toml` lives), install in editable mode:
-
-```bash
-pip install -e .
-```
-
-This will:
-
-- Build the Rust extension
-- Install the `balatro-environment` package into your currently active Python environment
-
-After this, you can import `balatro` from Python.
-
-> **Note for Rust/Python developers:**  
-> This project uses `maturin` as its build backend. For finer control or faster rebuilds during development, you can instead do:
->
-> ```bash
-> pip install maturin
-> maturin develop --release
-> ```
-
-## Minimal Python example
-
-Once the package is installed in your Python environment, you can run a minimal example like this (saved as `minimal_example.py`):
-
-```python
 from __future__ import annotations
 
 from balatro import (
-    Game,
     DeckType,
-    Stake,
+    DiscardSelected,
+    Game,
+    PlaySelectedHand,
     SelectBlind,
     SelectCard,
-    PlaySelectedHand,
-    DiscardSelected,
+    Stake,
 )
 
 
@@ -75,7 +45,9 @@ def main() -> None:
     print("Initial state:", game.state)
     print("Initial run info:", game.run_info())
 
+    # ------------------------------------------------------------------
     # Step 1: select the first blind
+    # ------------------------------------------------------------------
     actions = game.available_actions()
     print("Available actions in initial state:", actions)
 
@@ -90,7 +62,9 @@ def main() -> None:
     print("State after selecting blind:", game.state)
     print("Run info after blind selection:", game.run_info())
 
+    # ------------------------------------------------------------------
     # Step 2: if we are in a round, try a discard and then play a hand
+    # ------------------------------------------------------------------
     if game.state != "Round":
         print("Not in a Round state after selecting blind; stopping.")
         return
@@ -135,37 +109,19 @@ def main() -> None:
         print("PlaySelectedHand not available; ending demo.")
         return
 
+    # ------------------------------------------------------------------
     # Step 3: check outcome of the blind
+    # ------------------------------------------------------------------
     run = game.run_info()
     print("\nRun info after playing hand:", run)
     state = run.get("state")
     if state == "GameOver":
         print("Run ended: you lost the blind (GameOver).")
     else:
-        # If the run continues after playing a hand, treat that as
-        # "beat the blind" for this demo.
+        # We don't inspect exact scoring logic here; if the run continues
+        # after playing a hand, treat that as 'beat the blind' for this demo.
         print("Run is still alive (state =", state, ") – you likely beat the blind!")
 
 
 if __name__ == "__main__":
     main()
-```
-
-Save this as `minimal_example.py` and run it with your Python:
-
-```bash
-python minimal_example.py
-```
-
-## Development
-
-- The Rust crate and core game logic live under `src/`.
-- The Python package is under `python/balatro/`.
-- The Python package is configured via `pyproject.toml` and built with `maturin`.
-
-To run tests (if added) or to rebuild after making changes, simply re-run:
-
-```bash
-maturin develop --release
-```
-

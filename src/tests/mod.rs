@@ -20,6 +20,7 @@ mod gamestate;
 mod hand_types;
 mod joker_mechanics;
 mod long_runs;
+mod misc_jokers;
 mod planet_cards;
 mod rare_jokers;
 mod spectral_cards;

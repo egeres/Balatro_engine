@@ -28,6 +28,7 @@ pub(crate) fn count_retriggers(
     scoring_indices: &[usize],
     played_cards: &[CardInstance],
     hand_type: HandType,
+    hands_remaining: u32,
 ) -> usize {
     let mut retriggers = 0usize;
 
@@ -36,10 +37,12 @@ pub(crate) fn count_retriggers(
         retriggers += 1;
     }
 
-    // Dusk: retrigger scoring cards on last hand (handled at game level)
-    // Hack: retrigger 2-5 cards
+    // Dusk: retrigger all scoring cards on last hand (hands_remaining == 0)
     for joker in jokers.iter().filter(|j| j.active) {
         match joker.kind {
+            JokerKind::Dusk if hands_remaining == 0 => {
+                retriggers += 1;
+            }
             JokerKind::Hack => {
                 if matches!(
                     card.rank,
@@ -623,6 +626,58 @@ pub(crate) fn calc_joker_main(joker: &JokerInstance, ctx: &ScoringContext) -> Jo
         }
         JokerKind::Vagabond => {
             // Create Tarot if $4 or less (tracked at hand play time)
+        }
+        JokerKind::GrosMichel => {
+            effect.mult += 15;
+        }
+        JokerKind::Cavendish => {
+            if hand_type == HandType::Pair {
+                effect.x_mult = 3.0;
+            }
+        }
+        JokerKind::GoldenTicket => {
+            // +$1 per Gold enhancement card in scoring hand
+            let gold_count = scoring_cards.iter()
+                .filter(|&&i| played[i].enhancement == Enhancement::Gold)
+                .count();
+            effect.dollars += gold_count as i32;
+        }
+        JokerKind::LoyaltyCard => {
+            // x4 mult every 6 hands played (triggered on 6th, 12th, 18th hand)
+            let total_played: u32 = ctx.hand_levels.values().map(|h| h.played).sum();
+            if total_played > 0 && (total_played % 6) == 5 {
+                effect.x_mult = 4.0;
+            }
+        }
+        JokerKind::Blueprint => {
+            // Copy the joker immediately to the right
+            let pos = ctx.jokers.iter().position(|j| j as *const JokerInstance == joker as *const JokerInstance);
+            if let Some(p) = pos {
+                if p + 1 < ctx.jokers.len() {
+                    let next = &ctx.jokers[p + 1];
+                    if next.active && !matches!(next.kind, JokerKind::Blueprint | JokerKind::Brainstorm) {
+                        let copied = calc_joker_main(next, ctx);
+                        effect.chips += copied.chips;
+                        effect.mult += copied.mult;
+                        effect.x_mult *= copied.x_mult;
+                        effect.dollars += copied.dollars;
+                    }
+                }
+            }
+        }
+        JokerKind::Brainstorm => {
+            // Copy the leftmost joker (that is not Blueprint or Brainstorm)
+            if let Some(first) = ctx.jokers.iter().find(|&j| {
+                j.active
+                && !matches!(j.kind, JokerKind::Blueprint | JokerKind::Brainstorm)
+                && (j as *const JokerInstance != joker as *const JokerInstance)
+            }) {
+                let copied = calc_joker_main(first, ctx);
+                effect.chips += copied.chips;
+                effect.mult += copied.mult;
+                effect.x_mult *= copied.x_mult;
+                effect.dollars += copied.dollars;
+            }
         }
         _ => {}
     }

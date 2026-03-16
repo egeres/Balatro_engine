@@ -40,6 +40,29 @@ impl GameState {
         self.shop_offers = offers;
         self.shop_voucher = Some(self.random_voucher());
         self.reroll_cost = 5;
+
+        // ChaosTheClown: +1 free reroll per shop visit
+        let chaos_count = self.jokers.iter().filter(|j| j.kind == JokerKind::ChaosTheClown && j.active).count();
+        self.free_rerolls += chaos_count as u32;
+
+        // Egg: gains $3 sell value each time the shop is visited
+        for j in self.jokers.iter_mut() {
+            if j.kind == JokerKind::Egg && j.active {
+                let cur = j.get_counter_i64("sell_bonus");
+                j.set_counter_i64("sell_bonus", cur + 3);
+            }
+        }
+
+        // GiftCard: +$1 sell value to all other jokers held
+        let has_gift_card = self.jokers.iter().any(|j| j.kind == JokerKind::GiftCard && j.active);
+        if has_gift_card {
+            for j in self.jokers.iter_mut() {
+                if j.kind != JokerKind::GiftCard {
+                    let cur = j.get_counter_i64("sell_bonus");
+                    j.set_counter_i64("sell_bonus", cur + 1);
+                }
+            }
+        }
     }
 
     pub(crate) fn generate_random_joker(&mut self) -> Option<JokerInstance> {
@@ -298,7 +321,17 @@ impl GameState {
             return Err(BalatroError::ConsumableSlotsFull);
         }
 
-        let price = self.calculate_shop_price(offer.price);
+        let base_price = self.calculate_shop_price(offer.price);
+        // Astronomer: planet cards are free
+        let price = if self.jokers.iter().any(|j| j.kind == JokerKind::Astronomer && j.active) {
+            if let ShopItem::Consumable(ConsumableCard::Planet(_)) = &self.shop_offers[shop_index].kind {
+                0
+            } else {
+                base_price
+            }
+        } else {
+            base_price
+        };
         if self.money < price as i32 {
             return Err(BalatroError::NotEnoughMoney(price, self.money as u32));
         }

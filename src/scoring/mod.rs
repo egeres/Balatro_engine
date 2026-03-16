@@ -136,7 +136,7 @@ pub fn score_hand(
         }
 
         // Determine retrigger count for this card
-        let retriggers = count_retriggers(card_idx, card, jokers, &scoring_indices, played_cards, hand_type);
+        let retriggers = count_retriggers(card_idx, card, jokers, &scoring_indices, played_cards, hand_type, hands_remaining);
 
         for _trigger in 0..=retriggers {
             // Card base chips

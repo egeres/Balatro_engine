@@ -224,6 +224,16 @@ impl JokerInstance {
                 // Starts at X1 Mult, gains +1 Xmult per face card destroyed
                 counters.insert("x_mult".to_string(), serde_json::json!(1.0_f64));
             }
+            JokerKind::InvisibleJoker => {
+                counters.insert("rounds".to_string(), serde_json::json!(0));
+            }
+            JokerKind::Egg => {
+                counters.insert("sell_bonus".to_string(), serde_json::json!(0));
+            }
+            JokerKind::MailInRebate => {
+                // Default rank is "Two", can be changed
+                counters.insert("rank".to_string(), serde_json::json!("Two"));
+            }
             _ => {}
         }
         Self {
@@ -240,8 +250,9 @@ impl JokerInstance {
     }
 
     pub fn sell_value(&self) -> u32 {
-        // Base sell value is roughly half of cost
-        (self.kind.base_cost() + 1) / 2
+        let base = (self.kind.base_cost() + 1) / 2;
+        let bonus = self.get_counter_i64("sell_bonus") as u32;
+        base + bonus
     }
 
     /// Edition chip bonus (foil joker: +50 chips)

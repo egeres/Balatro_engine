@@ -32,6 +32,15 @@ impl GameState {
         if consumable_index >= self.consumables.len() {
             return Err(BalatroError::IndexOutOfRange(consumable_index, self.consumables.len()));
         }
+
+        // DietCola: when sold, creates a foil copy of the consumable
+        if self.jokers.iter().any(|j| j.kind == JokerKind::DietCola && j.active) {
+            if self.consumables.len() < self.consumable_slots as usize {
+                let copy = self.consumables[consumable_index].clone();
+                self.consumables.push(copy);
+            }
+        }
+
         let base_cost = self.consumables[consumable_index].base_cost();
         self.money += (base_cost / 2).max(1) as i32;
         self.consumables.remove(consumable_index);
