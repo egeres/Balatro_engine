@@ -107,28 +107,13 @@ impl CardInstance {
     }
 
     /// Chip bonus from edition (foil card)
-    pub fn edition_chip_bonus(&self) -> i64 {
-        match self.edition {
-            Edition::Foil => 50,
-            _ => 0,
-        }
-    }
+    pub fn edition_chip_bonus(&self) -> i64 { self.edition.chip_bonus() }
 
     /// Mult bonus from edition (holographic card)
-    pub fn edition_mult_bonus(&self) -> i64 {
-        match self.edition {
-            Edition::Holographic => 10,
-            _ => 0,
-        }
-    }
+    pub fn edition_mult_bonus(&self) -> i64 { self.edition.mult_bonus() }
 
     /// X-mult from edition (polychrome card)
-    pub fn edition_x_mult(&self) -> f64 {
-        match self.edition {
-            Edition::Polychrome => 1.5,
-            _ => 1.0,
-        }
-    }
+    pub fn edition_x_mult(&self) -> f64 { self.edition.x_mult() }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -260,28 +245,13 @@ impl JokerInstance {
     }
 
     /// Edition chip bonus (foil joker: +50 chips)
-    pub fn edition_chip_bonus(&self) -> i64 {
-        match self.edition {
-            Edition::Foil => 50,
-            _ => 0,
-        }
-    }
+    pub fn edition_chip_bonus(&self) -> i64 { self.edition.chip_bonus() }
 
     /// Edition mult bonus (holographic joker: +10 mult)
-    pub fn edition_mult_bonus(&self) -> i64 {
-        match self.edition {
-            Edition::Holographic => 10,
-            _ => 0,
-        }
-    }
+    pub fn edition_mult_bonus(&self) -> i64 { self.edition.mult_bonus() }
 
     /// Edition x-mult (polychrome joker: x1.5)
-    pub fn edition_x_mult(&self) -> f64 {
-        match self.edition {
-            Edition::Polychrome => 1.5,
-            _ => 1.0,
-        }
-    }
+    pub fn edition_x_mult(&self) -> f64 { self.edition.x_mult() }
 
     pub fn get_counter_f64(&self, key: &str) -> f64 {
         self.counters
