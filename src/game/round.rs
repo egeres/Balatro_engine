@@ -165,6 +165,16 @@ impl GameState {
             }
         }
 
+        // Vagabond: create a tarot if money <= $4 when playing a hand
+        if self.money <= 4 {
+            if self.jokers.iter().any(|j| j.kind == JokerKind::Vagabond && j.active) {
+                if self.consumables.len() < self.consumable_slots as usize {
+                    let tarot = self.random_tarot();
+                    self.consumables.push(ConsumableCard::Tarot(tarot));
+                }
+            }
+        }
+
         // Earn dollars from scoring
         self.money += result.dollars_earned;
 
@@ -410,6 +420,78 @@ impl GameState {
                         }
                     }
                 }
+                JokerKind::Seltzer => {
+                    // Retriggers all cards for 10 hands, then destroys itself
+                    let cur = self.jokers[i].get_counter_i64("hands");
+                    let new_val = cur - 1;
+                    self.jokers[i].set_counter_i64("hands", new_val);
+                    if new_val <= 0 && !self.jokers[i].eternal {
+                        self.jokers[i].active = false;
+                    }
+                }
+                JokerKind::SpaceJoker => {
+                    // 1/4 chance to level up the played hand
+                    if self.rng.next_bool_prob(0.25) {
+                        if let Some(level) = self.hand_levels.get_mut(&result.hand_type) {
+                            level.level += 1;
+                        }
+                    }
+                }
+                JokerKind::Seance => {
+                    // Create a spectral card if a Straight Flush is played
+                    if matches!(result.hand_type, HandType::StraightFlush | HandType::FlushFive) {
+                        if self.consumables.len() < self.consumable_slots as usize {
+                            let spectrals = [
+                                SpectralCard::Familiar, SpectralCard::Grim, SpectralCard::Incantation,
+                                SpectralCard::Aura, SpectralCard::Wraith, SpectralCard::Ectoplasm,
+                                SpectralCard::Ankh, SpectralCard::DejaVu, SpectralCard::Hex,
+                                SpectralCard::Medium, SpectralCard::Cryptid,
+                            ];
+                            let idx = self.rng.range_usize(0, spectrals.len() - 1);
+                            self.consumables.push(ConsumableCard::Spectral(spectrals[idx]));
+                        }
+                    }
+                }
+                JokerKind::Superposition => {
+                    // Ace + Straight → create a tarot card
+                    let has_ace = result.scoring_card_indices.iter()
+                        .any(|&idx| played[idx].rank == Rank::Ace);
+                    if has_ace && matches!(result.hand_type, HandType::Straight | HandType::StraightFlush) {
+                        if self.consumables.len() < self.consumable_slots as usize {
+                            let tarot = self.random_tarot();
+                            self.consumables.push(ConsumableCard::Tarot(tarot));
+                        }
+                    }
+                }
+                JokerKind::SixthSense => {
+                    // If only a 6 is played, destroy it and create a spectral card
+                    if played.len() == 1 && played[0].rank == Rank::Six {
+                        if self.consumables.len() < self.consumable_slots as usize {
+                            let spectrals = [
+                                SpectralCard::Familiar, SpectralCard::Grim, SpectralCard::Incantation,
+                                SpectralCard::Talisman, SpectralCard::Aura, SpectralCard::Wraith,
+                                SpectralCard::Ankh, SpectralCard::DejaVu, SpectralCard::Medium,
+                            ];
+                            let idx = self.rng.range_usize(0, spectrals.len() - 1);
+                            self.consumables.push(ConsumableCard::Spectral(spectrals[idx]));
+                            // Destroy the 6
+                            let card_id = played[0].id;
+                            self.destroy_deck_card(card_id);
+                        }
+                    }
+                }
+                JokerKind::MidasMask => {
+                    // Face cards scored become Gold enhancement
+                    for &sci in &result.scoring_card_indices {
+                        if played[sci].rank.is_face() {
+                            // Find the card in deck by id and set enhancement
+                            let card_id = played[sci].id;
+                            if let Some(deck_card) = self.deck.iter_mut().find(|c| c.id == card_id) {
+                                deck_card.enhancement = Enhancement::Gold;
+                            }
+                        }
+                    }
+                }
                 JokerKind::Dna => {
                     // On the first hand of a round, if only 1 card was played, add a permanent copy to deck
                     let max_h = self.effective_max_hands();
@@ -497,6 +579,21 @@ impl GameState {
             }
         }
 
+        // BurntJoker: +1 hand after discarding
+        let burnt_count = self.jokers.iter().filter(|j| j.kind == JokerKind::BurntJoker && j.active).count();
+        self.hands_remaining += burnt_count as u32;
+
+        // TradingCard: if first discard of the round and only 1 card, earn $3 and destroy the card
+        // discards_remaining was already decremented, so first discard leaves it at max-1
+        let is_first_discard = self.discards_remaining == self.effective_max_discards().saturating_sub(1);
+        if is_first_discard && discarded_cards.len() == 1 {
+            if self.jokers.iter().any(|j| j.kind == JokerKind::TradingCard && j.active) {
+                self.money += 3;
+                let card_id = discarded_cards[0].id;
+                self.destroy_deck_card(card_id);
+            }
+        }
+
         // Post-discard joker updates
         for i in 0..self.jokers.len() {
             let kind = self.jokers[i].kind;
@@ -576,6 +673,24 @@ impl GameState {
         let golden_joker_count = self.jokers.iter().filter(|j| j.kind == JokerKind::GoldenJoker && j.active).count();
         self.money += 4 * golden_joker_count as i32;
 
+        // Rocket: earns dollars equal to its counter; +$2 per boss blind beaten
+        let is_boss = matches!(self.current_blind, BlindKind::Boss);
+        for i in 0..self.jokers.len() {
+            if self.jokers[i].kind == JokerKind::Rocket && self.jokers[i].active {
+                let earn = self.jokers[i].get_counter_i64("dollars");
+                self.money += earn as i32;
+                if is_boss {
+                    let new_earn = earn + 2;
+                    self.jokers[i].set_counter_i64("dollars", new_earn);
+                }
+            }
+        }
+
+        // Satellite: +$1 per unique planet type used this run
+        let planet_types_used = self.planet_cards_used.min(9); // 9 unique planet types max
+        let satellite_count = self.jokers.iter().filter(|j| j.kind == JokerKind::Satellite && j.active).count();
+        self.money += planet_types_used as i32 * satellite_count as i32;
+
         // Cloud9: +$1 per 9 in full deck at end of round
         let nines_in_deck = self.deck.iter().filter(|c| c.rank == Rank::Nine && !c.debuffed).count();
         let cloud9_count = self.jokers.iter().filter(|j| j.kind == JokerKind::Cloud9 && j.active).count();
@@ -618,13 +733,17 @@ impl GameState {
             }
         }
 
+        // ToTheMoon: +$1 interest per $5 held (raises effective interest cap by 1 per joker)
+        let to_the_moon_count = self.jokers.iter().filter(|j| j.kind == JokerKind::ToTheMoon && j.active).count();
+
         if self.deck_type == DeckType::Green {
             // Green deck: +$1 per remaining hand, +$1 per remaining discard; no interest
             self.money += self.hands_remaining as i32;
             self.money += self.discards_remaining as i32;
         } else {
-            // Interest: $1 per $5 held, up to max_interest
-            let interest = (self.money / 5).min(self.max_interest / 5).max(0);
+            // Interest: $1 per $5 held, up to max_interest (ToTheMoon raises cap by 5 each)
+            let effective_max = self.max_interest + 5 * to_the_moon_count as i32;
+            let interest = (self.money / 5).min(effective_max / 5).max(0);
             self.money += interest;
         }
 

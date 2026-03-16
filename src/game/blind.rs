@@ -70,12 +70,19 @@ impl GameState {
             return Err(BalatroError::CannotSkipBoss);
         }
 
-        // Record skip for tags / Throwback joker
+        // Record skip for tags / Throwback / RedCard jokers
         self.skipped_blinds.push((self.ante, self.round));
         for j in self.jokers.iter_mut() {
-            if j.kind == JokerKind::Throwback {
-                let skips = j.get_counter_i64("skips");
-                j.set_counter_i64("skips", skips + 1);
+            match j.kind {
+                JokerKind::Throwback => {
+                    let skips = j.get_counter_i64("skips");
+                    j.set_counter_i64("skips", skips + 1);
+                }
+                JokerKind::RedCard => {
+                    let mult = j.get_counter_i64("mult");
+                    j.set_counter_i64("mult", mult + 3);
+                }
+                _ => {}
             }
         }
 
@@ -125,8 +132,8 @@ impl GameState {
                 JokerKind::Troubadour => {
                     hands = hands.saturating_sub(1);
                 }
-                JokerKind::BurntJoker => {
-                    // +? hands (tracked per-joker)
+                JokerKind::Burglar => {
+                    hands += 3;
                 }
                 _ => {}
             }
@@ -147,6 +154,7 @@ impl GameState {
             match j.kind {
                 JokerKind::MerryAndy => discards += 3,
                 JokerKind::Drunkard => discards += 1,
+                JokerKind::Burglar => discards = 0,
                 _ => {}
             }
         }
@@ -304,6 +312,44 @@ impl GameState {
                     let deck_idx = self.deck.len();
                     self.deck.push(new_card);
                     self.draw_pile.push(deck_idx);
+                }
+                JokerKind::RiffRaff => {
+                    // Add 2 common jokers (rarity 1) at the start of each round
+                    for _ in 0..2 {
+                        if self.jokers.len() < self.joker_slots as usize {
+                            if let Some(new_joker) = self.generate_random_joker() {
+                                // Only add if it's a common joker
+                                if new_joker.kind.rarity() == 1 {
+                                    self.jokers.push(new_joker);
+                                }
+                            }
+                        }
+                    }
+                }
+                JokerKind::TurtleBean => {
+                    // TurtleBean shrinks by 1 each round; destroyed when h_size reaches 0
+                    if let Some(pos) = self.jokers.iter().position(|j| j.kind == JokerKind::TurtleBean && j.active) {
+                        let cur = self.jokers[pos].get_counter_i64("h_size");
+                        let new_val = cur - 1;
+                        self.jokers[pos].set_counter_i64("h_size", new_val);
+                        if new_val <= 0 && !self.jokers[pos].eternal {
+                            self.jokers.remove(pos);
+                        }
+                    }
+                }
+                JokerKind::ToDoList => {
+                    // Randomize the target hand type each round
+                    let hand_types = [
+                        "HighCard", "Pair", "TwoPair", "ThreeOfAKind", "Straight",
+                        "Flush", "FullHouse", "FourOfAKind", "StraightFlush",
+                    ];
+                    let idx = self.rng.range_usize(0, hand_types.len() - 1);
+                    if let Some(pos) = self.jokers.iter().position(|j| j.kind == JokerKind::ToDoList) {
+                        self.jokers[pos].counters.insert(
+                            "hand_type".to_string(),
+                            serde_json::json!(hand_types[idx]),
+                        );
+                    }
                 }
                 _ => {}
             }

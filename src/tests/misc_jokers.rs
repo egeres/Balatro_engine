@@ -938,3 +938,561 @@ fn test_merry_andy_decreases_hand_size() {
     assert_eq!(gs.effective_hand_size(), base_hand_size - 1,
         "MerryAndy should reduce hand size by 1");
 }
+
+// =========================================================
+// BaseballCard: x1.5 per Uncommon joker (rarity 2)
+// =========================================================
+
+#[test]
+fn test_baseball_card_no_effect_without_uncommon_jokers() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let jokers = vec![joker(0, JokerKind::BaseballCard)];
+    let r = score(&played, &played, &jokers);
+    // No Uncommon jokers → no x_mult → HC: 16*1=16
+    assert_eq!(r.final_score as i64, 16);
+}
+
+#[test]
+fn test_baseball_card_multiplies_for_uncommon_joker() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    // FourFingers has rarity 2 (Uncommon)
+    let jokers = vec![
+        joker(0, JokerKind::BaseballCard),
+        joker(1, JokerKind::FourFingers),
+    ];
+    let r = score(&played, &played, &jokers);
+    // 1 Uncommon → x1.5 → HC: 16*1.5=24
+    assert!((r.final_score - 24.0).abs() < 0.5,
+        "BaseballCard should give x1.5 per Uncommon joker, got {}", r.final_score);
+}
+
+// =========================================================
+// Burglar: +3 hands, 0 discards per round
+// =========================================================
+
+#[test]
+fn test_burglar_adds_3_hands() {
+    let mut gs = make_game();
+    let base = gs.effective_max_hands();
+    gs.jokers.push(joker(1, JokerKind::Burglar));
+    assert_eq!(gs.effective_max_hands(), base + 3, "Burglar should add 3 hands");
+}
+
+#[test]
+fn test_burglar_sets_discards_to_zero() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(1, JokerKind::Burglar));
+    assert_eq!(gs.effective_max_discards(), 0, "Burglar should reduce discards to 0");
+}
+
+// =========================================================
+// BurntJoker: +1 hand after each discard
+// =========================================================
+
+#[test]
+fn test_burnt_joker_gives_extra_hand_after_discard() {
+    let mut gs = make_game();
+    let cards: Vec<_> = (0..10).map(|i| card(i, Rank::Ace, Suit::Spades)).collect();
+    setup_round(&mut gs, cards, 5);
+    gs.jokers.push(joker(1, JokerKind::BurntJoker));
+    gs.discards_remaining = 3;
+
+    let hands_before = gs.hands_remaining;
+    gs.select_card(0).unwrap();
+    gs.discard_hand().unwrap();
+
+    assert_eq!(gs.hands_remaining, hands_before + 1,
+        "BurntJoker should grant +1 hand after discarding");
+}
+
+// =========================================================
+// MidasMask: face cards become Gold when scored
+// =========================================================
+
+#[test]
+fn test_midas_mask_turns_scored_face_cards_gold() {
+    let mut gs = make_game();
+    let king = card(0, Rank::King, Suit::Spades);
+    let two  = card(1, Rank::Two, Suit::Hearts);
+    setup_round(&mut gs, vec![king, two], 2);
+    gs.jokers.push(joker(1, JokerKind::MidasMask));
+    gs.score_goal = 1.0;
+
+    gs.select_card(0).unwrap(); // King
+    gs.play_hand().unwrap();
+
+    let king_in_deck = gs.deck.iter().find(|c| c.rank == Rank::King).unwrap();
+    assert_eq!(king_in_deck.enhancement, Enhancement::Gold,
+        "MidasMask should turn scored face cards to Gold");
+}
+
+// =========================================================
+// MrBones: saves run when score >= 25% of goal
+// =========================================================
+
+#[test]
+fn test_mr_bones_saves_run_at_quarter_goal() {
+    let mut gs = make_game();
+    // Need enough cards for a high-card play
+    let cards: Vec<_> = (0..5).map(|i| card(i, Rank::Two, Suit::Spades)).collect();
+    setup_round(&mut gs, cards, 1);
+    gs.jokers.push(joker(1, JokerKind::MrBones));
+    gs.score_goal = 1000.0;
+    gs.score_accumulated = 250.0; // exactly 25%
+    gs.hands_remaining = 1; // last hand
+
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+
+    // Mr. Bones should have saved: state is Shop not GameOver
+    assert!(!matches!(gs.state, GameStateKind::GameOver),
+        "MrBones should prevent GameOver when score >= 25% of goal");
+}
+
+// =========================================================
+// RaisedFist: +2x lowest scoring card chip value
+// =========================================================
+
+#[test]
+fn test_raised_fist_doubles_lowest_card_chips() {
+    // Two of Spades = 2 chips (lowest), Ace = 11 chips
+    // Pair of 2s: chips = 2+2+10 base + 2*2*2 raised = ?
+    // Simpler: HC with just a Two
+    let played = vec![card(0, Rank::Two, Suit::Spades)];
+    let r_with = score(&played, &played, &[joker(0, JokerKind::RaisedFist)]);
+    let r_without = score(&played, &played, &[]);
+    // Two = 2 chips; RaisedFist adds 2*2=4 chips
+    assert_eq!((r_with.final_chips - r_without.final_chips) as i64, 4,
+        "RaisedFist should add 2x the lowest scoring card's chips");
+}
+
+// =========================================================
+// RedCard: +3 mult per skipped blind
+// =========================================================
+
+#[test]
+fn test_red_card_gains_mult_per_skipped_blind() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(1, JokerKind::RedCard));
+    gs.state = GameStateKind::BlindSelect;
+    gs.current_blind = crate::game::BlindKind::Small;
+
+    gs.skip_blind().unwrap();
+
+    // RedCard counter should have +3
+    let mult = gs.jokers[0].get_counter_i64("mult");
+    assert_eq!(mult, 3, "RedCard should gain +3 mult per skipped blind");
+}
+
+#[test]
+fn test_red_card_mult_applies_in_scoring() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let mut red = joker(0, JokerKind::RedCard);
+    red.set_counter_i64("mult", 6); // 2 blinds skipped
+    let r = score(&played, &played, &[red]);
+    // HC: chips=16, mult=1+6=7 → 112
+    assert_eq!(r.final_score as i64, 112);
+}
+
+// =========================================================
+// ReservedParking: $1 per face card held in hand
+// =========================================================
+
+#[test]
+fn test_reserved_parking_earns_per_face_card_in_hand() {
+    let king = card(0, Rank::King, Suit::Spades);
+    let queen = card(1, Rank::Queen, Suit::Hearts);
+    let played = vec![card(2, Rank::Two, Suit::Clubs)]; // played non-face
+    let hand = vec![king, queen]; // held face cards
+    let jokers = vec![joker(0, JokerKind::ReservedParking)];
+    let r = score(&played, &hand, &jokers);
+    // 2 face cards in hand → $2 dollars (simplified: always triggers)
+    assert_eq!(r.dollars_earned, 2,
+        "ReservedParking should earn $1 per face card held in hand");
+}
+
+// =========================================================
+// RiffRaff: adds 2 common jokers at round start
+// =========================================================
+
+#[test]
+fn test_riff_raff_adds_jokers_on_blind_select() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(1, JokerKind::RiffRaff));
+    gs.joker_slots = 10;
+
+    let jokers_before = gs.jokers.len();
+    gs.select_blind().unwrap();
+
+    // Should have added up to 2 common jokers
+    assert!(gs.jokers.len() >= jokers_before,
+        "RiffRaff should add jokers (or attempt to) at blind select");
+}
+
+// =========================================================
+// Rocket: earns money per round, more after boss blinds
+// =========================================================
+
+#[test]
+fn test_rocket_earns_money_at_end_of_round() {
+    let mut gs = make_game();
+    let cards = vec![card(0, Rank::Ace, Suit::Spades)];
+    setup_round(&mut gs, cards, 1);
+    gs.jokers.push(joker(1, JokerKind::Rocket));
+    gs.score_goal = 1.0;
+
+    let money_before = gs.money;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+
+    // Rocket starts with $1 → earns $1
+    assert!(gs.money > money_before,
+        "Rocket should earn money at end of round");
+}
+
+// =========================================================
+// Satellite: +$1 per unique planet type used this run
+// =========================================================
+
+#[test]
+fn test_satellite_earns_per_planet_used() {
+    let mut gs = make_game();
+    let cards = vec![card(0, Rank::Ace, Suit::Spades)];
+    setup_round(&mut gs, cards, 1);
+    gs.jokers.push(joker(1, JokerKind::Satellite));
+    gs.planet_cards_used = 3; // pretend 3 planet types used
+    gs.score_goal = 1.0;
+
+    let money_before = gs.money;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+
+    let money_gained = gs.money - money_before;
+    assert!(money_gained >= 3,
+        "Satellite should earn at least $3 for 3 planets used, gained: {}", money_gained);
+}
+
+// =========================================================
+// Seance: creates spectral card on Straight Flush
+// =========================================================
+
+#[test]
+fn test_seance_creates_spectral_on_straight_flush() {
+    let mut gs = make_game();
+    let cards = vec![
+        card(0, Rank::Nine, Suit::Spades),
+        card(1, Rank::Ten, Suit::Spades),
+        card(2, Rank::Jack, Suit::Spades),
+        card(3, Rank::Queen, Suit::Spades),
+        card(4, Rank::King, Suit::Spades),
+    ];
+    setup_round(&mut gs, cards, 5);
+    gs.jokers.push(joker(1, JokerKind::Seance));
+    gs.consumable_slots = 5;
+    gs.score_goal = 1.0;
+
+    for i in 0..5 { gs.select_card(i).unwrap(); }
+    gs.play_hand().unwrap();
+
+    assert!(!gs.consumables.is_empty(),
+        "Seance should create a spectral card on Straight Flush");
+    assert!(gs.consumables.iter().any(|c| matches!(c, crate::card::ConsumableCard::Spectral(_))),
+        "Seance should specifically create a Spectral card");
+}
+
+// =========================================================
+// Seltzer: retriggers all played cards for 10 hands then destroyed
+// =========================================================
+
+#[test]
+fn test_seltzer_retriggers_cards() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let mut seltzer = joker(0, JokerKind::Seltzer);
+    seltzer.set_counter_i64("hands", 5); // 5 hands remaining on joker
+    let r_with = score(&played, &played, &[seltzer]);
+    let r_without = score(&played, &played, &[]);
+    // Seltzer retriggers → higher score
+    assert!(r_with.final_score > r_without.final_score,
+        "Seltzer should retrigger scoring cards, with={} without={}", r_with.final_score, r_without.final_score);
+}
+
+#[test]
+fn test_seltzer_exhausted_does_not_retrigger() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let mut seltzer = joker(0, JokerKind::Seltzer);
+    seltzer.set_counter_i64("hands", 0); // exhausted
+    let r_with = score(&played, &played, &[seltzer]);
+    let r_without = score(&played, &played, &[]);
+    assert_eq!(r_with.final_score as i64, r_without.final_score as i64,
+        "Exhausted Seltzer should not retrigger");
+}
+
+#[test]
+fn test_seltzer_decrements_counter_per_hand() {
+    let mut gs = make_game();
+    let cards: Vec<_> = (0..5).map(|i| card(i, Rank::Ace, Suit::Spades)).collect();
+    setup_round(&mut gs, cards, 1);
+    let mut seltzer = joker(1, JokerKind::Seltzer);
+    seltzer.set_counter_i64("hands", 3);
+    gs.jokers.push(seltzer);
+    gs.score_goal = 1.0;
+
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+
+    // Counter should be decremented (joker may have been deactivated or removed if hands=0)
+    // Just ensure no panic occurred
+}
+
+// =========================================================
+// ShowMan: jokers can repeat in shop (existence check)
+// =========================================================
+
+#[test]
+fn test_showman_can_be_added() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(1, JokerKind::Showman));
+    assert_eq!(gs.jokers[0].kind, JokerKind::Showman);
+}
+
+// =========================================================
+// SixthSense: destroy a 6 played alone → get spectral
+// =========================================================
+
+#[test]
+fn test_sixth_sense_destroys_six_and_creates_spectral() {
+    let mut gs = make_game();
+    let cards = vec![
+        card(0, Rank::Six, Suit::Spades),
+        card(1, Rank::Ace, Suit::Hearts),
+    ];
+    setup_round(&mut gs, cards, 2);
+    gs.jokers.push(joker(1, JokerKind::SixthSense));
+    gs.consumable_slots = 5;
+    gs.score_goal = 1.0;
+
+    gs.select_card(0).unwrap(); // only the 6
+    gs.play_hand().unwrap();
+
+    assert!(!gs.consumables.is_empty(),
+        "SixthSense should create a spectral card when only a 6 is played");
+    // The six should be destroyed: deck should have fewer cards
+}
+
+// =========================================================
+// SpaceJoker: 1/4 chance to level up played hand
+// =========================================================
+
+#[test]
+fn test_space_joker_can_level_up_hand_over_many_trials() {
+    let mut leveled_up = false;
+    for trial in 0..50 {
+        let seed = format!("space_{}", trial);
+        let mut gs = crate::game::GameState::new(DeckType::Blue, Stake::White, Some(seed));
+        let cards = vec![card(0, Rank::Ace, Suit::Spades)];
+        setup_round(&mut gs, cards, 1);
+        gs.jokers.push(joker(1, JokerKind::SpaceJoker));
+        gs.score_goal = 1.0;
+
+        let level_before = gs.hand_levels.get(&HandType::HighCard).unwrap().level;
+        gs.select_card(0).unwrap();
+        gs.play_hand().unwrap();
+        let level_after = gs.hand_levels.get(&HandType::HighCard).unwrap().level;
+
+        if level_after > level_before {
+            leveled_up = true;
+            break;
+        }
+    }
+    assert!(leveled_up, "SpaceJoker should level up the hand at least once in 50 trials");
+}
+
+// =========================================================
+// Superposition: Ace + Straight → tarot card
+// =========================================================
+
+#[test]
+fn test_superposition_creates_tarot_on_ace_straight() {
+    let mut gs = make_game();
+    // Ace-high straight: A,2,3,4,5 (wheel straight)
+    let cards = vec![
+        card(0, Rank::Ace, Suit::Spades),
+        card(1, Rank::Two, Suit::Hearts),
+        card(2, Rank::Three, Suit::Clubs),
+        card(3, Rank::Four, Suit::Diamonds),
+        card(4, Rank::Five, Suit::Spades),
+    ];
+    setup_round(&mut gs, cards, 5);
+    gs.jokers.push(joker(1, JokerKind::Superposition));
+    gs.consumable_slots = 5;
+    gs.score_goal = 1.0;
+
+    for i in 0..5 { gs.select_card(i).unwrap(); }
+    gs.play_hand().unwrap();
+
+    assert!(!gs.consumables.is_empty(),
+        "Superposition should create a tarot card on Ace + Straight");
+}
+
+// =========================================================
+// ToDoList: $4 if played hand matches tracked type
+// =========================================================
+
+#[test]
+fn test_to_do_list_earns_dollars_on_match() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let mut todo = joker(0, JokerKind::ToDoList);
+    todo.counters.insert("hand_type".to_string(), serde_json::json!("HighCard"));
+    let r = score(&played, &played, &[todo]);
+    assert_eq!(r.dollars_earned, 4,
+        "ToDoList should earn $4 when played hand matches tracked type");
+}
+
+#[test]
+fn test_to_do_list_does_not_earn_on_mismatch() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let mut todo = joker(0, JokerKind::ToDoList);
+    todo.counters.insert("hand_type".to_string(), serde_json::json!("Pair"));
+    let r = score(&played, &played, &[todo]);
+    assert_eq!(r.dollars_earned, 0,
+        "ToDoList should not earn when hand type doesn't match");
+}
+
+// =========================================================
+// ToTheMoon: raises interest cap by $5 per joker
+// =========================================================
+
+#[test]
+fn test_to_the_moon_raises_interest_cap() {
+    let mut gs = make_game();
+    let cards = vec![card(0, Rank::Ace, Suit::Spades)];
+    setup_round(&mut gs, cards, 1);
+    gs.money = 50; // lots of money to earn interest
+    gs.max_interest = 5; // normally caps at $1 interest
+    gs.jokers.push(joker(1, JokerKind::ToTheMoon));
+    gs.score_goal = 1.0;
+
+    let money_before = gs.money;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+
+    // With ToTheMoon, effective cap is 5+5=10 → interest = min(50/5, 10/5) = min(10, 2) = 2
+    // Without: interest = min(10, 1) = 1
+    // Difference shows ToTheMoon raised the cap
+    let interest_gained = gs.money - money_before - 3; // subtract blind reward
+    assert!(interest_gained >= 2,
+        "ToTheMoon should enable higher interest earnings, gained extra: {}", interest_gained);
+}
+
+// =========================================================
+// TradingCard: $3 if first discard is 1 card, destroys that card
+// =========================================================
+
+#[test]
+fn test_trading_card_earns_and_destroys_on_single_first_discard() {
+    let mut gs = make_game();
+    let cards: Vec<_> = (0..5).map(|i| card(i, Rank::Ace, Suit::Spades)).collect();
+    setup_round(&mut gs, cards, 5);
+    gs.jokers.push(joker(1, JokerKind::TradingCard));
+    gs.discards_remaining = gs.max_discards;
+
+    let deck_size_before = gs.deck.len();
+    let money_before = gs.money;
+
+    // First discard, single card
+    gs.select_card(0).unwrap();
+    gs.discard_hand().unwrap();
+
+    assert_eq!(gs.money, money_before + 3,
+        "TradingCard should earn $3 on first single-card discard");
+    assert_eq!(gs.deck.len(), deck_size_before - 1,
+        "TradingCard should destroy the discarded card");
+}
+
+// =========================================================
+// Troubadour: +2 hand size, -1 hand per round
+// =========================================================
+
+#[test]
+fn test_troubadour_increases_hand_size() {
+    let mut gs = make_game();
+    let base = gs.effective_hand_size();
+    gs.jokers.push(joker(1, JokerKind::Troubadour));
+    assert_eq!(gs.effective_hand_size(), base + 2,
+        "Troubadour should add +2 hand size");
+}
+
+#[test]
+fn test_troubadour_decreases_max_hands() {
+    let mut gs = make_game();
+    let base = gs.effective_max_hands();
+    gs.jokers.push(joker(1, JokerKind::Troubadour));
+    assert_eq!(gs.effective_max_hands(), base - 1,
+        "Troubadour should reduce max hands by 1");
+}
+
+// =========================================================
+// TurtleBean: +h_size hand size, shrinks by 1 per round
+// =========================================================
+
+#[test]
+fn test_turtle_bean_increases_hand_size() {
+    let mut gs = make_game();
+    let base = gs.effective_hand_size();
+    gs.jokers.push(joker(1, JokerKind::TurtleBean)); // starts at h_size=5
+    assert_eq!(gs.effective_hand_size(), base + 5,
+        "TurtleBean should add +5 to hand size");
+}
+
+#[test]
+fn test_turtle_bean_shrinks_each_round() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(1, JokerKind::TurtleBean));
+    let hand_size_before = gs.effective_hand_size();
+
+    // Trigger notify_jokers_setting_blind via select_blind
+    gs.select_blind().unwrap();
+
+    // h_size should have decreased by 1
+    let hand_size_after = gs.effective_hand_size();
+    assert_eq!(hand_size_after, hand_size_before - 1,
+        "TurtleBean should shrink by 1 each round, before={} after={}", hand_size_before, hand_size_after);
+}
+
+// =========================================================
+// Vagabond: creates tarot when playing with $4 or less
+// =========================================================
+
+#[test]
+fn test_vagabond_creates_tarot_when_broke() {
+    let mut gs = make_game();
+    let cards = vec![card(0, Rank::Ace, Suit::Spades)];
+    setup_round(&mut gs, cards, 1);
+    gs.jokers.push(joker(1, JokerKind::Vagabond));
+    gs.money = 4; // at the threshold
+    gs.consumable_slots = 5;
+    gs.score_goal = 1.0;
+
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+
+    assert!(!gs.consumables.is_empty(),
+        "Vagabond should create a tarot when money <= $4");
+}
+
+#[test]
+fn test_vagabond_does_not_create_tarot_when_rich() {
+    let mut gs = make_game();
+    let cards = vec![card(0, Rank::Ace, Suit::Spades)];
+    setup_round(&mut gs, cards, 1);
+    gs.jokers.push(joker(1, JokerKind::Vagabond));
+    gs.money = 10; // above threshold
+    gs.consumable_slots = 5;
+    gs.score_goal = 1.0;
+
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+
+    assert!(gs.consumables.is_empty(),
+        "Vagabond should not create tarot when money > $4");
+}

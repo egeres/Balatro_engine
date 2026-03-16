@@ -62,6 +62,13 @@ pub(crate) fn count_retriggers(
                     retriggers += 2;
                 }
             }
+            JokerKind::Seltzer => {
+                // Retriggers all played cards for 10 hands, then destroyed
+                let remaining = joker.get_counter_i64("hands");
+                if remaining > 0 {
+                    retriggers += 1;
+                }
+            }
             _ => {}
         }
     }
@@ -288,6 +295,12 @@ pub(crate) fn calc_joker_hand_card(
             // +13 mult for each Queen held in hand (not played)
             if card.rank == Rank::Queen && !card.debuffed {
                 effect.mult += 13;
+            }
+        }
+        JokerKind::ReservedParking => {
+            // 1/2 chance $1 per face card held in hand (simplified: always $1)
+            if card.rank.is_face() && !card.debuffed {
+                effect.dollars += 1;
             }
         }
         _ => {}
@@ -597,10 +610,52 @@ pub(crate) fn calc_joker_main(joker: &JokerInstance, ctx: &ScoringContext) -> Jo
                 effect.x_mult = 3.0;
             }
         }
+        JokerKind::RedCard => {
+            // +3 mult per blind skipped (counter incremented in skip_blind)
+            let mult = joker.get_counter_i64("mult");
+            effect.mult += mult;
+        }
+        JokerKind::RaisedFist => {
+            // Adds double the chip value of the lowest-ranked scoring card
+            if let Some(min_chips) = scoring_cards.iter()
+                .map(|&i| played[i].base_chip_value() + played[i].chip_bonus())
+                .filter(|&v| v > 0)
+                .min()
+            {
+                effect.chips += min_chips * 2;
+            }
+        }
         JokerKind::BaseballCard => {
-            // x1.5 for each Uncommon joker
-            // simplified: count all jokers / 2
-            effect.x_mult = 1.0; // would need joker rarity info
+            // x1.5 for each Uncommon joker (rarity == 2)
+            let uncommon_count = ctx.jokers.iter()
+                .filter(|j| j.active && j.kind.rarity() == 2)
+                .count();
+            if uncommon_count > 0 {
+                effect.x_mult = 1.5_f64.powi(uncommon_count as i32);
+            }
+        }
+        JokerKind::ToDoList => {
+            // $4 if the played hand matches the tracked hand type
+            let target_str = joker.counters.get("hand_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("HighCard");
+            let target = match target_str {
+                "Pair" => HandType::Pair,
+                "TwoPair" => HandType::TwoPair,
+                "ThreeOfAKind" => HandType::ThreeOfAKind,
+                "Straight" => HandType::Straight,
+                "Flush" => HandType::Flush,
+                "FullHouse" => HandType::FullHouse,
+                "FourOfAKind" => HandType::FourOfAKind,
+                "StraightFlush" => HandType::StraightFlush,
+                "FiveOfAKind" => HandType::FiveOfAKind,
+                "FlushHouse" => HandType::FlushHouse,
+                "FlushFive" => HandType::FlushFive,
+                _ => HandType::HighCard,
+            };
+            if hand_type == target {
+                effect.dollars += 4;
+            }
         }
         JokerKind::Acrobat => {
             // x3 mult on last hand of round

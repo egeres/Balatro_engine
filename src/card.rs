@@ -220,6 +220,22 @@ impl JokerInstance {
             JokerKind::Rocket => {
                 counters.insert("dollars".to_string(), serde_json::json!(1));
             }
+            JokerKind::Seltzer => {
+                counters.insert("hands".to_string(), serde_json::json!(10_i64));
+            }
+            JokerKind::Satellite => {
+                // tracks unique planet types used (as a set stored as count)
+                counters.insert("planets_used".to_string(), serde_json::json!(0_i64));
+            }
+            JokerKind::ToDoList => {
+                counters.insert("hand_type".to_string(), serde_json::json!("HighCard"));
+            }
+            JokerKind::RedCard => {
+                counters.insert("mult".to_string(), serde_json::json!(0_i64));
+            }
+            JokerKind::Burglar => {
+                // Gains +3 hands, discards = 0 for the round (tracked via effective_max_*)
+            }
             JokerKind::Canio => {
                 // Starts at X1 Mult, gains +1 Xmult per face card destroyed
                 counters.insert("x_mult".to_string(), serde_json::json!(1.0_f64));
