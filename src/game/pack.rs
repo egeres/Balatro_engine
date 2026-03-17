@@ -76,7 +76,13 @@ impl GameState {
                     let suit_idx = self.rng.range_usize(0, 3);
                     let rank_idx = self.rng.range_usize(0, 12);
                     let id = self.next_id();
-                    let card = CardInstance::new(id, ranks[rank_idx], suits[suit_idx]);
+                    let mut card = CardInstance::new(id, ranks[rank_idx], suits[suit_idx]);
+                    // Edition probabilities: 4% Foil, 2.8% Holographic, 1.2% Polychrome
+                    let ed_roll = self.rng.next_f64();
+                    card.edition = if ed_roll < 0.012 { Edition::Polychrome }
+                        else if ed_roll < 0.04 { Edition::Holographic }
+                        else if ed_roll < 0.08 { Edition::Foil }
+                        else { Edition::None };
                     cards.push(PackCard::PlayingCard(card));
                 }
             }

@@ -307,6 +307,12 @@ pub fn score_hand(
             stone_count_in_deck,
             enhanced_count_in_deck,
         };
+        // Joker edition: Foil (+50 chips) and Holographic (+10 mult) apply BEFORE joker's main effect
+        let j_chip_bonus = joker.edition_chip_bonus();
+        let j_mult_bonus = joker.edition_mult_bonus();
+        chips += j_chip_bonus as f64;
+        mult += j_mult_bonus as f64;
+
         let effect = calc_joker_main(joker, &ctx);
         chips += effect.chips as f64;
         mult += effect.mult as f64;
@@ -334,12 +340,8 @@ pub fn score_hand(
             });
         }
 
-        // Joker edition effects
-        let j_chip_bonus = joker.edition_chip_bonus();
-        let j_mult_bonus = joker.edition_mult_bonus();
+        // Joker edition: Polychrome (x1.5) applies AFTER joker's main effect
         let j_xmult = joker.edition_x_mult();
-        chips += j_chip_bonus as f64;
-        mult += j_mult_bonus as f64;
         mult *= j_xmult;
     }
 

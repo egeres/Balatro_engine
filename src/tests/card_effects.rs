@@ -176,3 +176,80 @@ fn test_joker_holographic_edition_adds_10_mult() {
     let r = score(&played, &played, &jokers);
     assert_eq!(r.final_score as i64, 240);
 }
+
+#[test]
+fn test_joker_holographic_applies_before_x_mult_effect() {
+    // Holographic (+10 mult) applies BEFORE the joker's own x_mult effect.
+    // TheDuo (x2 when hand contains a Pair) with Holographic:
+    //   chips = 10(pair) + 11 + 11 = 32, mult = 2
+    //   holo fires first: mult = 2 + 10 = 12
+    //   TheDuo x2 fires: mult = 12 * 2 = 24
+    //   score = 32 * 24 = 768
+    let played = vec![
+        card(0, Rank::Ace, Suit::Spades),
+        card(1, Rank::Ace, Suit::Hearts),
+    ];
+    let mut the_duo = joker(0, JokerKind::TheDuo);
+    the_duo.edition = Edition::Holographic;
+    let jokers = vec![the_duo];
+    let r = score(&played, &played, &jokers);
+    assert_eq!(r.hand_type, HandType::Pair);
+    assert_eq!(r.final_score as i64, 768);
+}
+
+#[test]
+fn test_joker_foil_applies_before_x_mult_effect() {
+    // Foil (+50 chips) applies BEFORE the joker's own x_mult effect.
+    // TheDuo (x2) with Foil on a Pair of Aces:
+    //   chips = 32, mult = 2
+    //   foil fires first: chips = 32 + 50 = 82
+    //   TheDuo x2: mult = 4
+    //   score = 82 * 4 = 328
+    let played = vec![
+        card(0, Rank::Ace, Suit::Spades),
+        card(1, Rank::Ace, Suit::Hearts),
+    ];
+    let mut the_duo = joker(0, JokerKind::TheDuo);
+    the_duo.edition = Edition::Foil;
+    let jokers = vec![the_duo];
+    let r = score(&played, &played, &jokers);
+    assert_eq!(r.hand_type, HandType::Pair);
+    assert_eq!(r.final_score as i64, 328);
+}
+
+#[test]
+fn test_joker_polychrome_applies_after_x_mult_effect() {
+    // Polychrome (x1.5) applies AFTER the joker's own x_mult effect.
+    // TheDuo (x2) with Polychrome on a Pair of Aces:
+    //   chips = 32, mult = 2
+    //   TheDuo x2 fires: mult = 4
+    //   poly x1.5 fires after: mult = 4 * 1.5 = 6
+    //   score = 32 * 6 = 192
+    let played = vec![
+        card(0, Rank::Ace, Suit::Spades),
+        card(1, Rank::Ace, Suit::Hearts),
+    ];
+    let mut the_duo = joker(0, JokerKind::TheDuo);
+    the_duo.edition = Edition::Polychrome;
+    let jokers = vec![the_duo];
+    let r = score(&played, &played, &jokers);
+    assert_eq!(r.hand_type, HandType::Pair);
+    assert!((r.final_score - 192.0).abs() < 0.01);
+}
+
+#[test]
+fn test_multiple_playing_card_editions_stack() {
+    // Foil card (+50 chips) and Holographic card (+10 mult) in same hand
+    // Pair of Aces: chips = 10 + 11 + 11 = 32, mult = 2
+    // foil ace: +50 chips → chips = 82
+    // holo ace: +10 mult → mult = 12
+    // score = 82 * 12 = 984
+    let mut ace_foil = card(0, Rank::Ace, Suit::Spades);
+    ace_foil.edition = Edition::Foil;
+    let mut ace_holo = card(1, Rank::Ace, Suit::Hearts);
+    ace_holo.edition = Edition::Holographic;
+    let played = vec![ace_foil, ace_holo];
+    let r = score(&played, &played, &[]);
+    assert_eq!(r.hand_type, HandType::Pair);
+    assert_eq!(r.final_score as i64, 984);
+}

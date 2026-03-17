@@ -238,9 +238,12 @@ impl GameState {
                 let wheel_oops = if self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active) { 2.0_f64 } else { 1.0_f64 };
                 if !self.jokers.is_empty() && self.rng.next_bool_prob((0.25 * wheel_oops).min(1.0)) {
                     let idx = self.rng.range_usize(0, self.jokers.len() - 1);
-                    let editions = [Edition::Foil, Edition::Holographic, Edition::Polychrome];
-                    let ed_idx = self.rng.range_usize(0, 2);
-                    self.jokers[idx].edition = editions[ed_idx];
+                    // Probabilities: 50% Foil, 35% Holographic, 15% Polychrome
+                    let ed_roll = self.rng.next_f64();
+                    let edition = if ed_roll < 0.50 { Edition::Foil }
+                        else if ed_roll < 0.85 { Edition::Holographic }
+                        else { Edition::Polychrome };
+                    self.jokers[idx].edition = edition;
                 }
             }
             TarotCard::Judgement => {
@@ -338,9 +341,12 @@ impl GameState {
                 if let Some(&hi) = targets.first() {
                     if hi < self.hand.len() {
                         let card_idx = self.hand[hi];
-                        let editions = [Edition::Foil, Edition::Holographic, Edition::Polychrome];
-                        let idx = self.rng.range_usize(0, 2);
-                        self.deck[card_idx].edition = editions[idx];
+                        // Probabilities: 50% Foil, 35% Holographic, 15% Polychrome
+                        let ed_roll = self.rng.next_f64();
+                        let edition = if ed_roll < 0.50 { Edition::Foil }
+                            else if ed_roll < 0.85 { Edition::Holographic }
+                            else { Edition::Polychrome };
+                        self.deck[card_idx].edition = edition;
                     }
                 }
             }
