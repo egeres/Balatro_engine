@@ -120,25 +120,17 @@ impl GameState {
 
         let mut joker = JokerInstance::new(id, kind, edition);
 
-        // Apply stake-based stickers (mutually exclusive; types shuffled to remove ordering bias)
-        // Red+: Eternal can appear (~5% per type)
-        // Green+: Rental can also appear
-        // Blue+: Perishable can also appear
+        // Stake-based stickers (each 30% chance at the relevant stake threshold).
+        // Eternal (Black+) and Perishable (Orange+) are mutually exclusive; Eternal wins if both
+        // would trigger. Rental (Gold+) is independent and can combine with either.
         let stake_level = self.stake as u8;
-        let mut available: Vec<u8> = Vec::new();
-        if stake_level >= Stake::Red as u8   { available.push(0); } // Eternal
-        if stake_level >= Stake::Green as u8 { available.push(1); } // Rental
-        if stake_level >= Stake::Blue as u8  { available.push(2); } // Perishable
-        self.rng.shuffle(&mut available);
-        'sticker: for kind in available {
-            if self.rng.next_bool_prob(0.05) {
-                match kind {
-                    0 => { joker.eternal = true; }
-                    1 => { joker.rental = true; }
-                    _ => { joker.perishable = true; }
-                }
-                break 'sticker;
-            }
+        if stake_level >= Stake::Black as u8 && self.rng.next_bool_prob(0.30) {
+            joker.eternal = true;
+        } else if stake_level >= Stake::Orange as u8 && self.rng.next_bool_prob(0.30) {
+            joker.perishable = true;
+        }
+        if stake_level >= Stake::Gold as u8 && self.rng.next_bool_prob(0.30) {
+            joker.rental = true;
         }
 
         Some(joker)

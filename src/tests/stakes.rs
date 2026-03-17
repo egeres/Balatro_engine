@@ -2,13 +2,17 @@
 ///
 /// Stakes (in ascending order): White=0, Red=1, Green=2, Black=3, Blue=4, Purple=5, Orange=6, Gold=7
 ///
-/// What each stake unlocks:
-///   - Red+:    Eternal stickers can appear on shop jokers (~5%)
-///   - Green+:  Rental stickers can also appear on shop jokers (~5%)
-///   - Black+:  -1 effective discard per round
-///   - Blue+:   Perishable stickers can also appear on shop jokers (~5%)
-///   - Purple+: Spectral packs appear in the shop
-///   - Orange, Gold: same mechanical effects as Purple in the current engine
+/// What each stake changes (cumulative):
+///   White:   base difficulty, no modifiers
+///   Red:     Small Blind gives no cash reward ($0 instead of $3)
+///   Green:   required score scales faster each Ante (not directly testable here)
+///   Black:   30% chance Jokers in shops have Eternal sticker
+///   Blue:    -1 effective discard per round
+///   Purple:  score scales even faster; Spectral Packs appear in shops
+///   Orange:  30% chance Jokers in shops have Perishable sticker (on top of Eternal)
+///   Gold:    30% chance Jokers in shops have Rental sticker (independent of Eternal/Perishable)
+///
+/// Eternal and Perishable are mutually exclusive; Rental can combine with either.
 
 use super::*;
 use crate::card::ShopItem;
@@ -30,12 +34,11 @@ fn test_stake_ordering_is_correct() {
 }
 
 // =========================================================
-// White stake: baseline — no stickers, full discards
+// White stake: baseline — no stickers, full discards, $3 small blind
 // =========================================================
 
 #[test]
 fn test_white_stake_never_produces_stickered_jokers() {
-    // White has an empty sticker pool; no sticker can ever be assigned regardless of RNG.
     let mut gs = GameState::new(DeckType::Blue, Stake::White, Some("WHITE_STICKER".to_string()));
     for _ in 0..200 {
         gs.generate_shop();
@@ -67,18 +70,18 @@ fn test_white_stake_shop_has_no_spectral_pack() {
 }
 
 // =========================================================
-// Red stake: Eternal stickers only
+// Red stake: Small Blind gives no reward; still no stickers
 // =========================================================
 
 #[test]
-fn test_red_stake_never_produces_rental_or_perishable_jokers() {
-    // Red's sticker pool only contains Eternal (index 0). Rental and Perishable are
-    // structurally impossible regardless of RNG outcome.
-    let mut gs = GameState::new(DeckType::Blue, Stake::Red, Some("RED_RENTAL".to_string()));
+fn test_red_stake_never_produces_stickered_jokers() {
+    // Stickers only begin at Black stake.
+    let mut gs = GameState::new(DeckType::Blue, Stake::Red, Some("RED_STICKER".to_string()));
     for _ in 0..200 {
         gs.generate_shop();
         for offer in &gs.shop_offers {
             if let ShopItem::Joker(j) = &offer.kind {
+                assert!(!j.eternal,    "Red stake should never produce eternal jokers");
                 assert!(!j.rental,     "Red stake should never produce rental jokers");
                 assert!(!j.perishable, "Red stake should never produce perishable jokers");
             }
@@ -87,11 +90,49 @@ fn test_red_stake_never_produces_rental_or_perishable_jokers() {
 }
 
 #[test]
-fn test_red_stake_can_produce_eternal_jokers() {
-    // ~5% per joker. Over 500 shops (≈1000 jokers) P(no eternal) < 10^-22.
-    let mut gs = GameState::new(DeckType::Blue, Stake::Red, Some("RED_ETERNAL".to_string()));
+fn test_red_stake_effective_discards_equal_to_max() {
+    let gs = GameState::new(DeckType::Blue, Stake::Red, Some("RED_DISC".to_string()));
+    assert_eq!(gs.effective_max_discards(), gs.max_discards,
+        "Red stake should not reduce discards (that begins at Blue)");
+}
+
+// =========================================================
+// Green stake: still no stickers
+// =========================================================
+
+#[test]
+fn test_green_stake_never_produces_stickered_jokers() {
+    // Stickers only begin at Black stake.
+    let mut gs = GameState::new(DeckType::Blue, Stake::Green, Some("GREEN_STICKER".to_string()));
+    for _ in 0..200 {
+        gs.generate_shop();
+        for offer in &gs.shop_offers {
+            if let ShopItem::Joker(j) = &offer.kind {
+                assert!(!j.eternal,    "Green stake should never produce eternal jokers");
+                assert!(!j.rental,     "Green stake should never produce rental jokers");
+                assert!(!j.perishable, "Green stake should never produce perishable jokers");
+            }
+        }
+    }
+}
+
+#[test]
+fn test_green_stake_effective_discards_equal_to_max() {
+    let gs = GameState::new(DeckType::Blue, Stake::Green, Some("GREEN_DISC".to_string()));
+    assert_eq!(gs.effective_max_discards(), gs.max_discards,
+        "Green stake should not reduce discards (that begins at Blue)");
+}
+
+// =========================================================
+// Black stake: Eternal stickers only; discards NOT yet reduced
+// =========================================================
+
+#[test]
+fn test_black_stake_can_produce_eternal_jokers() {
+    // ~30% per joker. Over 50 shops (~100 jokers) P(no eternal) < (0.70)^100 ≈ 10^-15.
+    let mut gs = GameState::new(DeckType::Blue, Stake::Black, Some("BLACK_ETERNAL".to_string()));
     let mut found = false;
-    for _ in 0..500 {
+    for _ in 0..200 {
         gs.generate_shop();
         for offer in &gs.shop_offers {
             if let ShopItem::Joker(j) = &offer.kind {
@@ -100,101 +141,76 @@ fn test_red_stake_can_produce_eternal_jokers() {
         }
         if found { break; }
     }
-    assert!(found, "Red stake should eventually produce eternal jokers");
+    assert!(found, "Black stake should eventually produce eternal jokers");
 }
 
-// =========================================================
-// Green stake: Eternal + Rental stickers
-// =========================================================
-
 #[test]
-fn test_green_stake_never_produces_perishable_jokers() {
-    // Green's sticker pool is [Eternal, Rental]. Perishable requires Blue+.
-    let mut gs = GameState::new(DeckType::Blue, Stake::Green, Some("GREEN_PERISH".to_string()));
+fn test_black_stake_never_produces_rental_or_perishable_jokers() {
+    // Only Eternal is in the pool at Black; Perishable needs Orange+, Rental needs Gold+.
+    let mut gs = GameState::new(DeckType::Blue, Stake::Black, Some("BLACK_NO_RP".to_string()));
     for _ in 0..200 {
         gs.generate_shop();
         for offer in &gs.shop_offers {
             if let ShopItem::Joker(j) = &offer.kind {
-                assert!(!j.perishable, "Green stake should never produce perishable jokers");
-            }
-        }
-    }
-}
-
-#[test]
-fn test_green_stake_can_produce_rental_jokers() {
-    // ~4.9% per joker for rental specifically. Over 500 shops P(none) < 10^-22.
-    let mut gs = GameState::new(DeckType::Blue, Stake::Green, Some("GREEN_RENTAL".to_string()));
-    let mut found = false;
-    for _ in 0..500 {
-        gs.generate_shop();
-        for offer in &gs.shop_offers {
-            if let ShopItem::Joker(j) = &offer.kind {
-                if j.rental { found = true; }
-            }
-        }
-        if found { break; }
-    }
-    assert!(found, "Green stake should eventually produce rental jokers");
-}
-
-// =========================================================
-// Black stake: same stickers as Green, but -1 discard
-// =========================================================
-
-#[test]
-fn test_black_stake_effective_discards_reduced_by_one() {
-    let gs = GameState::new(DeckType::Blue, Stake::Black, Some("BLACK_DISC".to_string()));
-    assert_eq!(
-        gs.effective_max_discards(),
-        gs.max_discards.saturating_sub(1),
-        "Black stake should reduce effective discards by 1"
-    );
-}
-
-#[test]
-fn test_black_stake_never_produces_perishable_jokers() {
-    // Black = 3, Blue = 4; Perishable threshold is Blue+.
-    let mut gs = GameState::new(DeckType::Blue, Stake::Black, Some("BLACK_PERISH".to_string()));
-    for _ in 0..200 {
-        gs.generate_shop();
-        for offer in &gs.shop_offers {
-            if let ShopItem::Joker(j) = &offer.kind {
+                assert!(!j.rental,     "Black stake should never produce rental jokers");
                 assert!(!j.perishable, "Black stake should never produce perishable jokers");
             }
         }
     }
 }
 
+#[test]
+fn test_black_stake_effective_discards_equal_to_max() {
+    // The -1 discard penalty starts at Blue (stake 5), not Black (stake 4).
+    let gs = GameState::new(DeckType::Blue, Stake::Black, Some("BLACK_DISC".to_string()));
+    assert_eq!(
+        gs.effective_max_discards(),
+        gs.max_discards,
+        "Black stake should NOT reduce discards; that begins at Blue"
+    );
+}
+
 // =========================================================
-// Blue stake: all sticker types possible
+// Blue stake: Eternal stickers + -1 discard; still no Perishable/Rental
 // =========================================================
 
 #[test]
-fn test_blue_stake_can_produce_perishable_jokers() {
-    // Blue is the first stake where Perishable is available. ~5% per joker.
-    let mut gs = GameState::new(DeckType::Blue, Stake::Blue, Some("BLUE_PERISH".to_string()));
+fn test_blue_stake_can_produce_eternal_jokers() {
+    let mut gs = GameState::new(DeckType::Blue, Stake::Blue, Some("BLUE_ETERNAL".to_string()));
     let mut found = false;
-    for _ in 0..500 {
+    for _ in 0..200 {
         gs.generate_shop();
         for offer in &gs.shop_offers {
             if let ShopItem::Joker(j) = &offer.kind {
-                if j.perishable { found = true; }
+                if j.eternal { found = true; }
             }
         }
         if found { break; }
     }
-    assert!(found, "Blue stake should eventually produce perishable jokers");
+    assert!(found, "Blue stake should produce eternal jokers (inherited from Black+)");
+}
+
+#[test]
+fn test_blue_stake_never_produces_rental_or_perishable_jokers() {
+    let mut gs = GameState::new(DeckType::Blue, Stake::Blue, Some("BLUE_NO_RP".to_string()));
+    for _ in 0..200 {
+        gs.generate_shop();
+        for offer in &gs.shop_offers {
+            if let ShopItem::Joker(j) = &offer.kind {
+                assert!(!j.rental,     "Blue stake should never produce rental jokers");
+                assert!(!j.perishable, "Blue stake should never produce perishable jokers");
+            }
+        }
+    }
 }
 
 #[test]
 fn test_blue_stake_effective_discards_reduced_by_one() {
-    // Blue >= Black, so the -1 discard penalty applies.
     let gs = GameState::new(DeckType::Blue, Stake::Blue, Some("BLUE_DISC".to_string()));
     assert_eq!(
         gs.effective_max_discards(),
         gs.max_discards.saturating_sub(1),
-        "Blue stake (>= Black) should reduce effective discards by 1"
+        "Blue stake should reduce effective discards by 1"
     );
 }
 
@@ -218,13 +234,56 @@ fn test_purple_stake_effective_discards_reduced_by_one() {
     assert_eq!(
         gs.effective_max_discards(),
         gs.max_discards.saturating_sub(1),
-        "Purple stake (>= Black) should reduce effective discards by 1"
+        "Purple stake (>= Blue) should reduce effective discards by 1"
     );
 }
 
 // =========================================================
-// Orange stake
+// Orange stake: Eternal + Perishable stickers; still no Rental
 // =========================================================
+
+#[test]
+fn test_orange_stake_can_produce_eternal_jokers() {
+    let mut gs = GameState::new(DeckType::Blue, Stake::Orange, Some("ORANGE_ETERNAL".to_string()));
+    let mut found = false;
+    for _ in 0..200 {
+        gs.generate_shop();
+        for offer in &gs.shop_offers {
+            if let ShopItem::Joker(j) = &offer.kind { if j.eternal { found = true; } }
+        }
+        if found { break; }
+    }
+    assert!(found, "Orange stake should produce eternal jokers (inherited from Black+)");
+}
+
+#[test]
+fn test_orange_stake_can_produce_perishable_jokers() {
+    // ~30% per joker. Over 200 shops P(none) < (0.70)^400 ≈ 10^-56.
+    let mut gs = GameState::new(DeckType::Blue, Stake::Orange, Some("ORANGE_PERISH".to_string()));
+    let mut found = false;
+    for _ in 0..200 {
+        gs.generate_shop();
+        for offer in &gs.shop_offers {
+            if let ShopItem::Joker(j) = &offer.kind { if j.perishable { found = true; } }
+        }
+        if found { break; }
+    }
+    assert!(found, "Orange stake should eventually produce perishable jokers");
+}
+
+#[test]
+fn test_orange_stake_never_produces_rental_jokers() {
+    // Rental only unlocks at Gold stake.
+    let mut gs = GameState::new(DeckType::Blue, Stake::Orange, Some("ORANGE_NO_RENT".to_string()));
+    for _ in 0..200 {
+        gs.generate_shop();
+        for offer in &gs.shop_offers {
+            if let ShopItem::Joker(j) = &offer.kind {
+                assert!(!j.rental, "Orange stake should never produce rental jokers");
+            }
+        }
+    }
+}
 
 #[test]
 fn test_orange_stake_shop_contains_spectral_pack() {
@@ -242,12 +301,12 @@ fn test_orange_stake_effective_discards_reduced_by_one() {
     assert_eq!(
         gs.effective_max_discards(),
         gs.max_discards.saturating_sub(1),
-        "Orange stake (>= Black) should reduce effective discards by 1"
+        "Orange stake (>= Blue) should reduce effective discards by 1"
     );
 }
 
 // =========================================================
-// Gold stake
+// Gold stake: all three sticker types possible; Rental is independent
 // =========================================================
 
 #[test]
@@ -266,16 +325,16 @@ fn test_gold_stake_effective_discards_reduced_by_one() {
     assert_eq!(
         gs.effective_max_discards(),
         gs.max_discards.saturating_sub(1),
-        "Gold stake (>= Black) should reduce effective discards by 1"
+        "Gold stake (>= Blue) should reduce effective discards by 1"
     );
 }
 
 #[test]
 fn test_gold_stake_can_produce_all_sticker_types() {
-    // Gold >= Blue, so all three sticker types are possible.
+    // Each sticker type has ~30% chance per joker; all three should appear within 200 shops.
     let mut gs = GameState::new(DeckType::Blue, Stake::Gold, Some("GOLD_STICKERS".to_string()));
     let (mut found_eternal, mut found_rental, mut found_perishable) = (false, false, false);
-    for _ in 0..500 {
+    for _ in 0..200 {
         gs.generate_shop();
         for offer in &gs.shop_offers {
             if let ShopItem::Joker(j) = &offer.kind {
@@ -289,4 +348,38 @@ fn test_gold_stake_can_produce_all_sticker_types() {
     assert!(found_eternal,    "Gold stake should eventually produce eternal jokers");
     assert!(found_rental,     "Gold stake should eventually produce rental jokers");
     assert!(found_perishable, "Gold stake should eventually produce perishable jokers");
+}
+
+#[test]
+fn test_gold_stake_rental_can_coexist_with_eternal() {
+    // Rental is independent of Eternal/Perishable; a joker can be both Rental and Eternal.
+    let mut gs = GameState::new(DeckType::Blue, Stake::Gold, Some("GOLD_RENT_ETERNAL".to_string()));
+    let mut found = false;
+    for _ in 0..500 {
+        gs.generate_shop();
+        for offer in &gs.shop_offers {
+            if let ShopItem::Joker(j) = &offer.kind {
+                if j.eternal && j.rental { found = true; }
+            }
+        }
+        if found { break; }
+    }
+    assert!(found, "Gold stake should eventually produce a joker that is both Eternal and Rental");
+}
+
+#[test]
+fn test_eternal_and_perishable_never_coexist() {
+    // The engine must never assign both Eternal and Perishable to the same joker.
+    let mut gs = GameState::new(DeckType::Blue, Stake::Gold, Some("NO_ETERNAL_PERISH".to_string()));
+    for _ in 0..500 {
+        gs.generate_shop();
+        for offer in &gs.shop_offers {
+            if let ShopItem::Joker(j) = &offer.kind {
+                assert!(
+                    !(j.eternal && j.perishable),
+                    "A joker must not be both Eternal and Perishable"
+                );
+            }
+        }
+    }
 }

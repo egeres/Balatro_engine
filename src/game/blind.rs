@@ -143,8 +143,8 @@ impl GameState {
 
     pub(crate) fn effective_max_discards(&self) -> u32 {
         let mut discards = self.max_discards;
-        // Black stake and above: -1 discard per round
-        if self.stake as u8 >= Stake::Black as u8 {
+        // Blue stake and above: -1 discard per round
+        if self.stake as u8 >= Stake::Blue as u8 {
             discards = discards.saturating_sub(1);
         }
         for j in &self.jokers {

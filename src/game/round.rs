@@ -820,7 +820,10 @@ impl GameState {
 
     fn blind_reward_dollars(&self) -> i32 {
         match (self.current_blind.clone(), self.boss_blind) {
-            (BlindKind::Small, _) => 3,
+            // Red stake and above: Small Blind gives no cash reward
+            (BlindKind::Small, _) => {
+                if self.stake as u8 >= Stake::Red as u8 { 0 } else { 3 }
+            }
             (BlindKind::Big, _) => 4,
             (BlindKind::Boss, Some(b)) => {
                 // boss blinds give 5$ (showdowns give 8$)
