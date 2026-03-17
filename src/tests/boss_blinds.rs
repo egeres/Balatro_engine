@@ -1235,3 +1235,74 @@ fn test_cerulean_bell_with_luchador_no_forced_selection() {
         "Luchador must prevent CeruleanBell from setting a forced card ID"
     );
 }
+
+// =========================================================
+// TheWater — start with 0 discards
+// =========================================================
+
+/// TheWater Boss blind starts the round with 0 discards.
+#[test]
+fn test_the_water_gives_zero_discards_on_boss() {
+    let mut gs = boss_select(BossBlind::TheWater);
+    gs.select_blind().unwrap();
+    assert_eq!(gs.discards_remaining, 0, "TheWater: discards_remaining must be 0");
+}
+
+/// TheWater does not zero discards on Small or Big blind.
+#[test]
+fn test_the_water_no_effect_on_small_blind() {
+    let mut gs = make_game();
+    gs.boss_blind = Some(BossBlind::TheWater);
+    gs.select_blind().unwrap();
+    assert!(gs.discards_remaining > 0, "TheWater must not affect Small blind discards");
+}
+
+/// Luchador suppresses TheWater: discards are normal.
+#[test]
+fn test_the_water_with_luchador_normal_discards() {
+    let mut gs = boss_select(BossBlind::TheWater);
+    gs.jokers.push(joker(100, JokerKind::Luchador));
+    let normal = gs.effective_max_discards();
+    gs.select_blind().unwrap();
+    assert_eq!(gs.discards_remaining, normal,
+        "Luchador must suppress TheWater (expected {} discards)", normal);
+}
+
+// =========================================================
+// TheManacle — -1 hand size
+// =========================================================
+
+/// TheManacle reduces effective hand size by 1 on Boss blind.
+#[test]
+fn test_the_manacle_reduces_hand_size_by_one() {
+    let mut gs = boss_select(BossBlind::TheManacle);
+    let normal_size = gs.hand_size;
+    gs.select_blind().unwrap();
+    assert_eq!(
+        gs.hand.len() as u32, normal_size - 1,
+        "TheManacle: hand should have {} cards, got {}",
+        normal_size - 1, gs.hand.len()
+    );
+}
+
+/// TheManacle does not reduce hand size on Small or Big blind.
+#[test]
+fn test_the_manacle_no_effect_on_small_blind() {
+    let mut gs = make_game();
+    gs.boss_blind = Some(BossBlind::TheManacle);
+    let normal_size = gs.hand_size;
+    gs.select_blind().unwrap();
+    assert_eq!(gs.hand.len() as u32, normal_size,
+        "TheManacle must not reduce hand size on Small blind");
+}
+
+/// Luchador suppresses TheManacle: full hand drawn.
+#[test]
+fn test_the_manacle_with_luchador_normal_hand_size() {
+    let mut gs = boss_select(BossBlind::TheManacle);
+    gs.jokers.push(joker(100, JokerKind::Luchador));
+    let normal_size = gs.hand_size;
+    gs.select_blind().unwrap();
+    assert_eq!(gs.hand.len() as u32, normal_size,
+        "Luchador must suppress TheManacle");
+}

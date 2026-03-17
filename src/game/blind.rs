@@ -163,6 +163,17 @@ impl GameState {
         if self.stake as u8 >= Stake::Blue as u8 {
             discards = discards.saturating_sub(1);
         }
+        // TheWater: start with 0 discards
+        if let Some(BossBlind::TheWater) = self.boss_blind {
+            if matches!(self.current_blind, BlindKind::Boss) {
+                let disabled = self.jokers.iter().any(|j| {
+                    (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
+                });
+                if !disabled {
+                    return 0;
+                }
+            }
+        }
         for j in &self.jokers {
             if !j.active {
                 continue;
@@ -179,6 +190,17 @@ impl GameState {
 
     pub fn effective_hand_size(&self) -> u32 {
         let mut size = self.hand_size;
+        // TheManacle: -1 hand size during Boss blind
+        if let Some(BossBlind::TheManacle) = self.boss_blind {
+            if matches!(self.current_blind, BlindKind::Boss) {
+                let disabled = self.jokers.iter().any(|j| {
+                    (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
+                });
+                if !disabled {
+                    size = size.saturating_sub(1);
+                }
+            }
+        }
         for j in &self.jokers {
             if !j.active {
                 continue;
