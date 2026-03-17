@@ -276,7 +276,8 @@ impl JokerInstance {
     }
 
     pub fn sell_value(&self) -> u32 {
-        let base = (self.kind.base_cost() + 1) / 2;
+        // Balatro uses floor(buy_cost / 2), minimum $1
+        let base = (self.kind.base_cost() / 2).max(1);
         let bonus = self.get_counter_i64("sell_bonus") as u32;
         base + bonus
     }
