@@ -316,8 +316,40 @@ impl GameState {
             }),
         });
 
-        // Draw up to hand size
-        self.draw_to_hand();
+        // TheHook: discard 2 additional random cards from remaining hand after each play
+        if let Some(BossBlind::TheHook) = self.boss_blind {
+            if matches!(self.current_blind, BlindKind::Boss) {
+                let disabled = self.jokers.iter().any(|j| {
+                    (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
+                });
+                if !disabled {
+                    let discard_count = 2.min(self.hand.len());
+                    for _ in 0..discard_count {
+                        if self.hand.is_empty() { break; }
+                        let pick = self.rng.range_usize(0, self.hand.len() - 1);
+                        let card_idx = self.hand.remove(pick);
+                        self.discard_pile.push(card_idx);
+                    }
+                }
+            }
+        }
+
+        // Draw: TheSerpent draws exactly 3; otherwise fill to hand size
+        let is_serpent = matches!(self.boss_blind, Some(BossBlind::TheSerpent))
+            && matches!(self.current_blind, BlindKind::Boss)
+            && !self.jokers.iter().any(|j| {
+                (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
+            });
+        if is_serpent {
+            let draw_count = 3.min(self.draw_pile.len());
+            for _ in 0..draw_count {
+                if self.draw_pile.is_empty() { break; }
+                let card_idx = self.draw_pile.remove(0);
+                self.hand.push(card_idx);
+            }
+        } else {
+            self.draw_to_hand();
+        }
 
         // Check for round win
         if self.score_accumulated >= self.score_goal {
@@ -736,7 +768,22 @@ impl GameState {
             }),
         });
 
-        self.draw_to_hand();
+        // TheSerpent: draw exactly 3 after discard instead of filling to hand size
+        let is_serpent_discard = matches!(self.boss_blind, Some(BossBlind::TheSerpent))
+            && matches!(self.current_blind, BlindKind::Boss)
+            && !self.jokers.iter().any(|j| {
+                (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
+            });
+        if is_serpent_discard {
+            let draw_count = 3.min(self.draw_pile.len());
+            for _ in 0..draw_count {
+                if self.draw_pile.is_empty() { break; }
+                let card_idx = self.draw_pile.remove(0);
+                self.hand.push(card_idx);
+            }
+        } else {
+            self.draw_to_hand();
+        }
         Ok(())
     }
 

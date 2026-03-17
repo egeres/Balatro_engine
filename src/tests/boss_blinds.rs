@@ -1306,3 +1306,141 @@ fn test_the_manacle_with_luchador_normal_hand_size() {
     assert_eq!(gs.hand.len() as u32, normal_size,
         "Luchador must suppress TheManacle");
 }
+
+// =========================================================
+// TheHook — discard 2 random cards after each hand played
+// =========================================================
+
+/// After playing a hand against TheHook, 2 extra cards are discarded from the remaining hand.
+#[test]
+fn test_the_hook_discards_2_cards_after_play() {
+    let mut gs = boss_select(BossBlind::TheHook);
+    gs.select_blind().unwrap();
+    gs.score_goal = f64::MAX;
+    let hand_before = gs.hand.len();
+    // Play exactly 1 card
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    // Hand should have lost 1 (played) + 2 (hook) cards, then drawn back
+    // After playing 1 and hook discarding 2: hand_before - 3 cards removed, then draw fills up
+    // Net hand = (hand_before - 3) + min(3, draw_pile remaining)
+    // We can't easily predict exact count, but we can verify 2 extra were discarded
+    // by checking discard_pile size is at least 3 (1 played + 2 hooked)
+    assert!(
+        gs.discard_pile.len() >= 3,
+        "TheHook: discard pile should have ≥3 cards (1 played + 2 hooked), got {}",
+        gs.discard_pile.len()
+    );
+}
+
+/// After two hands against TheHook, at least 6 cards are in discard (2×3).
+#[test]
+fn test_the_hook_discards_accumulate_each_hand() {
+    let mut gs = boss_select(BossBlind::TheHook);
+    gs.select_blind().unwrap();
+    gs.score_goal = f64::MAX;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    assert!(
+        gs.discard_pile.len() >= 6,
+        "TheHook: two hands should produce ≥6 discards, got {}",
+        gs.discard_pile.len()
+    );
+}
+
+/// Luchador suppresses TheHook: only played cards are discarded.
+#[test]
+fn test_the_hook_with_luchador_no_extra_discard() {
+    let mut gs = boss_select(BossBlind::TheHook);
+    gs.jokers.push(joker(100, JokerKind::Luchador));
+    gs.select_blind().unwrap();
+    gs.score_goal = f64::MAX;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    // Only 1 card was discarded (the played card), not 3
+    assert_eq!(
+        gs.discard_pile.len(), 1,
+        "Luchador must suppress TheHook extra discards"
+    );
+}
+
+/// TheHook has no extra discard effect on Small or Big blind.
+#[test]
+fn test_the_hook_no_effect_on_small_blind() {
+    let mut gs = make_game();
+    gs.boss_blind = Some(BossBlind::TheHook);
+    gs.select_blind().unwrap();
+    gs.score_goal = f64::MAX;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    assert_eq!(gs.discard_pile.len(), 1,
+        "TheHook must not affect Small blind");
+}
+
+// =========================================================
+// TheSerpent — always draw exactly 3 after each play or discard
+// =========================================================
+
+/// After playing a hand against TheSerpent, exactly 3 new cards are drawn.
+#[test]
+fn test_the_serpent_draws_3_after_play() {
+    let mut gs = boss_select(BossBlind::TheSerpent);
+    gs.select_blind().unwrap();
+    gs.score_goal = f64::MAX;
+    // Play 1 card; hand should refill with exactly 3 (not hand_size)
+    gs.select_card(0).unwrap();
+    let hand_after_play_before_draw = 0; // after playing 1, then hook discards 0; hand before draw = hand_size - 1
+    let _ = hand_after_play_before_draw; // suppress warning
+    gs.play_hand().unwrap();
+    // hand.len() should be (hand_size - 1) + 3 = 10 for default hand_size=8
+    // Actually: played 1 card, then drew 3 → hand should be (8-1) + 3 = 10
+    // But draw_pile might be smaller. With 52 cards and 8 drawn initially, draw_pile = 44.
+    assert_eq!(gs.hand.len(), 7 + 3, // 7 remaining after playing 1, plus 3 drawn
+        "TheSerpent: hand should grow by exactly 3 after play, got {}", gs.hand.len());
+}
+
+/// After discarding against TheSerpent, exactly 3 new cards are drawn.
+#[test]
+fn test_the_serpent_draws_3_after_discard() {
+    let mut gs = boss_select(BossBlind::TheSerpent);
+    gs.select_blind().unwrap();
+    gs.score_goal = f64::MAX;
+    let cards_before = gs.hand.len();
+    // Discard 1 card
+    gs.select_card(0).unwrap();
+    gs.discard_hand().unwrap();
+    // hand.len() should be (cards_before - 1) + 3
+    assert_eq!(gs.hand.len(), cards_before - 1 + 3,
+        "TheSerpent: hand should grow by 3 after discard, got {}", gs.hand.len());
+}
+
+/// Luchador suppresses TheSerpent: normal hand refill after play.
+#[test]
+fn test_the_serpent_with_luchador_normal_draw() {
+    let mut gs = boss_select(BossBlind::TheSerpent);
+    gs.jokers.push(joker(100, JokerKind::Luchador));
+    gs.select_blind().unwrap();
+    gs.score_goal = f64::MAX;
+    let hand_size = gs.hand_size as usize;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    // Normal draw should fill back to hand_size
+    assert_eq!(gs.hand.len(), hand_size,
+        "Luchador must suppress TheSerpent: hand should be {} cards", hand_size);
+}
+
+/// TheSerpent has no effect on Small or Big blind.
+#[test]
+fn test_the_serpent_no_effect_on_small_blind() {
+    let mut gs = make_game();
+    gs.boss_blind = Some(BossBlind::TheSerpent);
+    gs.select_blind().unwrap();
+    gs.score_goal = f64::MAX;
+    let hand_size = gs.hand_size as usize;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    assert_eq!(gs.hand.len(), hand_size,
+        "TheSerpent must not affect Small blind draw");
+}
