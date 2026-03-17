@@ -275,6 +275,27 @@ impl GameState {
             level.played_this_round += 1;
         }
 
+        // TheOx: playing the most-played hand type this run sets money to $0
+        if let Some(BossBlind::TheOx) = self.boss_blind {
+            if matches!(self.current_blind, BlindKind::Boss) {
+                let luchador_active = self.jokers.iter().any(|j| {
+                    (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
+                });
+                if !luchador_active {
+                    let max_played = self.hand_levels.values().map(|h| h.played).max().unwrap_or(0);
+                    if max_played > 0 {
+                        let played_hand_count = self.hand_levels
+                            .get(&result.hand_type)
+                            .map(|h| h.played)
+                            .unwrap_or(0);
+                        if played_hand_count >= max_played {
+                            self.money = 0;
+                        }
+                    }
+                }
+            }
+        }
+
         // ThePillar: record played card IDs for this Ante
         for card in &played_cards {
             if !self.played_card_ids_this_ante.contains(&card.id) {

@@ -726,13 +726,13 @@ fn win_boss_and_get_money_delta(boss: BossBlind) -> i32 {
 /// Regular boss blinds (non-showdown) award $5 on defeat.
 #[test]
 fn test_regular_boss_blind_awards_5_dollars() {
-    // TheOx is a representative regular boss
+    // TheWall is a representative regular boss with no score or money side-effect
     let money_before = 4_i32;
     let reward = 5_i32;
     let interest = (money_before + reward) / 5; // 9/5 = 1
     let expected_delta = reward + interest;       // 5 + 1 = 6
     assert_eq!(
-        win_boss_and_get_money_delta(BossBlind::TheOx), expected_delta,
+        win_boss_and_get_money_delta(BossBlind::TheWall), expected_delta,
         "regular boss should award $5 + $1 interest = $6 delta"
     );
 }
@@ -797,7 +797,7 @@ fn test_crimson_heart_awards_8_dollars() {
 /// Showdown bosses award $3 more than regular bosses (8 − 5 = 3).
 #[test]
 fn test_showdown_bosses_award_3_more_than_regular() {
-    let delta_regular  = win_boss_and_get_money_delta(BossBlind::TheOx);
+    let delta_regular  = win_boss_and_get_money_delta(BossBlind::TheWall);
     let delta_showdown = win_boss_and_get_money_delta(BossBlind::CeruleanBell);
     // Interest differs too: regular 9/5=1, showdown 12/5=2, so delta showdown = 10, regular = 6
     assert_eq!(
@@ -1723,4 +1723,59 @@ fn test_the_pillar_ids_cleared_on_new_ante() {
         gs.played_card_ids_this_ante.is_empty(),
         "played_card_ids_this_ante must be cleared on new Ante"
     );
+}
+
+// =========================================================
+// TheOx
+// =========================================================
+
+/// Playing the most-played hand type sets money to $0.
+#[test]
+fn test_the_ox_sets_money_to_zero_on_most_played_hand() {
+    let mut gs = make_game();
+    gs.boss_blind = Some(BossBlind::TheOx);
+    gs.current_blind = crate::game::BlindKind::Boss;
+    // Pre-load HighCard as most-played (2 plays)
+    if let Some(h) = gs.hand_levels.get_mut(&HandType::HighCard) { h.played = 2; }
+    gs.money = 100; // large so the wipe is detectable
+    // Setup: one Ace of Spades → HighCard
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    gs.score_goal = 1.0;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    // TheOx zeroes money mid-play; win_round then adds Boss reward ($5) + interest on $0 ($0) = ~$6
+    // Without TheOx: money would be 100 + $5 + $20 (interest cap) = ~$125
+    assert!(gs.money < 20, "TheOx: money should be wiped to near-zero (got {})", gs.money);
+}
+
+/// Playing a hand type that is NOT the most-played does NOT wipe money.
+#[test]
+fn test_the_ox_does_not_wipe_money_on_non_most_played_hand() {
+    let mut gs = make_game();
+    gs.boss_blind = Some(BossBlind::TheOx);
+    gs.current_blind = crate::game::BlindKind::Boss;
+    // Pre-load Flush as most-played (5 plays); we'll play HighCard (0 plays)
+    if let Some(h) = gs.hand_levels.get_mut(&HandType::Flush) { h.played = 5; }
+    gs.money = 10;
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    gs.score_goal = 1.0;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    assert!(gs.money > 0, "TheOx: playing non-most-played hand must not wipe money");
+}
+
+/// TheOx is disabled by Luchador/Chicot.
+#[test]
+fn test_the_ox_disabled_by_luchador() {
+    let mut gs = make_game();
+    gs.boss_blind = Some(BossBlind::TheOx);
+    gs.current_blind = crate::game::BlindKind::Boss;
+    if let Some(h) = gs.hand_levels.get_mut(&HandType::HighCard) { h.played = 5; }
+    gs.money = 10;
+    gs.jokers.push(joker(1, JokerKind::Luchador));
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    gs.score_goal = 1.0;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    assert!(gs.money > 0, "TheOx: Luchador must disable TheOx effect");
 }
