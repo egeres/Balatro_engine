@@ -182,6 +182,34 @@ impl GameState {
         id
     }
 
+    /// Swap two jokers by position. Order matters for Blueprint/Brainstorm.
+    /// Valid at any point in the game; returns `IndexOutOfRange` if either index is out of bounds.
+    pub fn swap_jokers(&mut self, a: usize, b: usize) -> Result<(), BalatroError> {
+        let len = self.jokers.len();
+        if a >= len {
+            return Err(BalatroError::IndexOutOfRange(a, len));
+        }
+        if b >= len {
+            return Err(BalatroError::IndexOutOfRange(b, len));
+        }
+        self.jokers.swap(a, b);
+        Ok(())
+    }
+
+    /// Swap two consumables (tarots, planets, spectrals) by position.
+    /// Valid at any point in the game; returns `IndexOutOfRange` if either index is out of bounds.
+    pub fn swap_consumables(&mut self, a: usize, b: usize) -> Result<(), BalatroError> {
+        let len = self.consumables.len();
+        if a >= len {
+            return Err(BalatroError::IndexOutOfRange(a, len));
+        }
+        if b >= len {
+            return Err(BalatroError::IndexOutOfRange(b, len));
+        }
+        self.consumables.swap(a, b);
+        Ok(())
+    }
+
     fn apply_deck_init(&mut self) {
         match self.deck_type {
             DeckType::Red => {

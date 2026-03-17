@@ -303,7 +303,7 @@ impl JokerInstance {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ConsumableCard {
     Tarot(TarotCard),
     Planet(PlanetCard),

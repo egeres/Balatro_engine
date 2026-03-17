@@ -567,6 +567,14 @@ impl BalatroEngine {
         self.gs.sell_joker(index).map_err(balatro_err_to_py)
     }
 
+    fn swap_jokers(&mut self, a: usize, b: usize) -> PyResult<()> {
+        self.gs.swap_jokers(a, b).map_err(balatro_err_to_py)
+    }
+
+    fn swap_consumables(&mut self, a: usize, b: usize) -> PyResult<()> {
+        self.gs.swap_consumables(a, b).map_err(balatro_err_to_py)
+    }
+
     fn buy_consumable(&mut self, index: usize) -> PyResult<()> {
         self.gs.buy_consumable(index).map_err(balatro_err_to_py)
     }
