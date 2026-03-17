@@ -73,6 +73,10 @@ pub struct GameState {
     pub cerulean_forced_card_id: Option<u64>,
     /// VerdantLeaf: set to true once the first joker is sold this blind.
     pub verdant_leaf_joker_sold: bool,
+
+    /// ThePillar: IDs of cards played in earlier rounds of the current Ante.
+    /// Cleared when a new Ante begins. Used to debuff those cards during the Boss blind.
+    pub played_card_ids_this_ante: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -170,6 +174,7 @@ impl GameState {
             last_consumable_used: None,
             cerulean_forced_card_id: None,
             verdant_leaf_joker_sold: false,
+            played_card_ids_this_ante: Vec::new(),
         };
 
         // Apply deck-type modifications

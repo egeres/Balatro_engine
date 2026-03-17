@@ -194,6 +194,28 @@ impl GameState {
             .filter(|c| c.enhancement == Enhancement::Steel)
             .count();
 
+        // TheArm: decrease the level of the played poker hand by 1 (minimum 1) before scoring
+        if let Some(BossBlind::TheArm) = self.boss_blind {
+            if matches!(self.current_blind, BlindKind::Boss) {
+                let luchador_active = self.jokers.iter().any(|j| {
+                    (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
+                });
+                if !luchador_active {
+                    // Determine the hand type that will be played
+                    let has_four_fingers = self.jokers.iter().any(|j| j.kind == JokerKind::FourFingers && j.active);
+                    let has_shortcut = self.jokers.iter().any(|j| j.kind == JokerKind::Shortcut && j.active);
+                    let has_smeared = self.jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active);
+                    let has_splash = self.jokers.iter().any(|j| j.kind == JokerKind::Splash && j.active);
+                    let arm_preview = evaluate_hand(&played_cards, has_four_fingers, has_shortcut, has_smeared, has_splash);
+                    if let Some(level) = self.hand_levels.get_mut(&arm_preview.hand_type) {
+                        if level.level > 1 {
+                            level.level -= 1;
+                        }
+                    }
+                }
+            }
+        }
+
         // CrimsonHeart: disable one random active joker for the duration of this hand
         let crimson_disabled_joker_id: Option<u64> = if let Some(BossBlind::CrimsonHeart) = self.boss_blind {
             if matches!(self.current_blind, BlindKind::Boss) {
@@ -251,6 +273,13 @@ impl GameState {
         if let Some(level) = self.hand_levels.get_mut(&result.hand_type) {
             level.played += 1;
             level.played_this_round += 1;
+        }
+
+        // ThePillar: record played card IDs for this Ante
+        for card in &played_cards {
+            if !self.played_card_ids_this_ante.contains(&card.id) {
+                self.played_card_ids_this_ante.push(card.id);
+            }
         }
 
         // Plasma deck: balance chips and mult (replace both with their average)
@@ -1032,6 +1061,7 @@ impl GameState {
                 self.current_blind = BlindKind::Small;
                 self.blind_defeated_this_ante = [false; 3];
                 self.boss_blind = self.pick_boss_blind();
+                self.played_card_ids_this_ante.clear();
             }
         }
     }

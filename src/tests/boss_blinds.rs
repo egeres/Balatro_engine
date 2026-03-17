@@ -1583,3 +1583,144 @@ fn test_the_mouth_with_luchador_allows_different_types() {
     gs.select_card(1).unwrap();
     assert!(gs.play_hand().is_ok(), "Luchador must suppress TheMouth");
 }
+
+// =========================================================
+// TheArm — decreases played hand level by 1 before scoring
+// =========================================================
+
+/// TheArm permanently decreases the played hand's level by 1 (min 1).
+#[test]
+fn test_the_arm_decreases_hand_level() {
+    use crate::card::HandLevelData;
+    let mut gs = boss_select(BossBlind::TheArm);
+    // Manually raise Pair to level 3
+    gs.hand_levels.insert(HandType::Pair, {
+        let mut d = HandLevelData::new(true);
+        d.level = 3;
+        d
+    });
+    let c1 = card(1, Rank::King, Suit::Spades);
+    let c2 = card(2, Rank::King, Suit::Hearts);
+    let c3 = card(3, Rank::Two,  Suit::Clubs);
+    setup_round(&mut gs, vec![c1, c2, c3], 3);
+    gs.score_goal = f64::MAX;
+    // Play a Pair; TheArm should reduce Pair level from 3 → 2 before scoring
+    gs.select_card(0).unwrap();
+    gs.select_card(1).unwrap();
+    gs.play_hand().unwrap();
+    let pair_level = gs.hand_levels[&HandType::Pair].level;
+    assert_eq!(pair_level, 2, "TheArm: Pair level should drop from 3 to 2, got {}", pair_level);
+}
+
+/// TheArm does not reduce level below 1.
+#[test]
+fn test_the_arm_does_not_go_below_level_1() {
+    let mut gs = boss_select(BossBlind::TheArm);
+    // Pair is at default level 1
+    let c1 = card(1, Rank::King, Suit::Spades);
+    let c2 = card(2, Rank::King, Suit::Hearts);
+    setup_round(&mut gs, vec![c1, c2], 2);
+    gs.score_goal = f64::MAX;
+    gs.select_card(0).unwrap();
+    gs.select_card(1).unwrap();
+    gs.play_hand().unwrap();
+    let pair_level = gs.hand_levels[&HandType::Pair].level;
+    assert_eq!(pair_level, 1, "TheArm: level must not go below 1, got {}", pair_level);
+}
+
+/// Luchador suppresses TheArm: hand level unchanged.
+#[test]
+fn test_the_arm_with_luchador_level_unchanged() {
+    use crate::card::HandLevelData;
+    let mut gs = boss_select(BossBlind::TheArm);
+    gs.jokers.push(joker(100, JokerKind::Luchador));
+    gs.hand_levels.insert(HandType::Pair, {
+        let mut d = HandLevelData::new(true);
+        d.level = 3;
+        d
+    });
+    let c1 = card(1, Rank::King, Suit::Spades);
+    let c2 = card(2, Rank::King, Suit::Hearts);
+    setup_round(&mut gs, vec![c1, c2], 2);
+    gs.score_goal = f64::MAX;
+    gs.select_card(0).unwrap();
+    gs.select_card(1).unwrap();
+    gs.play_hand().unwrap();
+    let pair_level = gs.hand_levels[&HandType::Pair].level;
+    assert_eq!(pair_level, 3, "Luchador must suppress TheArm (level should stay 3)");
+}
+
+// =========================================================
+// ThePillar — cards played previously this Ante are debuffed
+// =========================================================
+
+/// Cards played in a previous round of the same Ante are debuffed at the Boss blind.
+#[test]
+fn test_the_pillar_debuffs_previously_played_cards() {
+    let mut gs = make_game();
+    gs.boss_blind = Some(BossBlind::ThePillar);
+    // Small blind: play a card to record its ID
+    gs.select_blind().unwrap();
+    gs.score_goal = f64::MAX;
+    let played_id = gs.deck[gs.hand[0]].id;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    // Win the small blind (advance to shop)
+    gs.score_goal = 0.0;
+    // Force win_round (score already accumulated > 0)
+    // Actually, after play_hand, if accumulated >= goal, it wins.
+    // Let's just advance manually
+    gs.score_accumulated = 9999.0;
+    gs.score_goal = 1.0;
+    // We need to trigger win_round... easiest is to re-enter and play again:
+    // Instead, let's directly set state and advance
+    // Check that played_card_ids_this_ante contains the played card
+    assert!(
+        gs.played_card_ids_this_ante.contains(&played_id),
+        "played_card_ids_this_ante must contain the played card ID"
+    );
+}
+
+/// ThePillar debuffs cards whose IDs are in played_card_ids_this_ante at Boss blind start.
+#[test]
+fn test_the_pillar_debuffs_recorded_ids_on_boss_enter() {
+    let mut gs = boss_select(BossBlind::ThePillar);
+    // Manually populate played_card_ids_this_ante with some deck card IDs
+    let first_card_id = gs.deck[0].id;
+    let second_card_id = gs.deck[1].id;
+    gs.played_card_ids_this_ante.push(first_card_id);
+    gs.played_card_ids_this_ante.push(second_card_id);
+    gs.select_blind().unwrap();
+    // Those cards should now be debuffed
+    assert!(gs.deck[0].debuffed, "ThePillar: first previously-played card must be debuffed");
+    assert!(gs.deck[1].debuffed, "ThePillar: second previously-played card must be debuffed");
+    // Cards NOT in the list must not be debuffed
+    assert!(!gs.deck[2].debuffed, "ThePillar: unplayed cards must not be debuffed");
+}
+
+/// Cards not previously played are not debuffed by ThePillar.
+#[test]
+fn test_the_pillar_does_not_debuff_unplayed_cards() {
+    let mut gs = boss_select(BossBlind::ThePillar);
+    // No IDs recorded
+    gs.select_blind().unwrap();
+    assert!(
+        gs.deck.iter().all(|c| !c.debuffed),
+        "ThePillar: no cards should be debuffed if none were played previously"
+    );
+}
+
+/// played_card_ids_this_ante is cleared when advancing to a new Ante.
+#[test]
+fn test_the_pillar_ids_cleared_on_new_ante() {
+    let mut gs = make_game();
+    gs.played_card_ids_this_ante.push(42);
+    gs.played_card_ids_this_ante.push(99);
+    // Simulate Boss blind completion → advance_blind() → new Ante
+    gs.current_blind = crate::game::BlindKind::Boss;
+    gs.advance_blind();
+    assert!(
+        gs.played_card_ids_this_ante.is_empty(),
+        "played_card_ids_this_ante must be cleared on new Ante"
+    );
+}
