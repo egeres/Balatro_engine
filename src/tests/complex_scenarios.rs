@@ -10,6 +10,7 @@
 
 use super::*;
 use crate::scoring::score_hand;
+use crate::game::GameStateKind;
 
 // Helper: build a hand_levels map with one type overridden.
 fn levels_with(ht: HandType, level: u32) -> std::collections::HashMap<HandType, HandLevelData> {
@@ -943,4 +944,49 @@ fn test_scenario_five_of_a_kind_lvl3_nine_jokers_zero_discards() {
     assert_eq!(r.final_chips as i64, 375,    "chips mismatch");
     assert_eq!(r.final_mult  as i64, 2445,   "mult mismatch");
     assert_eq!(r.final_score as i64, 916875, "score mismatch");
+}
+
+// ─────────────────────────────────────────────────────────────
+// Scenario 15 – swap_jokers changes Blueprint scoring across rounds
+// ─────────────────────────────────────────────────────────────
+//
+// Round 1: jokers = [Joker(0), Blueprint(1)]
+//   Blueprint is last, has no joker to its right → does not copy anything.
+//   High Card L1: chips=5 (Ace) + 11 (HC base) = 16, mult=1 + 4 (Joker) = 5 → 80
+//
+// swap_jokers(0, 1) → jokers = [Blueprint, Joker]
+//
+// Round 2: jokers = [Blueprint, Joker]
+//   Blueprint copies the Joker immediately to its right → +4 mult.
+//   mult = 1 + 4 (Joker) + 4 (Blueprint copy of Joker) = 9 → chips=16, mult=9 → 144
+#[test]
+fn test_scenario_swap_jokers_changes_blueprint_scoring_across_rounds() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(0, JokerKind::Joker));
+    gs.jokers.push(joker(1, JokerKind::Blueprint));
+
+    // ── Round 1: [Joker, Blueprint] — Blueprint has nothing to its right ──
+    setup_round(&mut gs, vec![card(10, Rank::Ace, Suit::Spades)], 1);
+    gs.score_goal = 1.0; // ensure round ends on first play
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    assert_eq!(
+        gs.score_accumulated as i64, 80,
+        "Round 1: [Joker, Blueprint] should score 80"
+    );
+
+    // ── Swap jokers so Blueprint is now first ──
+    gs.swap_jokers(0, 1).unwrap();
+    assert_eq!(gs.jokers[0].kind, JokerKind::Blueprint, "slot 0 should be Blueprint after swap");
+    assert_eq!(gs.jokers[1].kind, JokerKind::Joker,     "slot 1 should be Joker after swap");
+
+    // ── Round 2: [Blueprint, Joker] — Blueprint copies Joker → mult=9 ──
+    setup_round(&mut gs, vec![card(20, Rank::Ace, Suit::Spades)], 1);
+    gs.score_goal = 1.0;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    assert_eq!(
+        gs.score_accumulated as i64, 144,
+        "Round 2: [Blueprint, Joker] should score 144"
+    );
 }
