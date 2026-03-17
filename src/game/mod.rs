@@ -67,6 +67,12 @@ pub struct GameState {
 
     // For The Fool tarot: remembers the most recently used tarot or planet this run
     pub last_consumable_used: Option<LastConsumable>,
+
+    // Showdown boss blind state
+    /// CeruleanBell: ID of the card that is always forced-selected this draw.
+    pub cerulean_forced_card_id: Option<u64>,
+    /// VerdantLeaf: set to true once the first joker is sold this blind.
+    pub verdant_leaf_joker_sold: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,6 +168,8 @@ impl GameState {
             history: Vec::new(),
             next_id: 1,
             last_consumable_used: None,
+            cerulean_forced_card_id: None,
+            verdant_leaf_joker_sold: false,
         };
 
         // Apply deck-type modifications

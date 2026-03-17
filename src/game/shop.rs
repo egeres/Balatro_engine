@@ -1,7 +1,7 @@
 use crate::card::*;
 use crate::types::*;
 use std::collections::HashMap;
-use super::{GameState, GameStateKind, BalatroError, HistoryEvent, upgraded_voucher};
+use super::{GameState, GameStateKind, BlindKind, BalatroError, HistoryEvent, upgraded_voucher};
 
 impl GameState {
     pub(crate) fn generate_shop(&mut self) {
@@ -292,6 +292,17 @@ impl GameState {
         }
 
         self.jokers.remove(joker_index);
+
+        // VerdantLeaf: first joker sold lifts the all-cards-debuffed effect
+        if let Some(BossBlind::VerdantLeaf) = self.boss_blind {
+            if matches!(self.current_blind, BlindKind::Boss) && !self.verdant_leaf_joker_sold {
+                self.verdant_leaf_joker_sold = true;
+                for card in self.deck.iter_mut() {
+                    card.debuffed = false;
+                }
+            }
+        }
+
         Ok(())
     }
 

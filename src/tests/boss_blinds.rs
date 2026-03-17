@@ -932,3 +932,306 @@ fn test_crimson_heart_does_not_modify_score() {
     let p = flush_spades();
     assert_eq!(score_with_boss(&p, BossBlind::CrimsonHeart).final_score, score_baseline(&p).final_score);
 }
+
+// =========================================================
+// 13. AmberAcorn — shuffle joker order at blind start
+// =========================================================
+
+/// AmberAcorn preserves the full set of jokers (no jokers lost or added).
+#[test]
+fn test_amber_acorn_preserves_joker_count() {
+    let mut gs = boss_select(BossBlind::AmberAcorn);
+    gs.jokers.push(joker(100, JokerKind::Joker));
+    gs.jokers.push(joker(101, JokerKind::AbstractJoker));
+    gs.jokers.push(joker(102, JokerKind::Blueprint));
+    gs.select_blind().unwrap();
+    assert_eq!(gs.jokers.len(), 3, "AmberAcorn must not add or remove jokers");
+    let kinds: Vec<JokerKind> = gs.jokers.iter().map(|j| j.kind).collect();
+    assert!(kinds.contains(&JokerKind::Joker));
+    assert!(kinds.contains(&JokerKind::AbstractJoker));
+    assert!(kinds.contains(&JokerKind::Blueprint));
+}
+
+/// Luchador suppresses AmberAcorn's shuffle: joker order is preserved.
+#[test]
+fn test_amber_acorn_with_luchador_does_not_shuffle() {
+    let mut gs = boss_select(BossBlind::AmberAcorn);
+    gs.jokers.push(joker(100, JokerKind::Luchador));
+    gs.jokers.push(joker(101, JokerKind::Joker));
+    gs.jokers.push(joker(102, JokerKind::AbstractJoker));
+    gs.select_blind().unwrap();
+    // Luchador disables the boss effect; order must be unchanged
+    assert_eq!(gs.jokers[0].kind, JokerKind::Luchador);
+    assert_eq!(gs.jokers[1].kind, JokerKind::Joker);
+    assert_eq!(gs.jokers[2].kind, JokerKind::AbstractJoker);
+}
+
+/// AmberAcorn does not shuffle jokers on a non-boss blind.
+#[test]
+fn test_amber_acorn_no_shuffle_on_small_blind() {
+    let mut gs = make_game();
+    gs.boss_blind = Some(BossBlind::AmberAcorn);
+    // default current_blind is Small
+    gs.jokers.push(joker(100, JokerKind::Joker));
+    gs.jokers.push(joker(101, JokerKind::AbstractJoker));
+    gs.select_blind().unwrap();
+    assert_eq!(gs.jokers[0].kind, JokerKind::Joker, "order must not change on Small blind");
+    assert_eq!(gs.jokers[1].kind, JokerKind::AbstractJoker);
+}
+
+// =========================================================
+// 14. VerdantLeaf — all cards debuffed until first joker sold
+// =========================================================
+
+/// After selecting a VerdantLeaf blind, every card in the deck is debuffed.
+#[test]
+fn test_verdant_leaf_debuffs_all_cards_on_enter() {
+    let mut gs = boss_select(BossBlind::VerdantLeaf);
+    gs.jokers.push(joker(100, JokerKind::Joker));
+    gs.select_blind().unwrap();
+    assert!(
+        gs.deck.iter().all(|c| c.debuffed),
+        "VerdantLeaf: all cards must be debuffed at round start"
+    );
+}
+
+/// Selling any joker during a VerdantLeaf blind immediately un-debuffs all cards.
+#[test]
+fn test_verdant_leaf_undebuffs_cards_after_first_joker_sold() {
+    let mut gs = boss_select(BossBlind::VerdantLeaf);
+    gs.jokers.push(joker(100, JokerKind::Joker));
+    gs.jokers.push(joker(101, JokerKind::AbstractJoker));
+    gs.select_blind().unwrap();
+    assert!(gs.deck.iter().all(|c| c.debuffed), "cards must start debuffed");
+    gs.sell_joker(0).unwrap();
+    assert!(
+        gs.deck.iter().all(|c| !c.debuffed),
+        "VerdantLeaf: selling first joker must un-debuff all cards"
+    );
+}
+
+/// Selling a second joker during VerdantLeaf still leaves cards un-debuffed (idempotent).
+#[test]
+fn test_verdant_leaf_second_joker_sell_keeps_cards_undebuffed() {
+    let mut gs = boss_select(BossBlind::VerdantLeaf);
+    gs.jokers.push(joker(100, JokerKind::Joker));
+    gs.jokers.push(joker(101, JokerKind::AbstractJoker));
+    gs.select_blind().unwrap();
+    gs.sell_joker(0).unwrap();
+    gs.sell_joker(0).unwrap(); // sell second joker
+    assert!(gs.deck.iter().all(|c| !c.debuffed));
+}
+
+/// Luchador suppresses VerdantLeaf: cards are NOT debuffed at all.
+#[test]
+fn test_verdant_leaf_with_luchador_no_debuff() {
+    let mut gs = boss_select(BossBlind::VerdantLeaf);
+    gs.jokers.push(joker(100, JokerKind::Luchador));
+    gs.jokers.push(joker(101, JokerKind::Joker));
+    gs.select_blind().unwrap();
+    assert!(
+        gs.deck.iter().all(|c| !c.debuffed),
+        "Luchador must suppress VerdantLeaf card debuffs"
+    );
+}
+
+/// VerdantLeaf does not debuff cards on a Small or Big blind (boss only).
+#[test]
+fn test_verdant_leaf_no_debuff_on_small_blind() {
+    let mut gs = make_game();
+    gs.boss_blind = Some(BossBlind::VerdantLeaf);
+    // Small blind
+    gs.select_blind().unwrap();
+    assert!(
+        gs.deck.iter().all(|c| !c.debuffed),
+        "VerdantLeaf must not debuff on a Small blind"
+    );
+}
+
+// =========================================================
+// 15. CrimsonHeart — one random joker disabled per hand
+// =========================================================
+
+/// With a single joker (AbstractJoker), CrimsonHeart disables it during scoring,
+/// so the score equals the baseline (no joker) result.
+#[test]
+fn test_crimson_heart_disables_joker_during_scoring() {
+    // Baseline score: Pair with two 8s, no joker
+    // chips = 10 + 8 + 8 = 26, mult = 2, score = 52
+    let played = vec![
+        card(1, Rank::Eight, Suit::Spades),
+        card(2, Rank::Eight, Suit::Hearts),
+    ];
+
+    // Without CrimsonHeart: AbstractJoker adds +3 mult per joker = 5 total → 26×5 = 130
+    let result_no_boss = score_hand(
+        &played, &[], &[joker(10, JokerKind::AbstractJoker)],
+        &default_hand_levels(), 3, 3, 0, 40, 52, None, 5, 0, 0,
+    );
+    assert_eq!(result_no_boss.final_score as i64, 130);
+
+    // With CrimsonHeart via GameState: AbstractJoker is disabled during play_hand
+    let mut gs = boss_select(BossBlind::CrimsonHeart);
+    gs.jokers.push(joker(10, JokerKind::AbstractJoker));
+    gs.select_blind().unwrap();
+    gs.score_goal = f64::MAX;
+
+    // Place the two 8s into the deck and hand
+    gs.deck.clear();
+    gs.hand.clear();
+    gs.draw_pile.clear();
+    gs.deck.push(card(1, Rank::Eight, Suit::Spades));
+    gs.deck.push(card(2, Rank::Eight, Suit::Hearts));
+    gs.hand = vec![0, 1];
+    gs.selected_indices.clear();
+    // Cerulean-bell auto-selection not active here; manually select
+    gs.select_card(0).unwrap();
+    gs.select_card(1).unwrap();
+
+    let result = gs.play_hand().unwrap();
+    // AbstractJoker was disabled → score = 26 × 2 = 52
+    assert_eq!(result.final_score as i64, 52,
+        "CrimsonHeart: AbstractJoker must be disabled during scoring (expected 52, got {})",
+        result.final_score as i64
+    );
+}
+
+/// After the hand, the CrimsonHeart-disabled joker is re-enabled.
+#[test]
+fn test_crimson_heart_joker_reenabled_after_hand() {
+    let mut gs = boss_select(BossBlind::CrimsonHeart);
+    gs.jokers.push(joker(10, JokerKind::AbstractJoker));
+    gs.select_blind().unwrap();
+    gs.score_goal = f64::MAX;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    assert!(
+        gs.jokers.iter().all(|j| j.active),
+        "CrimsonHeart: disabled joker must be re-enabled after the hand"
+    );
+}
+
+/// Luchador suppresses CrimsonHeart: no joker is disabled, score includes joker bonuses.
+#[test]
+fn test_crimson_heart_with_luchador_joker_not_disabled() {
+    let played = vec![
+        card(1, Rank::Eight, Suit::Spades),
+        card(2, Rank::Eight, Suit::Hearts),
+    ];
+    // AbstractJoker gives +3 mult/joker. With Luchador blocking CrimsonHeart,
+    // AbstractJoker should contribute normally: 26 chips × (2+3+3) mult = 26×8 = 208
+    // (2 jokers in total: AbstractJoker+Luchador → +6 mult)
+    let mut gs = boss_select(BossBlind::CrimsonHeart);
+    gs.jokers.push(joker(10, JokerKind::Luchador));
+    gs.jokers.push(joker(11, JokerKind::AbstractJoker));
+    gs.select_blind().unwrap();
+    gs.score_goal = f64::MAX;
+    gs.deck.clear(); gs.hand.clear(); gs.draw_pile.clear();
+    gs.deck.push(card(1, Rank::Eight, Suit::Spades));
+    gs.deck.push(card(2, Rank::Eight, Suit::Hearts));
+    gs.hand = vec![0, 1];
+    gs.selected_indices.clear();
+    gs.select_card(0).unwrap();
+    gs.select_card(1).unwrap();
+    let result = gs.play_hand().unwrap();
+    // Luchador disables CrimsonHeart; both jokers active → 26 × (2+3+3) = 26×8 = 208
+    assert_eq!(result.final_score as i64, 208,
+        "Luchador should suppress CrimsonHeart (expected 208, got {})", result.final_score as i64
+    );
+}
+
+// =========================================================
+// 16. CeruleanBell — one card always selected (forced)
+// =========================================================
+
+/// After select_blind, exactly 1 card is pre-selected and cerulean_forced_card_id is set.
+#[test]
+fn test_cerulean_bell_auto_selects_one_card_on_enter() {
+    let mut gs = boss_select(BossBlind::CeruleanBell);
+    gs.select_blind().unwrap();
+    assert_eq!(
+        gs.selected_indices.len(), 1,
+        "CeruleanBell: exactly 1 card must be auto-selected on round start"
+    );
+    assert!(
+        gs.cerulean_forced_card_id.is_some(),
+        "CeruleanBell: forced card ID must be set"
+    );
+}
+
+/// Attempting to deselect the forced card returns a BossBlindEffect error.
+#[test]
+fn test_cerulean_bell_cannot_deselect_forced_card() {
+    let mut gs = boss_select(BossBlind::CeruleanBell);
+    gs.select_blind().unwrap();
+    assert_eq!(gs.selected_indices.len(), 1);
+    let forced_hand_idx = gs.selected_indices[0];
+    let result = gs.deselect_card(forced_hand_idx);
+    assert!(
+        matches!(result, Err(BalatroError::BossBlindEffect(_))),
+        "CeruleanBell: deselecting forced card must return BossBlindEffect, got {:?}", result
+    );
+}
+
+/// Non-forced cards can still be deselected normally.
+#[test]
+fn test_cerulean_bell_can_deselect_non_forced_card() {
+    let mut gs = boss_select(BossBlind::CeruleanBell);
+    gs.select_blind().unwrap();
+    // Select a non-forced card if hand has multiple cards
+    let forced_hand_idx = gs.selected_indices[0];
+    // Find another hand card that is NOT the forced one
+    if let Some(other_idx) = (0..gs.hand.len()).find(|&i| i != forced_hand_idx) {
+        gs.select_card(other_idx).unwrap();
+        assert!(gs.deselect_card(other_idx).is_ok(),
+            "CeruleanBell: non-forced card should be deselectable"
+        );
+    }
+}
+
+/// After playing a hand and drawing new cards, a new cerulean card is selected.
+#[test]
+fn test_cerulean_bell_reselects_new_card_after_draw() {
+    let mut gs = boss_select(BossBlind::CeruleanBell);
+    gs.select_blind().unwrap();
+    gs.score_goal = f64::MAX;
+    let first_forced_id = gs.cerulean_forced_card_id;
+    // Play the forced card (it's already selected)
+    gs.play_hand().unwrap();
+    // A new cerulean card should be chosen
+    assert!(
+        gs.cerulean_forced_card_id.is_some(),
+        "CeruleanBell: a new forced card must be selected after drawing"
+    );
+    // The new forced card should be in selected_indices
+    let new_forced_id = gs.cerulean_forced_card_id.unwrap();
+    let new_forced_hand_idx = gs.hand.iter().position(|&di| gs.deck[di].id == new_forced_id);
+    assert!(new_forced_hand_idx.is_some(), "forced card must be in hand");
+    assert!(
+        gs.selected_indices.contains(&new_forced_hand_idx.unwrap()),
+        "new forced card must be in selected_indices"
+    );
+    // Trying to deselect the new forced card must fail
+    let result = gs.deselect_card(new_forced_hand_idx.unwrap());
+    assert!(
+        matches!(result, Err(BalatroError::BossBlindEffect(_))),
+        "new cerulean card must also be blocked from deselection"
+    );
+    let _ = first_forced_id; // suppress unused warning
+}
+
+/// Luchador suppresses CeruleanBell: no card is auto-selected.
+#[test]
+fn test_cerulean_bell_with_luchador_no_forced_selection() {
+    let mut gs = boss_select(BossBlind::CeruleanBell);
+    gs.jokers.push(joker(100, JokerKind::Luchador));
+    gs.select_blind().unwrap();
+    assert_eq!(
+        gs.selected_indices.len(), 0,
+        "Luchador must suppress CeruleanBell auto-selection"
+    );
+    assert!(
+        gs.cerulean_forced_card_id.is_none(),
+        "Luchador must prevent CeruleanBell from setting a forced card ID"
+    );
+}

@@ -100,6 +100,10 @@ impl GameState {
         self.hand.clear();
         self.discard_pile.clear();
 
+        // Reset showdown blind state
+        self.verdant_leaf_joker_sold = false;
+        self.cerulean_forced_card_id = None;
+
         // Reset per-round hand played counters
         for data in self.hand_levels.values_mut() {
             data.played_this_round = 0;
@@ -111,6 +115,18 @@ impl GameState {
 
         // Apply boss blind debuffs to cards
         self.apply_boss_blind_debuffs();
+
+        // AmberAcorn: shuffle joker order at the start of the blind
+        if let Some(BossBlind::AmberAcorn) = self.boss_blind {
+            if matches!(self.current_blind, BlindKind::Boss) {
+                let disabled = self.jokers.iter().any(|j| {
+                    (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
+                });
+                if !disabled {
+                    self.rng.shuffle(&mut self.jokers);
+                }
+            }
+        }
 
         // Set score goal
         self.score_goal = self.get_blind_chip_goal();
@@ -190,11 +206,32 @@ impl GameState {
 
     pub(crate) fn draw_to_hand(&mut self) {
         let hand_size = self.effective_hand_size() as usize;
+        let start_hand_len = self.hand.len();
         while self.hand.len() < hand_size && !self.draw_pile.is_empty() {
             let card_idx = self.draw_pile.remove(0);
             self.hand.push(card_idx);
         }
-        // Apply Dusk joker: DNA copies first card of first hand of round
+
+        // CeruleanBell: one random newly-drawn card is always selected (forced)
+        if let Some(BossBlind::CeruleanBell) = self.boss_blind {
+            if matches!(self.current_blind, BlindKind::Boss) {
+                let luchador_active = self.jokers.iter().any(|j| {
+                    (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
+                });
+                if !luchador_active {
+                    let newly_drawn_count = self.hand.len() - start_hand_len;
+                    if newly_drawn_count > 0 {
+                        let offset = self.rng.range_usize(0, newly_drawn_count - 1);
+                        let forced_hand_idx = start_hand_len + offset;
+                        let card_deck_idx = self.hand[forced_hand_idx];
+                        self.cerulean_forced_card_id = Some(self.deck[card_deck_idx].id);
+                        if !self.selected_indices.contains(&forced_hand_idx) {
+                            self.selected_indices.push(forced_hand_idx);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn apply_boss_blind_debuffs(&mut self) {
@@ -252,6 +289,14 @@ impl GameState {
             BossBlind::TheMark => {
                 for card in self.deck.iter_mut() {
                     if card.rank.is_face() {
+                        card.debuffed = true;
+                    }
+                }
+            }
+            BossBlind::VerdantLeaf => {
+                // All cards debuffed until at least 1 joker is sold
+                if !self.verdant_leaf_joker_sold {
+                    for card in self.deck.iter_mut() {
                         card.debuffed = true;
                     }
                 }

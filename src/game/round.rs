@@ -32,6 +32,15 @@ impl GameState {
         if hand_index >= self.hand.len() {
             return Err(BalatroError::IndexOutOfRange(hand_index, self.hand.len()));
         }
+        // CeruleanBell: the forced card cannot be deselected
+        if let Some(forced_id) = self.cerulean_forced_card_id {
+            let card_deck_idx = self.hand[hand_index];
+            if self.deck[card_deck_idx].id == forced_id {
+                return Err(BalatroError::BossBlindEffect(
+                    "Cerulean Bell: this card cannot be deselected".to_string(),
+                ));
+            }
+        }
         self.selected_indices.retain(|&x| x != hand_index);
         Ok(())
     }
@@ -146,6 +155,36 @@ impl GameState {
             .filter(|c| c.enhancement == Enhancement::Steel)
             .count();
 
+        // CrimsonHeart: disable one random active joker for the duration of this hand
+        let crimson_disabled_joker_id: Option<u64> = if let Some(BossBlind::CrimsonHeart) = self.boss_blind {
+            if matches!(self.current_blind, BlindKind::Boss) {
+                let luchador_active = self.jokers.iter().any(|j| {
+                    (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
+                });
+                if !luchador_active {
+                    let active_jokers: Vec<usize> = self.jokers.iter().enumerate()
+                        .filter(|(_, j)| j.active)
+                        .map(|(i, _)| i)
+                        .collect();
+                    if !active_jokers.is_empty() {
+                        let pick = self.rng.range_usize(0, active_jokers.len() - 1);
+                        let idx = active_jokers[pick];
+                        let id = self.jokers[idx].id;
+                        self.jokers[idx].active = false;
+                        Some(id)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let result = score_hand(
             &played_cards,
             &hand_cards,
@@ -161,6 +200,13 @@ impl GameState {
             self.tarot_cards_used,
             steel_count_in_deck,
         );
+
+        // CrimsonHeart: re-enable the temporarily disabled joker
+        if let Some(disabled_id) = crimson_disabled_joker_id {
+            if let Some(j) = self.jokers.iter_mut().find(|j| j.id == disabled_id) {
+                j.active = true;
+            }
+        }
 
         // Update hand level stats
         if let Some(level) = self.hand_levels.get_mut(&result.hand_type) {
