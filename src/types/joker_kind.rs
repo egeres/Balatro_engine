@@ -519,7 +519,6 @@ impl JokerKind {
             | JokerKind::RiffRaff
             | JokerKind::Photograph
             | JokerKind::MailInRebate
-            | JokerKind::Hallucination
             | JokerKind::FortuneTeller
             | JokerKind::Juggler
             | JokerKind::Drunkard
@@ -530,7 +529,8 @@ impl JokerKind {
             | JokerKind::Swashbuckler
             | JokerKind::HangingChad
             | JokerKind::ReservedParking
-            | JokerKind::ShootTheMoon => 1,
+            | JokerKind::ShootTheMoon
+            | JokerKind::Popcorn => 1,
 
             JokerKind::JokerStencil
             | JokerKind::FourFingers
@@ -594,7 +594,7 @@ impl JokerKind {
             | JokerKind::Bootstraps
             | JokerKind::TheIdol
             | JokerKind::OopsAll6s
-            | JokerKind::Popcorn => 2,
+            | JokerKind::Hallucination => 2,
 
             JokerKind::Dna
             | JokerKind::Stuntman

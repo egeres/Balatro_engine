@@ -389,11 +389,15 @@ impl GameState {
             }
             SpectralCard::Ankh => {
                 // Copy a random joker, destroy the others (eternal jokers are spared)
+                // Negative edition is removed from the copy per wiki
                 if !self.jokers.is_empty() {
                     let idx = self.rng.range_usize(0, self.jokers.len() - 1);
                     let chosen_id = self.jokers[idx].id;
                     let mut new_copy = self.jokers[idx].clone();
                     new_copy.id = self.next_id();
+                    if new_copy.edition == Edition::Negative {
+                        new_copy.edition = Edition::None;
+                    }
                     // Retain: the eternal jokers + the copy (original is removed, copy is added below)
                     self.jokers.retain(|j| j.eternal && j.id != chosen_id);
                     self.jokers.push(new_copy);

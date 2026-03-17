@@ -568,7 +568,7 @@ impl GameState {
                     self.jokers[i].set_counter_i64("mult", cur + 1);
                 }
                 JokerKind::SpareTrousers => {
-                    if hand_type == HandType::TwoPair {
+                    if hand_type.contains_two_pair() {
                         let cur = self.jokers[i].get_counter_i64("mult");
                         self.jokers[i].set_counter_i64("mult", cur + 2);
                     }
