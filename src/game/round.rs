@@ -2,6 +2,7 @@ use crate::card::*;
 use crate::types::*;
 use crate::scoring::score_hand;
 use crate::scoring::ScoreResult;
+use crate::hand_eval::evaluate_hand;
 use std::collections::HashMap;
 use super::{GameState, GameStateKind, BlindKind, BalatroError, HistoryEvent, LastConsumable};
 
@@ -117,6 +118,44 @@ impl GameState {
             .iter()
             .map(|&i| self.deck[i].clone())
             .collect();
+
+        // TheEye / TheMouth: evaluate hand type early to enforce restrictions
+        if matches!(self.current_blind, BlindKind::Boss) {
+            let luchador_active = self.jokers.iter().any(|j| {
+                (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
+            });
+            if !luchador_active {
+                let has_four_fingers = self.jokers.iter().any(|j| j.kind == JokerKind::FourFingers && j.active);
+                let has_shortcut = self.jokers.iter().any(|j| j.kind == JokerKind::Shortcut && j.active);
+                let has_smeared = self.jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active);
+                let has_splash = self.jokers.iter().any(|j| j.kind == JokerKind::Splash && j.active);
+                let preview = evaluate_hand(&played_cards, has_four_fingers, has_shortcut, has_smeared, has_splash);
+
+                // TheEye: no repeat hand types this round
+                if let Some(BossBlind::TheEye) = self.boss_blind {
+                    let already_played = self.hand_levels
+                        .get(&preview.hand_type)
+                        .map(|h| h.played_this_round > 0)
+                        .unwrap_or(false);
+                    if already_played {
+                        return Err(BalatroError::BossBlindEffect(
+                            format!("The Eye: {:?} has already been played this round", preview.hand_type)
+                        ));
+                    }
+                }
+
+                // TheMouth: only one hand type per round
+                if let Some(BossBlind::TheMouth) = self.boss_blind {
+                    let other_type_played = self.hand_levels.iter()
+                        .any(|(ht, h)| *ht != preview.hand_type && h.played_this_round > 0);
+                    if other_type_played {
+                        return Err(BalatroError::BossBlindEffect(
+                            "The Mouth: only one hand type may be played per round".to_string()
+                        ));
+                    }
+                }
+            }
+        }
 
         // Lucky card: pre-roll probabilistic effects so score_hand sees them as flat bonuses.
         // +20 Mult on 1/5 (written into extra_mult so flat_mult_bonus picks it up).

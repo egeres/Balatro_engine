@@ -1444,3 +1444,142 @@ fn test_the_serpent_no_effect_on_small_blind() {
     assert_eq!(gs.hand.len(), hand_size,
         "TheSerpent must not affect Small blind draw");
 }
+
+// =========================================================
+// TheEye — no repeat hand types per round
+// =========================================================
+
+/// First hand of any type succeeds against TheEye.
+#[test]
+fn test_the_eye_allows_first_hand_of_each_type() {
+    let mut gs = boss_select(BossBlind::TheEye);
+    gs.select_blind().unwrap();
+    gs.score_goal = f64::MAX;
+    gs.select_card(0).unwrap();
+    assert!(gs.play_hand().is_ok(), "TheEye: first hand must succeed");
+}
+
+/// Repeating the same hand type returns BossBlindEffect.
+#[test]
+fn test_the_eye_blocks_repeated_hand_type() {
+    let mut gs = boss_select(BossBlind::TheEye);
+    // Fill deck with pairs so both hands are detected as HighCard (single card)
+    let c1 = card(1, Rank::Ace,  Suit::Spades);
+    let c2 = card(2, Rank::King, Suit::Hearts);
+    let c3 = card(3, Rank::Queen, Suit::Clubs);
+    setup_round(&mut gs, vec![c1, c2, c3], 3);
+    gs.score_goal = f64::MAX;
+    // First High Card (single card)
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    // Second High Card must fail
+    gs.select_card(0).unwrap();
+    let result = gs.play_hand();
+    assert!(
+        matches!(result, Err(BalatroError::BossBlindEffect(_))),
+        "TheEye: second HighCard must return BossBlindEffect, got {:?}", result
+    );
+}
+
+/// Luchador suppresses TheEye: repeated hand types are allowed.
+#[test]
+fn test_the_eye_with_luchador_allows_repeats() {
+    let mut gs = boss_select(BossBlind::TheEye);
+    gs.jokers.push(joker(100, JokerKind::Luchador));
+    let c1 = card(1, Rank::Ace,  Suit::Spades);
+    let c2 = card(2, Rank::King, Suit::Hearts);
+    let c3 = card(3, Rank::Queen, Suit::Clubs);
+    setup_round(&mut gs, vec![c1, c2, c3], 3);
+    gs.score_goal = f64::MAX;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    gs.select_card(0).unwrap();
+    assert!(gs.play_hand().is_ok(), "Luchador must suppress TheEye");
+}
+
+/// TheEye has no restriction on Small or Big blind.
+#[test]
+fn test_the_eye_no_restriction_on_small_blind() {
+    let mut gs = make_game();
+    gs.boss_blind = Some(BossBlind::TheEye);
+    let c1 = card(1, Rank::Ace,  Suit::Spades);
+    let c2 = card(2, Rank::King, Suit::Hearts);
+    let c3 = card(3, Rank::Queen, Suit::Clubs);
+    setup_round(&mut gs, vec![c1, c2, c3], 3);
+    gs.score_goal = f64::MAX;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    gs.select_card(0).unwrap();
+    assert!(gs.play_hand().is_ok(), "TheEye must not restrict repeats on Small blind");
+}
+
+// =========================================================
+// TheMouth — only one hand type per round
+// =========================================================
+
+/// First hand of any type succeeds against TheMouth.
+#[test]
+fn test_the_mouth_allows_first_hand() {
+    let mut gs = boss_select(BossBlind::TheMouth);
+    gs.select_blind().unwrap();
+    gs.score_goal = f64::MAX;
+    gs.select_card(0).unwrap();
+    assert!(gs.play_hand().is_ok(), "TheMouth: first hand must succeed");
+}
+
+/// Playing a different hand type after the first returns BossBlindEffect.
+#[test]
+fn test_the_mouth_blocks_different_hand_type() {
+    let mut gs = boss_select(BossBlind::TheMouth);
+    // 4 cards, hand_size=4: play c1 alone (HighCard), then try c2+c3 (Pair)
+    let c1 = card(1, Rank::Ace,  Suit::Spades);
+    let c2 = card(2, Rank::King, Suit::Hearts);
+    let c3 = card(3, Rank::King, Suit::Clubs);
+    let c4 = card(4, Rank::Two,  Suit::Diamonds);
+    setup_round(&mut gs, vec![c1, c2, c3, c4], 4);
+    gs.score_goal = f64::MAX;
+    // First play: single card → HighCard
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    // Hand is now [King♥, King♣, 2♦] at positions 0,1,2
+    // Play King+King → Pair → different hand type → must fail
+    gs.select_card(0).unwrap();
+    gs.select_card(1).unwrap();
+    let result = gs.play_hand();
+    assert!(
+        matches!(result, Err(BalatroError::BossBlindEffect(_))),
+        "TheMouth: different hand type must return BossBlindEffect, got {:?}", result
+    );
+}
+
+/// Replaying the same hand type is allowed under TheMouth.
+#[test]
+fn test_the_mouth_allows_same_hand_type_again() {
+    let mut gs = boss_select(BossBlind::TheMouth);
+    let c1 = card(1, Rank::Ace,  Suit::Spades);
+    let c2 = card(2, Rank::King, Suit::Hearts);
+    let c3 = card(3, Rank::Queen, Suit::Clubs);
+    setup_round(&mut gs, vec![c1, c2, c3], 3);
+    gs.score_goal = f64::MAX;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap(); // HighCard
+    gs.select_card(0).unwrap();
+    assert!(gs.play_hand().is_ok(), "TheMouth: same hand type again must succeed");
+}
+
+/// Luchador suppresses TheMouth: different hand types are allowed.
+#[test]
+fn test_the_mouth_with_luchador_allows_different_types() {
+    let mut gs = boss_select(BossBlind::TheMouth);
+    gs.jokers.push(joker(100, JokerKind::Luchador));
+    let c1 = card(1, Rank::Ace,   Suit::Spades);
+    let c2 = card(2, Rank::Ace,   Suit::Hearts);
+    let c3 = card(3, Rank::Queen, Suit::Clubs);
+    setup_round(&mut gs, vec![c1, c2, c3], 3);
+    gs.score_goal = f64::MAX;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap(); // HighCard
+    gs.select_card(0).unwrap();
+    gs.select_card(1).unwrap();
+    assert!(gs.play_hand().is_ok(), "Luchador must suppress TheMouth");
+}
