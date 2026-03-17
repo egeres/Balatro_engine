@@ -200,6 +200,18 @@ fn test_cavendish_does_not_fire_on_high_card() {
     assert_eq!(r.final_score as i64, 16);
 }
 
+#[test]
+fn test_cavendish_does_not_crash_when_round_ends() {
+    // Cavendish has 1/1000 chance of being destroyed at end of round; verify it runs cleanly
+    let mut gs = make_game();
+    let cards = vec![card(0, Rank::Ace, Suit::Spades)];
+    setup_round(&mut gs, cards, 1);
+    gs.jokers.push(joker(1, JokerKind::Cavendish));
+    gs.score_goal = 1.0;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap(); // should not panic; Cavendish may or may not be destroyed (1/1000)
+}
+
 // =========================================================
 // Certificate: adds a card with enhancement when blind is set
 // =========================================================
@@ -1130,6 +1142,29 @@ fn test_oops_all_6s_does_not_crash_during_round() {
         "Playing with OopsAll6s should not crash and should complete the round");
 }
 
+#[test]
+fn test_oops_all_6s_doubles_gros_michel_destruction_chance() {
+    // OopsAll6s doubles GrosMichel's 1/6 destruction chance to 1/3.
+    // Run 20 trials: with 1/3 chance, at least one destruction is near-certain.
+    let mut destroyed = false;
+    for trial in 0..20 {
+        let seed = format!("oops_gm_{}", trial);
+        let mut gs = crate::game::GameState::new(DeckType::Blue, Stake::White, Some(seed));
+        let cards = vec![card(0, Rank::Ace, Suit::Spades)];
+        setup_round(&mut gs, cards, 1);
+        gs.jokers.push(joker(1, JokerKind::OopsAll6s));
+        gs.jokers.push(joker(2, JokerKind::GrosMichel));
+        gs.score_goal = 1.0;
+        gs.select_card(0).unwrap();
+        gs.play_hand().unwrap();
+        if gs.jokers.iter().all(|j| j.kind != JokerKind::GrosMichel) {
+            destroyed = true;
+            break;
+        }
+    }
+    assert!(destroyed, "GrosMichel with OopsAll6s (1/3 chance) should be destroyed at least once in 20 trials");
+}
+
 // =========================================================
 // RaisedFist: +2x rank of lowest held card to Mult
 // =========================================================
@@ -1175,20 +1210,33 @@ fn test_red_card_mult_applies_in_scoring() {
 }
 
 // =========================================================
-// ReservedParking: $1 per face card held in hand
+// ReservedParking: 1/2 chance $1 per face card held in hand
 // =========================================================
 
 #[test]
-fn test_reserved_parking_earns_per_face_card_in_hand() {
-    let king = card(0, Rank::King, Suit::Spades);
-    let queen = card(1, Rank::Queen, Suit::Hearts);
-    let played = vec![card(2, Rank::Two, Suit::Clubs)]; // played non-face
-    let hand = vec![king, queen]; // held face cards
-    let jokers = vec![joker(0, JokerKind::ReservedParking)];
-    let r = score(&played, &hand, &jokers);
-    // 2 face cards in hand → $2 dollars (simplified: always triggers)
-    assert_eq!(r.dollars_earned, 2,
-        "ReservedParking should earn $1 per face card held in hand");
+fn test_reserved_parking_can_earn_per_face_card_in_hand() {
+    // ReservedParking has 1/2 chance per face card; handled in round.rs
+    let mut earned = false;
+    for trial in 0..50 {
+        let seed = format!("parking_{}", trial);
+        let mut gs = crate::game::GameState::new(DeckType::Blue, Stake::White, Some(seed));
+        // Play a non-face card, hold 2 face cards
+        let two = card(0, Rank::Two, Suit::Clubs);
+        let king = card(1, Rank::King, Suit::Spades);
+        let queen = card(2, Rank::Queen, Suit::Hearts);
+        setup_round(&mut gs, vec![two, king, queen], 3);
+        gs.jokers.push(joker(1, JokerKind::ReservedParking));
+        gs.score_goal = 1.0;
+        gs.money = 0;
+        gs.select_card(0).unwrap(); // play the Two
+        gs.play_hand().unwrap();
+        // Blind reward $3 + possibly $1-$2 from ReservedParking (0-2 face cards trigger)
+        if gs.money >= 4 { // $3 + at least $1 from one face card triggering
+            earned = true;
+            break;
+        }
+    }
+    assert!(earned, "ReservedParking should earn $1 per triggered face card at least once in 50 trials");
 }
 
 // =========================================================

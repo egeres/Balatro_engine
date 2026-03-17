@@ -383,10 +383,44 @@ fn test_onyx_agate_fires_on_clubs() {
 
 #[test]
 fn test_bloodstone_fires_on_hearts() {
-    let played = vec![card(0, Rank::Two, Suit::Hearts)];
+    // Bloodstone is pre-rolled in round.rs; test with extra_x_mult=1.5 pre-set on the card
+    let mut hearts_card = card(0, Rank::Two, Suit::Hearts);
+    hearts_card.extra_x_mult = 1.5;
+    let played = vec![hearts_card];
     let r = score(&played, &played, &[joker(0, JokerKind::Bloodstone)]);
     // HC: 5+2=7 chips, mult=1*1.5=1.5 → 10.5 → 10
     assert_eq!(r.final_score as i64, 10);
+}
+
+#[test]
+fn test_bloodstone_does_not_fire_without_pre_roll() {
+    // Without pre-rolling (extra_x_mult=1.0 default), Bloodstone has no effect
+    let played = vec![card(0, Rank::Two, Suit::Hearts)];
+    let r = score(&played, &played, &[joker(0, JokerKind::Bloodstone)]);
+    // HC: 5+2=7 chips, mult=1 (no x_mult) → 7
+    assert_eq!(r.final_score as i64, 7);
+}
+
+#[test]
+fn test_bloodstone_can_trigger_via_round() {
+    // Run many trials: Bloodstone has 1/2 chance to trigger per scoring Hearts card
+    let mut triggered = false;
+    for trial in 0..30 {
+        let seed = format!("bloodstone_{}", trial);
+        let mut gs = crate::game::GameState::new(DeckType::Blue, Stake::White, Some(seed));
+        let hearts_card = card(0, Rank::Two, Suit::Hearts);
+        setup_round(&mut gs, vec![hearts_card], 1);
+        gs.jokers.push(joker(1, JokerKind::Bloodstone));
+        gs.score_goal = 1.0;
+        gs.select_card(0).unwrap();
+        let result = gs.play_hand().unwrap();
+        // Without Bloodstone trigger: 7 chips * 1 mult = 7; with trigger: 7 * 1.5 → 10
+        if result.final_score as i64 >= 10 {
+            triggered = true;
+            break;
+        }
+    }
+    assert!(triggered, "Bloodstone should trigger at least once in 30 trials");
 }
 
 #[test]
@@ -397,10 +431,26 @@ fn test_rough_gem_earns_dollar_on_diamonds() {
 }
 
 #[test]
-fn test_business_card_earns_dollar_on_face_card() {
-    let played = vec![card(0, Rank::King, Suit::Spades)];
-    let r = score(&played, &played, &[joker(0, JokerKind::BusinessCard)]);
-    assert_eq!(r.dollars_earned, 1);
+fn test_business_card_can_earn_dollars_on_face_card() {
+    // BusinessCard has 1/2 chance to earn $2 per scoring face card; handled in round.rs
+    let mut earned = false;
+    for trial in 0..50 {
+        let seed = format!("business_{}", trial);
+        let mut gs = crate::game::GameState::new(DeckType::Blue, Stake::White, Some(seed));
+        let king = card(0, Rank::King, Suit::Spades);
+        setup_round(&mut gs, vec![king], 1);
+        gs.jokers.push(joker(1, JokerKind::BusinessCard));
+        gs.score_goal = 1.0;
+        gs.money = 0;
+        gs.select_card(0).unwrap();
+        gs.play_hand().unwrap();
+        // Blind reward $3 + interest $0 + possibly $2 from BusinessCard = $5
+        if gs.money >= 5 {
+            earned = true;
+            break;
+        }
+    }
+    assert!(earned, "BusinessCard should earn $2 per face card scored at least once in 50 trials");
 }
 
 // =========================================================

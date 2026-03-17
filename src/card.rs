@@ -17,6 +17,8 @@ pub struct CardInstance {
     pub extra_chips: i64,
     /// For flip cards (Certificate joker)
     pub extra_mult: i64,
+    /// Pre-rolled x_mult bonus (e.g. Bloodstone 1/2 chance x1.5, pre-rolled by game loop)
+    pub extra_x_mult: f64,
 }
 
 impl CardInstance {
@@ -32,6 +34,7 @@ impl CardInstance {
             face_down: false,
             extra_chips: 0,
             extra_mult: 0,
+            extra_x_mult: 1.0,
         }
     }
 

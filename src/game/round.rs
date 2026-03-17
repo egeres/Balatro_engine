@@ -157,16 +157,38 @@ impl GameState {
             }
         }
 
+        // OopsAll6s: doubles all listed probabilities when active
+        let oops_active = self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active);
+        let oops_mult = if oops_active { 2.0_f64 } else { 1.0_f64 };
+
+        // Bloodstone: pre-roll 1/2 chance x1.5 per scoring Hearts card
+        let has_bloodstone = self.jokers.iter().any(|j| j.kind == JokerKind::Bloodstone && j.active);
+        if has_bloodstone {
+            let has_four_fingers = self.jokers.iter().any(|j| j.kind == JokerKind::FourFingers && j.active);
+            let has_shortcut = self.jokers.iter().any(|j| j.kind == JokerKind::Shortcut && j.active);
+            let has_smeared = self.jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active);
+            let has_splash = self.jokers.iter().any(|j| j.kind == JokerKind::Splash && j.active);
+            let pre_eval = crate::hand_eval::evaluate_hand(&played_cards, has_four_fingers, has_shortcut, has_smeared, has_splash);
+            for &idx in &pre_eval.scoring_indices {
+                let card = &mut played_cards[idx];
+                if !card.debuffed && card.effective_suits().contains(&Suit::Hearts) {
+                    if self.rng.next_bool_prob((0.5 * oops_mult).min(1.0)) {
+                        card.extra_x_mult = 1.5;
+                    }
+                }
+            }
+        }
+
         // Lucky card: pre-roll probabilistic effects so score_hand sees them as flat bonuses.
         // +20 Mult on 1/5 (written into extra_mult so flat_mult_bonus picks it up).
         // $20 on 1/15 (counted here, paid out after scoring).
         let mut lucky_dollar_count: i32 = 0;
         for card in played_cards.iter_mut() {
             if card.enhancement == Enhancement::Lucky && !card.debuffed {
-                if self.rng.next_bool_prob(1.0 / 5.0) {
+                if self.rng.next_bool_prob((1.0 / 5.0) * oops_mult) {
                     card.extra_mult += 20;
                 }
-                if self.rng.next_bool_prob(1.0 / 15.0) {
+                if self.rng.next_bool_prob((1.0 / 15.0) * oops_mult) {
                     lucky_dollar_count += 1;
                     // LuckyCat joker: gains +0.25 x_mult per successful Lucky trigger
                     for j in self.jokers.iter_mut() {
@@ -346,6 +368,30 @@ impl GameState {
         // Lucky card $20 bonus (1/15 chance per scored Lucky card, pre-rolled above)
         self.money += lucky_dollar_count * 20;
 
+        // BusinessCard: 1/2 chance to earn $2 per scoring face card (doubled to 1.0 with OopsAll6s)
+        if self.jokers.iter().any(|j| j.kind == JokerKind::BusinessCard && j.active) {
+            let pareidolia = self.jokers.iter().any(|j| j.kind == JokerKind::Pareidolia && j.active);
+            for &idx in &result.scoring_card_indices {
+                let card = &played_cards[idx];
+                if !card.debuffed && card.is_face(pareidolia) {
+                    if self.rng.next_bool_prob((0.5 * oops_mult).min(1.0)) {
+                        self.money += 2;
+                    }
+                }
+            }
+        }
+
+        // ReservedParking: 1/2 chance to earn $1 per face card held in hand (doubled to 1.0 with OopsAll6s)
+        if self.jokers.iter().any(|j| j.kind == JokerKind::ReservedParking && j.active) {
+            for card in &hand_cards {
+                if card.rank.is_face() && !card.debuffed {
+                    if self.rng.next_bool_prob((0.5 * oops_mult).min(1.0)) {
+                        self.money += 1;
+                    }
+                }
+            }
+        }
+
         // Tooth boss: -$1 per card played
         if let Some(BossBlind::TheTooth) = self.boss_blind {
             if matches!(self.current_blind, BlindKind::Boss) {
@@ -368,8 +414,8 @@ impl GameState {
         // Process glass cards: chance to destroy
         for card in &played_cards {
             if card.enhancement == Enhancement::Glass {
-                // 1/4 chance to break
-                if self.rng.next_bool_prob(0.25) {
+                // 1/4 chance to break (1/2 with OopsAll6s)
+                if self.rng.next_bool_prob((0.25 * oops_mult).min(1.0)) {
                     // Remove card from deck (destroy_deck_card remaps all index collections)
                     self.destroy_deck_card(card.id);
                     self.notify_face_card_destroyed(card);
@@ -476,6 +522,7 @@ impl GameState {
 
     fn post_play_joker_updates(&mut self, result: &ScoreResult, played: &[CardInstance], hand: &[CardInstance]) {
         let hand_type = result.hand_type;
+        let oops_mult = if self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active) { 2.0_f64 } else { 1.0_f64 };
         for i in 0..self.jokers.len() {
             let kind = self.jokers[i].kind;
             match kind {
@@ -609,12 +656,12 @@ impl GameState {
                     // (handled in sell_joker)
                 }
                 JokerKind::EightBall => {
-                    // 1/4 chance to create a tarot card when an 8 is scored
+                    // 1/4 chance to create a tarot card when an 8 is scored (1/2 with OopsAll6s)
                     let eights_scored = result.scoring_card_indices.iter()
                         .filter(|&&idx| played[idx].rank == Rank::Eight)
                         .count();
                     for _ in 0..eights_scored {
-                        if self.rng.next_bool_prob(0.25) {
+                        if self.rng.next_bool_prob((0.25 * oops_mult).min(1.0)) {
                             if self.consumables.len() < self.consumable_slots as usize {
                                 let tarot = self.random_tarot();
                                 self.consumables.push(ConsumableCard::Tarot(tarot));
@@ -632,8 +679,8 @@ impl GameState {
                     }
                 }
                 JokerKind::SpaceJoker => {
-                    // 1/4 chance to level up the played hand
-                    if self.rng.next_bool_prob(0.25) {
+                    // 1/4 chance to level up the played hand (1/2 with OopsAll6s)
+                    if self.rng.next_bool_prob((0.25 * oops_mult).min(1.0)) {
                         if let Some(level) = self.hand_levels.get_mut(&result.hand_type) {
                             level.level += 1;
                         }
@@ -927,13 +974,28 @@ impl GameState {
             self.money += max_disc as i32 * 2 * dg_count as i32;
         }
 
-        // GrosMichel: 1/6 chance to be destroyed at end of round
+        // OopsAll6s doubles all listed probabilities at end of round too
+        let win_oops_active = self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active);
+        let win_oops_mult = if win_oops_active { 2.0_f64 } else { 1.0_f64 };
+
+        // GrosMichel: 1/6 chance to be destroyed at end of round (1/3 with OopsAll6s)
         let gm_positions: Vec<usize> = self.jokers.iter().enumerate()
             .filter(|(_, j)| j.kind == JokerKind::GrosMichel && j.active && !j.eternal)
             .map(|(i, _)| i)
             .collect();
         for pos in gm_positions.iter().rev() {
-            if self.rng.next_bool_prob(1.0 / 6.0) {
+            if self.rng.next_bool_prob((1.0 / 6.0) * win_oops_mult) {
+                self.jokers.remove(*pos);
+            }
+        }
+
+        // Cavendish: 1/1000 chance to be destroyed at end of round (1/500 with OopsAll6s)
+        let cav_positions: Vec<usize> = self.jokers.iter().enumerate()
+            .filter(|(_, j)| j.kind == JokerKind::Cavendish && j.active && !j.eternal)
+            .map(|(i, _)| i)
+            .collect();
+        for pos in cav_positions.iter().rev() {
+            if self.rng.next_bool_prob((1.0 / 1000.0) * win_oops_mult) {
                 self.jokers.remove(*pos);
             }
         }

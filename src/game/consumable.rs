@@ -233,8 +233,9 @@ impl GameState {
                 }
             }
             TarotCard::TheWheelOfFortune => {
-                // 1/4 chance to add random edition to random joker
-                if !self.jokers.is_empty() && self.rng.next_bool_prob(0.25) {
+                // 1/4 chance to add random edition to random joker (1/2 with OopsAll6s)
+                let wheel_oops = if self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active) { 2.0_f64 } else { 1.0_f64 };
+                if !self.jokers.is_empty() && self.rng.next_bool_prob((0.25 * wheel_oops).min(1.0)) {
                     let idx = self.rng.range_usize(0, self.jokers.len() - 1);
                     let editions = [Edition::Foil, Edition::Holographic, Edition::Polychrome];
                     let ed_idx = self.rng.range_usize(0, 2);

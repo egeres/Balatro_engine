@@ -184,10 +184,7 @@ pub(crate) fn calc_joker_individual(
             }
         }
         JokerKind::BusinessCard => {
-            if is_scoring && card.is_face(pareidolia) {
-                // 1/2 chance to earn $2 (simulate as earning $1 on average)
-                effect.dollars += 1; // simplified
-            }
+            // Handled in game loop (round.rs) with proper 1/2 probability roll
         }
         JokerKind::Photograph => {
             // First face card scored this hand gives x2 mult
@@ -230,9 +227,9 @@ pub(crate) fn calc_joker_individual(
             }
         }
         JokerKind::Bloodstone => {
-            if is_scoring && card.effective_suits().contains(&Suit::Hearts) {
-                // 1/2 chance x1.5 (simplified to always)
-                effect.x_mult = 1.5;
+            // Pre-rolled in round.rs: extra_x_mult is set to 1.5 if triggered (1/2 chance)
+            if is_scoring && card.effective_suits().contains(&Suit::Hearts) && card.extra_x_mult > 1.0 {
+                effect.x_mult = card.extra_x_mult;
             }
         }
         JokerKind::RoughGem => {
@@ -296,10 +293,7 @@ pub(crate) fn calc_joker_hand_card(
             }
         }
         JokerKind::ReservedParking => {
-            // 1/2 chance $1 per face card held in hand (simplified: always $1)
-            if card.rank.is_face() && !card.debuffed {
-                effect.dollars += 1;
-            }
+            // Handled in game loop (round.rs) with proper 1/2 probability roll
         }
         _ => {}
     }
