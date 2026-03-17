@@ -1,5 +1,5 @@
 use crate::card::{CardInstance, HandLevelData, JokerInstance};
-use crate::hand_eval::{evaluate_hand, HandEvalResult};
+use crate::hand_eval::evaluate_hand;
 use crate::types::*;
 use std::collections::HashMap;
 
@@ -15,7 +15,7 @@ pub struct ScoreResult {
     pub final_mult: f64,
     pub final_score: f64,
     pub dollars_earned: i32,
-    /// Events that happened during scoring for the history log
+    /// Events that happened during scoring (for history / debugging)
     pub events: Vec<ScoreEvent>,
 }
 
@@ -36,7 +36,7 @@ pub enum ScoreEventKind {
     CardDestroyed,
 }
 
-/// Context passed to joker evaluators
+/// Context passed to the joker evaluators in Phase 4
 pub struct ScoringContext<'a> {
     pub hand_type: HandType,
     pub scoring_cards: &'a [usize],
@@ -53,15 +53,31 @@ pub struct ScoringContext<'a> {
     pub joker_count: usize,
     pub joker_slot_count: usize,
     pub tarot_cards_used: u32,
-    /// Number of Steel-enhanced cards in the entire deck (used by Steel Joker)
     pub steel_count_in_deck: usize,
-    /// Number of Stone-enhanced cards in the entire deck (used by Stone Joker)
     pub stone_count_in_deck: usize,
-    /// Number of enhanced (non-None) cards in the entire deck (used by Driver's License)
     pub enhanced_count_in_deck: usize,
 }
 
-/// Score a played hand given game state
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn push_effect_events(events: &mut Vec<ScoreEvent>, effect: &JokerEffect, source: &str) {
+    if effect.chips != 0 {
+        events.push(ScoreEvent { source: source.to_string(), kind: ScoreEventKind::Chips,  value: effect.chips as f64 });
+    }
+    if effect.mult != 0 {
+        events.push(ScoreEvent { source: source.to_string(), kind: ScoreEventKind::Mult,   value: effect.mult as f64 });
+    }
+    if effect.x_mult != 1.0 {
+        events.push(ScoreEvent { source: source.to_string(), kind: ScoreEventKind::XMult,  value: effect.x_mult });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Main scoring entry-point
+// ---------------------------------------------------------------------------
+
 pub fn score_hand(
     played_cards: &[CardInstance],
     hand_cards: &[CardInstance],
@@ -80,19 +96,12 @@ pub fn score_hand(
     enhanced_count_in_deck: usize,
 ) -> ScoreResult {
     let has_four_fingers = jokers.iter().any(|j| j.kind == JokerKind::FourFingers && j.active);
-    let has_shortcut = jokers.iter().any(|j| j.kind == JokerKind::Shortcut && j.active);
-    let has_smeared = jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active);
-    let has_splash = jokers.iter().any(|j| j.kind == JokerKind::Splash && j.active);
-    let has_pareidolia = jokers.iter().any(|j| j.kind == JokerKind::Pareidolia && j.active);
+    let has_shortcut    = jokers.iter().any(|j| j.kind == JokerKind::Shortcut     && j.active);
+    let has_smeared     = jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active);
+    let has_splash      = jokers.iter().any(|j| j.kind == JokerKind::Splash       && j.active);
+    let has_pareidolia  = jokers.iter().any(|j| j.kind == JokerKind::Pareidolia   && j.active);
 
-    let eval = evaluate_hand(
-        played_cards,
-        has_four_fingers,
-        has_shortcut,
-        has_smeared,
-        has_splash,
-    );
-
+    let eval = evaluate_hand(played_cards, has_four_fingers, has_shortcut, has_smeared, has_splash);
     let hand_type = eval.hand_type;
     let scoring_indices = eval.scoring_indices.clone();
 
@@ -102,40 +111,31 @@ pub fn score_hand(
         .unwrap_or_else(|| HandLevelData::new(true));
 
     let mut chips: f64 = level_data.chips(hand_type) as f64;
-    let mut mult: f64 = level_data.mult(hand_type) as f64;
-    // Observatory voucher: accumulated X1.5 per planet use for this hand type
+    let mut mult:  f64 = level_data.mult(hand_type)  as f64;
     if level_data.observatory_x_mult != 1.0 {
         mult *= level_data.observatory_x_mult;
     }
+
     let mut dollars_earned: i32 = 0;
     let mut events: Vec<ScoreEvent> = Vec::new();
 
-    // Apply boss blind modifiers (some halve chips/mult)
-    if let Some(boss) = boss_blind {
-        match boss {
-            BossBlind::TheFlint => {
-                chips = (chips / 2.0).ceil();
-                mult = (mult / 2.0).ceil();
-                events.push(ScoreEvent {
-                    source: "The Flint".to_string(),
-                    kind: ScoreEventKind::XMult,
-                    value: 0.5,
-                });
-            }
-            _ => {}
-        }
+    // Boss blind modifier — The Flint halves chips and mult
+    if let Some(BossBlind::TheFlint) = boss_blind {
+        chips = (chips / 2.0).ceil();
+        mult  = (mult  / 2.0).ceil();
+        events.push(ScoreEvent { source: "The Flint".to_string(), kind: ScoreEventKind::XMult, value: 0.5 });
     }
 
-    // PHASE 1: "before" joker effects (triggered before card scoring)
+    // ── PHASE 1: hand-level effects before card scoring ───────────────────
     for joker in jokers.iter().filter(|j| j.active) {
-        let effect = calc_joker_before(joker, hand_type, &scoring_indices, played_cards, hand_levels);
+        let effect = calc_joker_before(joker, hand_type);
         chips += effect.chips as f64;
-        mult += effect.mult as f64;
-        mult *= effect.x_mult;
+        mult  += effect.mult  as f64;
+        mult  *= effect.x_mult;
         dollars_earned += effect.dollars;
     }
 
-    // PHASE 2: Score each card in the scoring hand
+    // ── PHASE 2: score each card in the scoring hand ──────────────────────
     for &card_idx in &scoring_indices {
         let card = &played_cards[card_idx];
 
@@ -148,11 +148,9 @@ pub fn score_hand(
             continue;
         }
 
-        // Determine retrigger count for this card
-        let retriggers = count_retriggers(card_idx, card, jokers, &scoring_indices, played_cards, hand_type, hands_remaining);
+        let retriggers = count_retriggers(card_idx, card, jokers, &scoring_indices, hands_remaining);
 
         for _trigger in 0..=retriggers {
-            // Card base chips
             let card_chips = card.base_chip_value() + card.chip_bonus();
             if card_chips != 0 {
                 chips += card_chips as f64;
@@ -163,7 +161,6 @@ pub fn score_hand(
                 });
             }
 
-            // Card flat mult (Mult enhancement)
             let card_mult = card.flat_mult_bonus();
             if card_mult != 0 {
                 mult += card_mult as f64;
@@ -174,7 +171,6 @@ pub fn score_hand(
                 });
             }
 
-            // Card X-mult (Glass card: x2; Lucky card has no x_mult, only flat mult via extra_mult)
             let card_xmult = card.x_mult_factor();
             if card_xmult != 1.0 {
                 mult *= card_xmult;
@@ -185,88 +181,44 @@ pub fn score_hand(
                 });
             }
 
-            // Card edition effects
+            // Card edition bonuses
             let ed_chips = card.edition_chip_bonus();
-            if ed_chips != 0 {
-                chips += ed_chips as f64;
-            }
-            let ed_mult = card.edition_mult_bonus();
-            if ed_mult != 0 {
-                mult += ed_mult as f64;
-            }
+            if ed_chips != 0 { chips += ed_chips as f64; }
+            let ed_mult  = card.edition_mult_bonus();
+            if ed_mult  != 0 { mult  += ed_mult  as f64; }
             let ed_xmult = card.edition_x_mult();
-            if ed_xmult != 1.0 {
-                mult *= ed_xmult;
+            if ed_xmult != 1.0 { mult *= ed_xmult; }
+
+            // Gold seal
+            if card.seal == Seal::Gold {
+                dollars_earned += 3;
+                events.push(ScoreEvent {
+                    source: format!("{:?} of {:?} (Gold Seal)", card.rank, card.suit),
+                    kind: ScoreEventKind::Dollars,
+                    value: 3.0,
+                });
             }
 
-            // Seal effects
-            match card.seal {
-                Seal::Gold => {
-                    dollars_earned += 3;
-                    events.push(ScoreEvent {
-                        source: format!("{:?} of {:?} (Gold Seal)", card.rank, card.suit),
-                        kind: ScoreEventKind::Dollars,
-                        value: 3.0,
-                    });
-                }
-                _ => {}
-            }
-
-            // Per-card joker effects (individual triggers)
+            // Per-card joker effects
             for joker in jokers.iter().filter(|j| j.active) {
                 let effect = calc_joker_individual(
-                    joker,
-                    card_idx,
-                    card,
-                    hand_type,
-                    &scoring_indices,
-                    played_cards,
-                    hand_cards,
-                    has_pareidolia,
+                    joker, card_idx, card, &scoring_indices, played_cards, has_pareidolia,
                 );
                 chips += effect.chips as f64;
-                mult += effect.mult as f64;
-                mult *= effect.x_mult;
+                mult  += effect.mult  as f64;
+                mult  *= effect.x_mult;
                 dollars_earned += effect.dollars;
-                if effect.chips != 0 {
-                    events.push(ScoreEvent {
-                        source: joker.kind.display_name().to_string(),
-                        kind: ScoreEventKind::Chips,
-                        value: effect.chips as f64,
-                    });
-                }
-                if effect.mult != 0 {
-                    events.push(ScoreEvent {
-                        source: joker.kind.display_name().to_string(),
-                        kind: ScoreEventKind::Mult,
-                        value: effect.mult as f64,
-                    });
-                }
-                if effect.x_mult != 1.0 {
-                    events.push(ScoreEvent {
-                        source: joker.kind.display_name().to_string(),
-                        kind: ScoreEventKind::XMult,
-                        value: effect.x_mult,
-                    });
-                }
+                push_effect_events(&mut events, &effect, joker.kind.display_name());
             }
         }
     }
 
-    // PHASE 3: Hand cards (cards in hand, not played) - Steel cards give x1.5
-    for (i, card) in hand_cards.iter().enumerate() {
-        if card.debuffed {
-            continue;
-        }
-        // Steel card effect
+    // ── PHASE 3: held-hand cards — Steel x-mult and hand-card joker effects ──
+    for card in hand_cards.iter().filter(|c| !c.debuffed) {
         let steel_xmult = card.steel_x_mult();
         if steel_xmult != 1.0 {
-            // Count retriggers for hand cards (Mime joker)
-            let mime_retriggers = jokers
-                .iter()
-                .filter(|j| j.kind == JokerKind::Mime && j.active)
-                .count();
-            for _ in 0..=(mime_retriggers) {
+            let mime_count = jokers.iter().filter(|j| j.kind == JokerKind::Mime && j.active).count();
+            for _ in 0..=mime_count {
                 mult *= steel_xmult;
                 events.push(ScoreEvent {
                     source: format!("{:?} of {:?} (Steel)", card.rank, card.suit),
@@ -276,77 +228,53 @@ pub fn score_hand(
             }
         }
 
-        // Per-hand-card joker effects
         for joker in jokers.iter().filter(|j| j.active) {
-            let effect = calc_joker_hand_card(joker, card, hand_type, &scoring_indices, played_cards, hand_cards);
-            mult += effect.mult as f64;
-            mult *= effect.x_mult;
+            let effect = calc_joker_hand_card(joker, card);
+            mult  += effect.mult  as f64;
+            mult  *= effect.x_mult;
             dollars_earned += effect.dollars;
         }
     }
 
-    // PHASE 4: Main joker effects (joker_main context)
-    for joker in jokers.iter().filter(|j| j.active) {
-        let ctx = ScoringContext {
-            hand_type,
-            scoring_cards: &scoring_indices,
-            played_cards,
-            hand_cards,
-            jokers,
-            hand_levels,
-            hands_remaining,
-            discards_remaining,
-            money,
-            deck_cards_remaining: deck_remaining,
-            total_deck_size: total_deck,
-            boss_blind,
-            joker_count: jokers.len(),
-            joker_slot_count,
-            tarot_cards_used,
-            steel_count_in_deck,
-            stone_count_in_deck,
-            enhanced_count_in_deck,
-        };
-        // Joker edition: Foil (+50 chips) and Holographic (+10 mult) apply BEFORE joker's main effect
-        let j_chip_bonus = joker.edition_chip_bonus();
-        let j_mult_bonus = joker.edition_mult_bonus();
-        chips += j_chip_bonus as f64;
-        mult += j_mult_bonus as f64;
+    // ── PHASE 4: main joker effects (once per joker) ──────────────────────
+    let ctx = ScoringContext {
+        hand_type,
+        scoring_cards: &scoring_indices,
+        played_cards,
+        hand_cards,
+        jokers,
+        hand_levels,
+        hands_remaining,
+        discards_remaining,
+        money,
+        deck_cards_remaining: deck_remaining,
+        total_deck_size: total_deck,
+        boss_blind,
+        joker_count: jokers.len(),
+        joker_slot_count,
+        tarot_cards_used,
+        steel_count_in_deck,
+        stone_count_in_deck,
+        enhanced_count_in_deck,
+    };
 
-        let effect = calc_joker_main(joker, &ctx);
+    for (joker_idx, joker) in jokers.iter().enumerate() {
+        if !joker.active { continue; }
+
+        // Edition bonuses: Foil/Holographic apply BEFORE the joker's effect
+        chips += joker.edition_chip_bonus() as f64;
+        mult  += joker.edition_mult_bonus() as f64;
+
+        let effect = calc_joker_main(joker, joker_idx, &ctx);
         chips += effect.chips as f64;
-        mult += effect.mult as f64;
-        mult *= effect.x_mult;
+        mult  += effect.mult  as f64;
+        mult  *= effect.x_mult;
         dollars_earned += effect.dollars;
-        if effect.chips != 0 {
-            events.push(ScoreEvent {
-                source: joker.kind.display_name().to_string(),
-                kind: ScoreEventKind::Chips,
-                value: effect.chips as f64,
-            });
-        }
-        if effect.mult != 0 {
-            events.push(ScoreEvent {
-                source: joker.kind.display_name().to_string(),
-                kind: ScoreEventKind::Mult,
-                value: effect.mult as f64,
-            });
-        }
-        if effect.x_mult != 1.0 {
-            events.push(ScoreEvent {
-                source: joker.kind.display_name().to_string(),
-                kind: ScoreEventKind::XMult,
-                value: effect.x_mult,
-            });
-        }
+        push_effect_events(&mut events, &effect, joker.kind.display_name());
 
-        // Joker edition: Polychrome (x1.5) applies AFTER joker's main effect
-        let j_xmult = joker.edition_x_mult();
-        mult *= j_xmult;
+        // Polychrome applies AFTER the joker's effect
+        mult *= joker.edition_x_mult();
     }
-
-    // Plasma Deck: balance chips and mult (average them)
-    // This is handled at the game level, not here
 
     let final_score = chips * mult;
 
@@ -355,9 +283,9 @@ pub fn score_hand(
         hand_name: hand_type.display_name().to_string(),
         scoring_card_indices: scoring_indices,
         base_chips: level_data.chips(hand_type),
-        base_mult: level_data.mult(hand_type),
+        base_mult:  level_data.mult(hand_type),
         final_chips: chips,
-        final_mult: mult,
+        final_mult:  mult,
         final_score,
         dollars_earned,
         events,
@@ -365,4 +293,7 @@ pub fn score_hand(
 }
 
 pub(crate) mod joker_effects;
-pub(crate) use joker_effects::{JokerEffect, calc_joker_before, calc_joker_individual, calc_joker_hand_card, calc_joker_main, count_retriggers};
+pub(crate) use joker_effects::{
+    JokerEffect, calc_joker_before, calc_joker_individual,
+    calc_joker_hand_card, calc_joker_main, count_retriggers,
+};
