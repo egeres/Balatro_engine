@@ -86,35 +86,36 @@ pub(crate) fn calc_joker_before(
 ) -> JokerEffect {
     let mut effect = JokerEffect::new();
     match joker.kind {
-        // These jokers trigger at the hand level (not per-card)
-        JokerKind::JollyJoker if hand_type == HandType::Pair => {
+        // These jokers trigger at the hand level (not per-card).
+        // Wiki uses "contains", so they fire on any hand that includes the pattern.
+        JokerKind::JollyJoker if hand_type.contains_pair() => {
             effect.mult += 8;
         }
-        JokerKind::ZanyJoker if hand_type == HandType::ThreeOfAKind => {
+        JokerKind::ZanyJoker if hand_type.contains_three_of_a_kind() => {
             effect.mult += 12;
         }
-        JokerKind::MadJoker if hand_type == HandType::TwoPair => {
+        JokerKind::MadJoker if hand_type.contains_two_pair() => {
             effect.mult += 10;
         }
-        JokerKind::CrazyJoker if hand_type == HandType::Straight => {
+        JokerKind::CrazyJoker if hand_type.contains_straight() => {
             effect.mult += 12;
         }
-        JokerKind::DrollJoker if hand_type == HandType::Flush => {
+        JokerKind::DrollJoker if hand_type.contains_flush() => {
             effect.mult += 10;
         }
-        JokerKind::SlyJoker if hand_type == HandType::Pair => {
+        JokerKind::SlyJoker if hand_type.contains_pair() => {
             effect.chips += 50;
         }
-        JokerKind::WilyJoker if hand_type == HandType::ThreeOfAKind => {
+        JokerKind::WilyJoker if hand_type.contains_three_of_a_kind() => {
             effect.chips += 100;
         }
-        JokerKind::CleverJoker if hand_type == HandType::TwoPair => {
+        JokerKind::CleverJoker if hand_type.contains_two_pair() => {
             effect.chips += 80;
         }
-        JokerKind::DeviousJoker if hand_type == HandType::Straight => {
+        JokerKind::DeviousJoker if hand_type.contains_straight() => {
             effect.chips += 100;
         }
-        JokerKind::CraftyJoker if hand_type == HandType::Flush => {
+        JokerKind::CraftyJoker if hand_type.contains_flush() => {
             effect.chips += 80;
         }
         _ => {}
@@ -520,19 +521,19 @@ pub(crate) fn calc_joker_main(joker: &JokerInstance, ctx: &ScoringContext) -> Jo
             // +1 mult per tarot card used this run
             effect.mult += ctx.tarot_cards_used as i64;
         }
-        JokerKind::TheDuo if hand_type == HandType::Pair => {
+        JokerKind::TheDuo if hand_type.contains_pair() => {
             effect.x_mult = 2.0;
         }
-        JokerKind::TheTrio if hand_type == HandType::ThreeOfAKind => {
+        JokerKind::TheTrio if hand_type.contains_three_of_a_kind() => {
             effect.x_mult = 3.0;
         }
-        JokerKind::TheFamily if hand_type == HandType::FourOfAKind => {
+        JokerKind::TheFamily if hand_type.contains_four_of_a_kind() => {
             effect.x_mult = 4.0;
         }
-        JokerKind::TheOrder if hand_type == HandType::Straight => {
+        JokerKind::TheOrder if hand_type.contains_straight() => {
             effect.x_mult = 3.0;
         }
-        JokerKind::TheTribe if hand_type == HandType::Flush => {
+        JokerKind::TheTribe if hand_type.contains_flush() => {
             effect.x_mult = 2.0;
         }
         JokerKind::CardSharp => {
@@ -547,11 +548,11 @@ pub(crate) fn calc_joker_main(joker: &JokerInstance, ctx: &ScoringContext) -> Jo
             }
         }
         JokerKind::SeeingDouble => {
-            // x2 if hand contains a Club and another suit
-            let has_club = played.iter().any(|c| c.effective_suits().contains(&Suit::Clubs));
-            let has_non_club = played
+            // x2 if a SCORING Club card and a SCORING card of any other suit exist
+            let has_club = scoring_cards.iter().any(|&i| played[i].effective_suits().contains(&Suit::Clubs));
+            let has_non_club = scoring_cards
                 .iter()
-                .any(|c| c.effective_suits().iter().any(|s| *s != Suit::Clubs));
+                .any(|&i| played[i].effective_suits().iter().any(|s| *s != Suit::Clubs));
             if has_club && has_non_club {
                 effect.x_mult = 2.0;
             }
@@ -677,9 +678,8 @@ pub(crate) fn calc_joker_main(joker: &JokerInstance, ctx: &ScoringContext) -> Jo
             effect.mult += 15;
         }
         JokerKind::Cavendish => {
-            if hand_type == HandType::Pair {
-                effect.x_mult = 3.0;
-            }
+            // Unconditional X3 Mult (no hand-type condition per wiki)
+            effect.x_mult = 3.0;
         }
         JokerKind::GoldenTicket => {
             // +$4 per Gold enhancement card in scoring hand

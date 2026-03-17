@@ -328,11 +328,11 @@ impl JokerKind {
             | JokerKind::MadJoker
             | JokerKind::CrazyJoker
             | JokerKind::DrollJoker => 4,
-            JokerKind::SlyJoker
-            | JokerKind::WilyJoker
+            JokerKind::SlyJoker => 3,
+            JokerKind::WilyJoker
             | JokerKind::CleverJoker
             | JokerKind::DeviousJoker
-            | JokerKind::CraftyJoker => 3,
+            | JokerKind::CraftyJoker => 4,
             JokerKind::HalfJoker => 5,
             JokerKind::JokerStencil => 8,
             JokerKind::FourFingers => 7,
@@ -546,7 +546,6 @@ impl JokerKind {
             | JokerKind::SpaceJoker
             | JokerKind::Burglar
             | JokerKind::Blackboard
-            | JokerKind::Dna
             | JokerKind::SixthSense
             | JokerKind::Constellation
             | JokerKind::Hiker
@@ -589,7 +588,6 @@ impl JokerKind {
             | JokerKind::FlowerPot
             | JokerKind::SeeingDouble
             | JokerKind::Matador
-            | JokerKind::Stuntman
             | JokerKind::Satellite
             | JokerKind::Cartomancer
             | JokerKind::Astronomer
@@ -598,7 +596,9 @@ impl JokerKind {
             | JokerKind::OopsAll6s
             | JokerKind::Popcorn => 2,
 
-            JokerKind::Vagabond
+            JokerKind::Dna
+            | JokerKind::Stuntman
+            | JokerKind::Vagabond
             | JokerKind::Baron
             | JokerKind::Obelisk
             | JokerKind::BaseballCard

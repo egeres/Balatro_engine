@@ -835,10 +835,6 @@ impl GameState {
             }
         }
 
-        // BurntJoker: +1 hand after discarding
-        let burnt_count = self.jokers.iter().filter(|j| j.kind == JokerKind::BurntJoker && j.active).count();
-        self.hands_remaining += burnt_count as u32;
-
         // TradingCard: if first discard of the round and only 1 card, earn $3 and destroy the card
         // discards_remaining was already decremented, so first discard leaves it at max-1
         let is_first_discard = self.discards_remaining == self.effective_max_discards().saturating_sub(1);
@@ -847,6 +843,21 @@ impl GameState {
                 self.money += 3;
                 let card_id = discarded_cards[0].id;
                 self.destroy_deck_card(card_id);
+            }
+        }
+
+        // BurntJoker: on first discard of the round, upgrade the level of the discarded hand type
+        if is_first_discard {
+            let burnt_count = self.jokers.iter().filter(|j| j.kind == JokerKind::BurntJoker && j.active).count();
+            if burnt_count > 0 {
+                let has_four_fingers = self.jokers.iter().any(|j| j.kind == JokerKind::FourFingers && j.active);
+                let has_shortcut = self.jokers.iter().any(|j| j.kind == JokerKind::Shortcut && j.active);
+                let has_smeared = self.jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active);
+                let has_splash = self.jokers.iter().any(|j| j.kind == JokerKind::Splash && j.active);
+                let discard_eval = evaluate_hand(&discarded_cards, has_four_fingers, has_shortcut, has_smeared, has_splash);
+                if let Some(level) = self.hand_levels.get_mut(&discard_eval.hand_type) {
+                    level.level += burnt_count as u32;
+                }
             }
         }
 
@@ -894,6 +905,14 @@ impl GameState {
                     if count > 0 {
                         let cur = self.jokers[i].get_counter_i64("chips");
                         self.jokers[i].set_counter_i64("chips", cur + 3 * count as i64);
+                    }
+                }
+                JokerKind::HitTheRoad => {
+                    // Gains X0.5 Mult for every Jack discarded this round
+                    let jacks = discarded_cards.iter().filter(|c| c.rank == Rank::Jack).count();
+                    if jacks > 0 {
+                        let cur = self.jokers[i].get_counter_f64("x_mult");
+                        self.jokers[i].set_counter_f64("x_mult", cur + 0.5 * jacks as f64);
                     }
                 }
                 _ => {}

@@ -192,12 +192,13 @@ fn test_cavendish_fires_on_pair() {
 }
 
 #[test]
-fn test_cavendish_does_not_fire_on_high_card() {
+fn test_cavendish_fires_unconditionally_on_high_card() {
+    // Cavendish gives X3 Mult unconditionally (wiki: no hand condition)
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
     let jokers = vec![joker(0, JokerKind::Cavendish)];
     let r = score(&played, &played, &jokers);
-    // HC: chips=16, mult=1 → 16 (no x3)
-    assert_eq!(r.final_score as i64, 16);
+    // HC: chips=16, mult=1, Cavendish x3 → 16*3=48
+    assert_eq!(r.final_score as i64, 48);
 }
 
 #[test]
@@ -1069,23 +1070,30 @@ fn test_burglar_sets_discards_to_zero() {
 }
 
 // =========================================================
-// BurntJoker: +1 hand after each discard
+// BurntJoker: upgrades the level of the first discarded hand type each round
 // =========================================================
 
 #[test]
-fn test_burnt_joker_gives_extra_hand_after_discard() {
+fn test_burnt_joker_levels_up_discarded_hand_type() {
+    use crate::types::HandType;
     let mut gs = make_game();
-    let cards: Vec<_> = (0..10).map(|i| card(i, Rank::Ace, Suit::Spades)).collect();
-    setup_round(&mut gs, cards, 5);
+    // Discard a pair (Ace♠ + Ace♥) so the evaluated hand is a Pair
+    let cards: Vec<_> = vec![
+        card(0, Rank::Ace, Suit::Spades),
+        card(1, Rank::Ace, Suit::Hearts),
+        card(2, Rank::Two, Suit::Clubs),
+    ];
+    setup_round(&mut gs, cards, 3);
     gs.jokers.push(joker(1, JokerKind::BurntJoker));
-    gs.discards_remaining = 3;
 
-    let hands_before = gs.hands_remaining;
+    let level_before = gs.hand_levels.get(&HandType::Pair).map(|h| h.level).unwrap_or(1);
     gs.select_card(0).unwrap();
+    gs.select_card(1).unwrap();
     gs.discard_hand().unwrap();
 
-    assert_eq!(gs.hands_remaining, hands_before + 1,
-        "BurntJoker should grant +1 hand after discarding");
+    let level_after = gs.hand_levels.get(&HandType::Pair).map(|h| h.level).unwrap_or(1);
+    assert_eq!(level_after, level_before + 1,
+        "BurntJoker should upgrade the level of the first discarded hand type");
 }
 
 // =========================================================

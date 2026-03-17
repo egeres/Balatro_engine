@@ -774,14 +774,27 @@ fn test_blackboard_does_not_fire_with_mixed_suits_in_hand() {
 }
 
 #[test]
-fn test_seeing_double_fires_with_club_and_non_club_in_played() {
+fn test_seeing_double_fires_with_scoring_club_and_scoring_non_club() {
+    // Pair Ace♠ + Ace♣: both score, one is Club, one is Spades → X2 fires
+    // Pair: base 10 chips + 11 + 11 = 32 chips, mult=2 * x2 = 4 → 32*4=128
+    let played = vec![
+        card(0, Rank::Ace, Suit::Spades),
+        card(1, Rank::Ace, Suit::Clubs),
+    ];
+    let r = score(&played, &played, &[joker(0, JokerKind::SeeingDouble)]);
+    assert_eq!(r.final_score as i64, 128);
+}
+
+#[test]
+fn test_seeing_double_does_not_fire_when_club_is_not_scoring() {
+    // HC: Ace♠ scores, Two♣ does not score → Seeing Double should NOT fire
     let played = vec![
         card(0, Rank::Ace, Suit::Spades),
         card(1, Rank::Two, Suit::Clubs),
     ];
     let r = score(&played, &played, &[joker(0, JokerKind::SeeingDouble)]);
-    // HC: only Ace scores → 16 chips, then SeeingDouble x2 → mult=2 → 32
-    assert_eq!(r.final_score as i64, 32);
+    // HC: only Ace scores → 16 chips, no X2 → 16
+    assert_eq!(r.final_score as i64, 16);
 }
 
 #[test]
