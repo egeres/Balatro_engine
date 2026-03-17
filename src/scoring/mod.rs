@@ -53,6 +53,8 @@ pub struct ScoringContext<'a> {
     pub joker_count: usize,
     pub joker_slot_count: usize,
     pub tarot_cards_used: u32,
+    /// Number of Steel-enhanced cards in the entire deck (used by Steel Joker)
+    pub steel_count_in_deck: usize,
 }
 
 /// Score a played hand given game state
@@ -69,6 +71,7 @@ pub fn score_hand(
     boss_blind: Option<BossBlind>,
     joker_slot_count: usize,
     tarot_cards_used: u32,
+    steel_count_in_deck: usize,
 ) -> ScoreResult {
     let has_four_fingers = jokers.iter().any(|j| j.kind == JokerKind::FourFingers && j.active);
     let has_shortcut = jokers.iter().any(|j| j.kind == JokerKind::Shortcut && j.active);
@@ -161,16 +164,9 @@ pub fn score_hand(
                 });
             }
 
-            // Card X-mult (Glass, Lucky)
+            // Card X-mult (Glass card: x2; Lucky card has no x_mult, only flat mult via extra_mult)
             let card_xmult = card.x_mult_factor();
             if card_xmult != 1.0 {
-                // Lucky card: 1/5 chance
-                if card.enhancement == Enhancement::Lucky {
-                    // For scoring purposes, we roll: simulate as always triggering
-                    // (in a simulation you'd use RNG here)
-                    // For now use the nominal 1/5 probability
-                    // TODO: wire up RNG
-                }
                 mult *= card_xmult;
                 events.push(ScoreEvent {
                     source: format!("{:?} of {:?}", card.rank, card.suit),
@@ -297,6 +293,7 @@ pub fn score_hand(
             joker_count: jokers.len(),
             joker_slot_count,
             tarot_cards_used,
+            steel_count_in_deck,
         };
         let effect = calc_joker_main(joker, &ctx);
         chips += effect.chips as f64;

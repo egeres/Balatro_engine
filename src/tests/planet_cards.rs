@@ -167,7 +167,7 @@ fn test_mercury_level_2_pair_scores_higher_than_level_1() {
     // chips=32+15=47, mult=2+1=3 → 141
     let mut levels = default_hand_levels();
     levels.get_mut(&HandType::Pair).unwrap().level = 2;
-    let r_lvl2 = score_hand(&played, &played, &[], &levels, 3, 3, 0, 40, 52, None, 5, 0);
+    let r_lvl2 = score_hand(&played, &played, &[], &levels, 3, 3, 0, 40, 52, None, 5, 0, 0);
 
     assert!(r_lvl2.final_score > r_lvl1.final_score,
         "Level 2 Pair should score more than Level 1");

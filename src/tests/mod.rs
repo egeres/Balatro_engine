@@ -89,6 +89,9 @@ pub fn score(
         None, // boss_blind
         5,    // joker_slot_count
         0,    // tarot_cards_used
+        played.iter().chain(hand.iter())
+            .filter(|c| c.enhancement == Enhancement::Steel)
+            .count(),
     )
 }
 
@@ -118,6 +121,9 @@ pub fn score_full(
         None,
         joker_slot_count,
         tarot_cards_used,
+        played.iter().chain(hand.iter())
+            .filter(|c| c.enhancement == Enhancement::Steel)
+            .count(),
     )
 }
 

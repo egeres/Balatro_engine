@@ -825,7 +825,7 @@ fn test_loyalty_card_fires_on_5th_modulo_6_total_plays() {
     // Set high card played=5 total
     levels.get_mut(&HandType::HighCard).unwrap().played = 5;
 
-    let r = score_hand(&played, &played, &jokers, &levels, 3, 3, 0, 40, 52, None, 5, 0);
+    let r = score_hand(&played, &played, &jokers, &levels, 3, 3, 0, 40, 52, None, 5, 0, 0);
     // x4 mult → HC: 16*4=64
     assert_eq!(r.final_score as i64, 64);
 }
@@ -838,7 +838,7 @@ fn test_loyalty_card_does_not_fire_on_other_totals() {
     let mut levels = default_hand_levels();
     levels.get_mut(&HandType::HighCard).unwrap().played = 3;
 
-    let r = score_hand(&played, &played, &jokers, &levels, 3, 3, 0, 40, 52, None, 5, 0);
+    let r = score_hand(&played, &played, &jokers, &levels, 3, 3, 0, 40, 52, None, 5, 0, 0);
     // No x4, just HC: 16*1=16
     assert_eq!(r.final_score as i64, 16);
 }

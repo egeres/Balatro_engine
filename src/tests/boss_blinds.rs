@@ -68,12 +68,12 @@ fn boss_select(boss: BossBlind) -> GameState {
 
 /// Call `score_hand` with a specific boss blind, no jokers, and default Level-1 hands.
 fn score_with_boss(played: &[CardInstance], boss: BossBlind) -> crate::scoring::ScoreResult {
-    score_hand(played, &[], &[], &default_hand_levels(), 3, 3, 0, 40, 52, Some(boss), 5, 0)
+    score_hand(played, &[], &[], &default_hand_levels(), 3, 3, 0, 40, 52, Some(boss), 5, 0, 0)
 }
 
 /// Call `score_hand` with no boss blind — the baseline to compare against.
 fn score_baseline(played: &[CardInstance]) -> crate::scoring::ScoreResult {
-    score_hand(played, &[], &[], &default_hand_levels(), 3, 3, 0, 40, 52, None, 5, 0)
+    score_hand(played, &[], &[], &default_hand_levels(), 3, 3, 0, 40, 52, None, 5, 0, 0)
 }
 
 /// Five mixed low Spades that form a Flush (2,3,4,5,7 — no straight).

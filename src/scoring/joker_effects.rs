@@ -485,12 +485,10 @@ pub(crate) fn calc_joker_main(joker: &JokerInstance, ctx: &ScoringContext) -> Jo
             }
         }
         JokerKind::SteelJoker => {
-            // Count steel cards in full deck (not just hand)
-            // simplified: count steel in hand
-            let steel_count = hand.iter().filter(|c| c.enhancement == Enhancement::Steel).count();
-            let x_per = 0.2_f64;
+            // +X0.2 Mult per Steel card in the full deck
+            let steel_count = ctx.steel_count_in_deck;
             if steel_count > 0 {
-                effect.x_mult = 1.0 + x_per * steel_count as f64;
+                effect.x_mult = 1.0 + 0.2 * steel_count as f64;
             }
         }
         JokerKind::Blackboard => {

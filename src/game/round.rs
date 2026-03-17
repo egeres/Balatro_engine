@@ -104,10 +104,32 @@ impl GameState {
             .map(|&hi| self.hand[hi])
             .collect();
 
-        let played_cards: Vec<CardInstance> = played_hand_indices
+        let mut played_cards: Vec<CardInstance> = played_hand_indices
             .iter()
             .map(|&i| self.deck[i].clone())
             .collect();
+
+        // Lucky card: pre-roll probabilistic effects so score_hand sees them as flat bonuses.
+        // +20 Mult on 1/5 (written into extra_mult so flat_mult_bonus picks it up).
+        // $20 on 1/15 (counted here, paid out after scoring).
+        let mut lucky_dollar_count: i32 = 0;
+        for card in played_cards.iter_mut() {
+            if card.enhancement == Enhancement::Lucky && !card.debuffed {
+                if self.rng.next_bool_prob(1.0 / 5.0) {
+                    card.extra_mult += 20;
+                }
+                if self.rng.next_bool_prob(1.0 / 15.0) {
+                    lucky_dollar_count += 1;
+                    // LuckyCat joker: gains +0.25 x_mult per successful Lucky trigger
+                    for j in self.jokers.iter_mut() {
+                        if j.kind == JokerKind::LuckyCat && j.active {
+                            let cur = j.get_counter_f64("x_mult");
+                            j.set_counter_f64("x_mult", cur + 0.25);
+                        }
+                    }
+                }
+            }
+        }
 
         let hand_card_indices: Vec<usize> = self
             .hand
@@ -119,6 +141,10 @@ impl GameState {
             .iter()
             .map(|&i| self.deck[i].clone())
             .collect();
+
+        let steel_count_in_deck = self.deck.iter()
+            .filter(|c| c.enhancement == Enhancement::Steel)
+            .count();
 
         let result = score_hand(
             &played_cards,
@@ -133,6 +159,7 @@ impl GameState {
             self.boss_blind,
             self.joker_slots as usize,
             self.tarot_cards_used,
+            steel_count_in_deck,
         );
 
         // Update hand level stats
@@ -177,6 +204,8 @@ impl GameState {
 
         // Earn dollars from scoring
         self.money += result.dollars_earned;
+        // Lucky card $20 bonus (1/15 chance per scored Lucky card, pre-rolled above)
+        self.money += lucky_dollar_count * 20;
 
         // Tooth boss: -$1 per card played
         if let Some(BossBlind::TheTooth) = self.boss_blind {

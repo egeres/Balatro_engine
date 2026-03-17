@@ -26,7 +26,8 @@ fn score_levels(
     jokers: &[JokerInstance],
     levels: &std::collections::HashMap<HandType, HandLevelData>,
 ) -> crate::scoring::ScoreResult {
-    score_hand(played, hand, jokers, levels, 3, 3, 0, 40, 52, None, 5, 0)
+    score_hand(played, hand, jokers, levels, 3, 3, 0, 40, 52, None, 5, 0,
+        played.iter().chain(hand.iter()).filter(|c| c.enhancement == Enhancement::Steel).count())
 }
 
 // =========================================================
@@ -510,6 +511,7 @@ fn test_scenario_flush_lvl2_blackboard_money_jokers() {
         None,
         5,   // joker_slot_count
         0,   // tarot_cards_used
+        0,   // steel_count_in_deck
     );
 
     assert_eq!(r.hand_type, HandType::Flush);
@@ -573,6 +575,7 @@ fn test_scenario_high_card_lvl2_deck_and_economy_jokers() {
         None,
         5,   // joker_slot_count
         8,   // tarot_cards_used
+        0,   // steel_count_in_deck
     );
 
     assert_eq!(r.hand_type, HandType::HighCard);
@@ -641,6 +644,7 @@ fn test_scenario_straight_lvl2_walkietalkie_order_erosion() {
         None,
         5,   // joker_slot_count
         0,   // tarot_cards_used
+        0,   // steel_count_in_deck
     );
 
     assert_eq!(r.hand_type, HandType::Straight);
@@ -744,6 +748,7 @@ fn test_scenario_flushhouse_lvl3_nine_jokers_last_hand() {
         None,
         9,   // joker_slot_count (Blank + Antimatter vouchers + 3 Negative jokers)
         0,   // tarot_cards_used
+        0,   // steel_count_in_deck
     );
 
     assert_eq!(r.hand_type, HandType::FlushHouse);
@@ -836,6 +841,7 @@ fn test_scenario_four_of_a_kind_lvl3_eight_jokers_face_avalanche() {
         None,
         8,   // joker_slot_count (Blank voucher + 2 Negative jokers)
         0,   // tarot_cards_used
+        0,   // steel_count_in_deck
     );
 
     assert_eq!(r.hand_type, HandType::FourOfAKind);
@@ -938,6 +944,7 @@ fn test_scenario_five_of_a_kind_lvl3_nine_jokers_zero_discards() {
         None,
         9,   // joker_slot_count (Blank + Antimatter + 3 Negative jokers)
         0,   // tarot_cards_used
+        0,   // steel_count_in_deck
     );
 
     assert_eq!(r.hand_type, HandType::FiveOfAKind);

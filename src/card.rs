@@ -42,15 +42,18 @@ impl CardInstance {
         }
     }
 
-    /// Additional flat mult from enhancement (when scoring)
+    /// Additional flat mult from enhancement (when scoring).
+    /// Also includes `extra_mult`, which is pre-rolled by the game loop for probabilistic
+    /// effects (e.g. Lucky card +20 Mult on a 1/5 trigger).
     pub fn flat_mult_bonus(&self) -> i64 {
         if self.debuffed {
             return 0;
         }
-        match self.enhancement {
+        let base = match self.enhancement {
             Enhancement::Mult => 4,
             _ => 0,
-        }
+        };
+        base + self.extra_mult
     }
 
     /// Extra chips from enhancement (Bonus card)
