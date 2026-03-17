@@ -92,6 +92,9 @@ pub fn score(
         played.iter().chain(hand.iter())
             .filter(|c| c.enhancement == Enhancement::Steel)
             .count(),
+        played.iter().chain(hand.iter())
+            .filter(|c| c.is_stone())
+            .count(),
     )
 }
 
@@ -123,6 +126,9 @@ pub fn score_full(
         tarot_cards_used,
         played.iter().chain(hand.iter())
             .filter(|c| c.enhancement == Enhancement::Steel)
+            .count(),
+        played.iter().chain(hand.iter())
+            .filter(|c| c.is_stone())
             .count(),
     )
 }

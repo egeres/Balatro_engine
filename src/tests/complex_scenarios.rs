@@ -27,7 +27,8 @@ fn score_levels(
     levels: &std::collections::HashMap<HandType, HandLevelData>,
 ) -> crate::scoring::ScoreResult {
     score_hand(played, hand, jokers, levels, 3, 3, 0, 40, 52, None, 5, 0,
-        played.iter().chain(hand.iter()).filter(|c| c.enhancement == Enhancement::Steel).count())
+        played.iter().chain(hand.iter()).filter(|c| c.enhancement == Enhancement::Steel).count(),
+        played.iter().chain(hand.iter()).filter(|c| c.is_stone()).count())
 }
 
 // =========================================================
@@ -461,7 +462,7 @@ fn test_scenario_pair_lvl3_halfjoker_lusty_fibonacci() {
 // Scenario 9: Level 2 Flush (all Clubs) —
 //   GluttonousJoker + Blackboard + Banner + Bull + Bootstraps
 //   Played: 2♣ 5♣ 8♣ J♣ K♣  (all Clubs → Blackboard fires)
-//   Context: hands_remaining = 2, money = $15
+//   Context: discards_remaining = 2, money = $15
 //
 // Flush L2: chips = 35 + 15×1 = 50, mult = 4 + 2×1 = 6
 //
@@ -477,8 +478,8 @@ fn test_scenario_pair_lvl3_halfjoker_lusty_fibonacci() {
 // Phase 4:
 //   GluttonousJoker: no main effect
 //   Blackboard (all hand = Clubs): × 3 mult → 63
-//   Banner (hands_remaining = 2): +2×30 = +60 chips → 145
-//   Bull   (money = $15):         +2×15 = +30 chips → 175
+//   Banner (discards_remaining = 2): +2×30 = +60 chips → 145
+//   Bull   (money = $15):           +2×15 = +30 chips → 175
 //   Bootstraps (money = $15, $15/$5 = 3): +2×3 = +6 mult → 69
 //
 // Final: 175 × 69 = 12075
@@ -504,7 +505,7 @@ fn test_scenario_flush_lvl2_blackboard_money_jokers() {
     let r = score_hand(
         &played, &played, &jokers, &levels,
         2,   // hands_remaining
-        3,   // discards_remaining
+        2,   // discards_remaining
         15,  // money
         40,  // deck_remaining
         52,  // total_deck
@@ -512,6 +513,7 @@ fn test_scenario_flush_lvl2_blackboard_money_jokers() {
         5,   // joker_slot_count
         0,   // tarot_cards_used
         0,   // steel_count_in_deck
+        0,   // stone_count_in_deck
     );
 
     assert_eq!(r.hand_type, HandType::Flush);
@@ -576,6 +578,7 @@ fn test_scenario_high_card_lvl2_deck_and_economy_jokers() {
         5,   // joker_slot_count
         8,   // tarot_cards_used
         0,   // steel_count_in_deck
+        0,   // stone_count_in_deck
     );
 
     assert_eq!(r.hand_type, HandType::HighCard);
@@ -588,7 +591,7 @@ fn test_scenario_high_card_lvl2_deck_and_economy_jokers() {
 // Scenario 11: Level 2 Straight (mixed suits) —
 //   WalkieTalkie + Swashbuckler(mult=12) + SpareTrousers(mult=8) + TheOrder(×3) + Erosion
 //   Played: 4♣ 5♦ 6♥ 7♠ 8♦
-//   Context: deck_remaining = 42, total_deck = 52  (10 cards below full → Erosion +40 mult)
+//   Context: deck_remaining = 42, total_deck = 42  (10 cards permanently removed → Erosion +40 mult)
 //
 // Straight L2: chips = 30 + 30×1 = 60, mult = 4 + 3×1 = 7
 //
@@ -606,7 +609,7 @@ fn test_scenario_high_card_lvl2_deck_and_economy_jokers() {
 //   Swashbuckler (mult counter = 12): +12 mult → 23
 //   SpareTrousers (mult counter =  8): +8 mult → 31
 //   TheOrder   (Straight): ×3 mult → 93
-//   Erosion    (total 52 − remaining 42 = 10 below): +4×10 = +40 mult → 133
+//   Erosion    (52 − total_deck 42 = 10 permanently removed): +4×10 = +40 mult → 133
 //
 // Final: 100 × 133 = 13300
 // =========================================================
@@ -640,11 +643,12 @@ fn test_scenario_straight_lvl2_walkietalkie_order_erosion() {
         3,   // discards_remaining
         0,   // money
         42,  // deck_remaining
-        52,  // total_deck
+        42,  // total_deck (10 cards permanently removed from starting 52)
         None,
         5,   // joker_slot_count
         0,   // tarot_cards_used
         0,   // steel_count_in_deck
+        0,   // stone_count_in_deck
     );
 
     assert_eq!(r.hand_type, HandType::Straight);
@@ -749,6 +753,7 @@ fn test_scenario_flushhouse_lvl3_nine_jokers_last_hand() {
         9,   // joker_slot_count (Blank + Antimatter vouchers + 3 Negative jokers)
         0,   // tarot_cards_used
         0,   // steel_count_in_deck
+        0,   // stone_count_in_deck
     );
 
     assert_eq!(r.hand_type, HandType::FlushHouse);
@@ -842,6 +847,7 @@ fn test_scenario_four_of_a_kind_lvl3_eight_jokers_face_avalanche() {
         8,   // joker_slot_count (Blank voucher + 2 Negative jokers)
         0,   // tarot_cards_used
         0,   // steel_count_in_deck
+        0,   // stone_count_in_deck
     );
 
     assert_eq!(r.hand_type, HandType::FourOfAKind);
@@ -924,7 +930,7 @@ fn test_scenario_five_of_a_kind_lvl3_nine_jokers_zero_discards() {
     // Ramen starts at x2.0 by default — no explicit set needed
     let ramen = joker(6, JokerKind::Ramen);
 
-    // CardSharp fires ×3 because FiveOfAKind played_this_round = 0 (never played this round)
+    // CardSharp fires ×3 because FiveOfAKind already played this round (played_this_round = 1)
     let cardsharp = joker(7, JokerKind::CardSharp);
 
     let jokers = vec![
@@ -933,7 +939,8 @@ fn test_scenario_five_of_a_kind_lvl3_nine_jokers_zero_discards() {
         joker(8, JokerKind::MysticSummit),
     ];
 
-    let levels = levels_with(HandType::FiveOfAKind, 3);
+    let mut levels = levels_with(HandType::FiveOfAKind, 3);
+    levels.get_mut(&HandType::FiveOfAKind).unwrap().played_this_round = 1; // CardSharp fires
     let r = score_hand(
         &played, &played, &jokers, &levels,
         3,   // hands_remaining
@@ -945,6 +952,7 @@ fn test_scenario_five_of_a_kind_lvl3_nine_jokers_zero_discards() {
         9,   // joker_slot_count (Blank + Antimatter + 3 Negative jokers)
         0,   // tarot_cards_used
         0,   // steel_count_in_deck
+        0,   // stone_count_in_deck
     );
 
     assert_eq!(r.hand_type, HandType::FiveOfAKind);

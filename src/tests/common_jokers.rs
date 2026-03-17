@@ -359,8 +359,9 @@ fn test_stone_joker_fires_on_stone_card() {
     let mut stone = card(0, Rank::Two, Suit::Spades);
     stone.enhancement = Enhancement::Stone;
     let played = vec![stone];
-    let r = score(&played, &played, &[joker(0, JokerKind::StoneJoker)]);
-    // Stone: base chip 50. StoneJoker +25 → 5+50+25=80, mult=1 → 80
+    // Pass empty hand to avoid double-counting the stone card in stone_count_in_deck
+    let r = score(&played, &[], &[joker(0, JokerKind::StoneJoker)]);
+    // HC base=5, Stone card chip_bonus=50, StoneJoker(1 stone in deck)=+25 → chips=80, mult=1 → 80
     assert_eq!(r.final_score as i64, 80);
 }
 
@@ -498,8 +499,8 @@ fn test_the_idol_does_not_fire_on_wrong_suit() {
 // =========================================================
 
 #[test]
-fn test_banner_adds_chips_per_hand_remaining() {
-    // Banner: +30 chips per remaining Hand (default 3 passed to score()) → +90 chips
+fn test_banner_adds_chips_per_discard_remaining() {
+    // Banner: +30 chips per remaining Discard (default 3 passed to score()) → +90 chips
     // High Card Ace: chips = 16 + 90 = 106, mult = 1 → 106
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
     let r = score(&played, &played, &[joker(0, JokerKind::Banner)]);
@@ -551,6 +552,7 @@ fn test_mystic_summit_fires_only_at_zero_discards() {
         5,
         0,
         0,
+        0,
     );
     // chips=16, mult=1+15=16 → 256
     assert_eq!(r2.final_score as i64, 256);
@@ -577,6 +579,7 @@ fn test_supernova_adds_mult_equal_to_times_played() {
         52,
         None,
         5,
+        0,
         0,
         0,
     );
@@ -753,20 +756,21 @@ fn test_flower_pot_fires_with_all_four_suits_in_scoring_cards() {
 }
 
 #[test]
-fn test_card_sharp_fires_when_hand_type_not_yet_played_this_round() {
+fn test_card_sharp_does_not_fire_on_first_play_this_round() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
     let r = score(&played, &played, &[joker(0, JokerKind::CardSharp)]);
-    // HC: 16 chips, mult=1*3=3 → 48
-    assert_eq!(r.final_score as i64, 48);
+    // HC: 16 chips, mult=1 (no X3 — hand not yet played this round) → 16
+    assert_eq!(r.final_score as i64, 16);
 }
 
 #[test]
-fn test_card_sharp_does_not_fire_when_hand_type_already_played() {
+fn test_card_sharp_fires_when_hand_type_already_played_this_round() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
     let mut levels = default_hand_levels();
     levels.get_mut(&HandType::HighCard).unwrap().played_this_round = 1;
-    let r = score_hand(&played, &played, &[joker(0, JokerKind::CardSharp)], &levels, 3, 3, 0, 40, 52, None, 5, 0, 0);
-    assert_eq!(r.final_score as i64, 16);
+    let r = score_hand(&played, &played, &[joker(0, JokerKind::CardSharp)], &levels, 3, 3, 0, 40, 52, None, 5, 0, 0, 0);
+    // HC: 16 chips, mult=1*3=3 → 48 (X3 because HighCard already played this round)
+    assert_eq!(r.final_score as i64, 48);
 }
 
 #[test]
@@ -867,16 +871,17 @@ fn test_drivers_license_does_not_fire_below_threshold() {
 #[test]
 fn test_erosion_fires_when_deck_is_smaller_than_starting_size() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
-    // deck_remaining=40, total_deck=52 → 12 below → +48 mult
-    let r = score_full(&played, &played, &[joker(0, JokerKind::Erosion)], 3, 3, 0, 40, 52, 5, 0);
-    // HC: 16*(1+48)=784
-    assert_eq!(r.final_score as i64, 784);
+    // total_deck=42 → 52-42=10 cards permanently removed → +40 mult
+    let r = score_full(&played, &played, &[joker(0, JokerKind::Erosion)], 3, 3, 0, 40, 42, 5, 0);
+    // HC: 16*(1+40)=656
+    assert_eq!(r.final_score as i64, 656);
 }
 
 #[test]
 fn test_erosion_does_not_fire_when_deck_is_full() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
-    let r = score_full(&played, &played, &[joker(0, JokerKind::Erosion)], 3, 3, 0, 52, 52, 5, 0);
+    // total_deck=52 → no cards removed → +0 mult
+    let r = score_full(&played, &played, &[joker(0, JokerKind::Erosion)], 3, 3, 0, 40, 52, 5, 0);
     assert_eq!(r.final_score as i64, 16);
 }
 

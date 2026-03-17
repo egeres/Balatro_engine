@@ -193,6 +193,9 @@ impl GameState {
         let steel_count_in_deck = self.deck.iter()
             .filter(|c| c.enhancement == Enhancement::Steel)
             .count();
+        let stone_count_in_deck = self.deck.iter()
+            .filter(|c| c.is_stone())
+            .count();
 
         // TheArm: decrease the level of the played poker hand by 1 (minimum 1) before scoring
         if let Some(BossBlind::TheArm) = self.boss_blind {
@@ -260,6 +263,7 @@ impl GameState {
             self.joker_slots as usize,
             self.tarot_cards_used,
             steel_count_in_deck,
+            stone_count_in_deck,
         );
 
         // CrimsonHeart: re-enable the temporarily disabled joker

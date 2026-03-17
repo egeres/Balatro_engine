@@ -212,9 +212,7 @@ pub(crate) fn calc_joker_individual(
             }
         }
         JokerKind::StoneJoker => {
-            if is_scoring && card.is_stone() {
-                effect.chips += 25;
-            }
+            // Handled in calc_joker_main (counts all Stone cards in full deck)
         }
         JokerKind::Hiker => {
             if is_scoring {
@@ -321,9 +319,9 @@ pub(crate) fn calc_joker_main(joker: &JokerInstance, ctx: &ScoringContext) -> Jo
             effect.mult += 4;
         }
         JokerKind::JokerStencil => {
-            // +1 mult for each empty joker slot
+            // X1 mult for each empty joker slot (multiplicative)
             let empty_slots = ctx.joker_slot_count.saturating_sub(ctx.joker_count);
-            effect.mult += empty_slots as i64;
+            effect.x_mult = 1.0 + empty_slots as f64;
         }
         JokerKind::AbstractJoker => {
             effect.mult += (ctx.joker_count as i64) * 3;
@@ -334,7 +332,7 @@ pub(crate) fn calc_joker_main(joker: &JokerInstance, ctx: &ScoringContext) -> Jo
             }
         }
         JokerKind::Banner => {
-            effect.chips += (ctx.hands_remaining as i64) * 30;
+            effect.chips += (ctx.discards_remaining as i64) * 30;
         }
         JokerKind::MysticSummit => {
             if ctx.discards_remaining == 0 {
@@ -358,8 +356,8 @@ pub(crate) fn calc_joker_main(joker: &JokerInstance, ctx: &ScoringContext) -> Jo
             effect.chips += (ctx.deck_cards_remaining as i64) * 2;
         }
         JokerKind::Erosion => {
-            // +4 mult for each card below starting deck size (52)
-            let below = (ctx.total_deck_size as i64 - ctx.deck_cards_remaining as i64).max(0);
+            // +4 mult for each card permanently removed from starting deck (52)
+            let below = (52i64 - ctx.total_deck_size as i64).max(0);
             effect.mult += below * 4;
         }
         JokerKind::Misprint => {
@@ -484,6 +482,10 @@ pub(crate) fn calc_joker_main(joker: &JokerInstance, ctx: &ScoringContext) -> Jo
                 effect.x_mult = xmult;
             }
         }
+        JokerKind::StoneJoker => {
+            // +25 Chips per Stone card in the full deck
+            effect.chips += ctx.stone_count_in_deck as i64 * 25;
+        }
         JokerKind::SteelJoker => {
             // +X0.2 Mult per Steel card in the full deck
             let steel_count = ctx.steel_count_in_deck;
@@ -540,13 +542,13 @@ pub(crate) fn calc_joker_main(joker: &JokerInstance, ctx: &ScoringContext) -> Jo
             effect.x_mult = 2.0;
         }
         JokerKind::CardSharp => {
-            // x3 if this hand type was not played this round
+            // x3 if this hand type was already played this round
             let played_this_round = ctx
                 .hand_levels
                 .get(&hand_type)
                 .map(|h| h.played_this_round)
                 .unwrap_or(0);
-            if played_this_round == 0 {
+            if played_this_round > 0 {
                 effect.x_mult = 3.0;
             }
         }
@@ -614,13 +616,13 @@ pub(crate) fn calc_joker_main(joker: &JokerInstance, ctx: &ScoringContext) -> Jo
             effect.mult += mult;
         }
         JokerKind::RaisedFist => {
-            // Adds double the chip value of the lowest-ranked scoring card
-            if let Some(min_chips) = scoring_cards.iter()
-                .map(|&i| played[i].base_chip_value() + played[i].chip_bonus())
+            // Adds double the rank value of the lowest card held in hand to Mult
+            if let Some(min_rank) = hand.iter()
+                .map(|c| c.base_chip_value())
                 .filter(|&v| v > 0)
                 .min()
             {
-                effect.chips += min_chips * 2;
+                effect.mult += min_rank * 2;
             }
         }
         JokerKind::BaseballCard => {
@@ -689,11 +691,11 @@ pub(crate) fn calc_joker_main(joker: &JokerInstance, ctx: &ScoringContext) -> Jo
             }
         }
         JokerKind::GoldenTicket => {
-            // +$1 per Gold enhancement card in scoring hand
+            // +$4 per Gold enhancement card in scoring hand
             let gold_count = scoring_cards.iter()
                 .filter(|&&i| played[i].enhancement == Enhancement::Gold)
                 .count();
-            effect.dollars += gold_count as i32;
+            effect.dollars += gold_count as i32 * 4;
         }
         JokerKind::LoyaltyCard => {
             // x4 mult every 6 hands played (triggered on 6th, 12th, 18th hand)

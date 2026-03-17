@@ -681,7 +681,7 @@ fn test_golden_joker_earns_4_dollars_at_end_of_round() {
 }
 
 // =========================================================
-// GoldenTicket: +$1 per Gold card in scoring hand
+// GoldenTicket: +$4 per Gold card in scoring hand
 // =========================================================
 
 #[test]
@@ -691,7 +691,7 @@ fn test_golden_ticket_earns_dollar_per_gold_card() {
     let played = vec![gold_ace];
     let jokers = vec![joker(0, JokerKind::GoldenTicket)];
     let r = score(&played, &played, &jokers);
-    assert_eq!(r.dollars_earned, 1, "GoldenTicket should earn $1 per Gold card in scoring hand");
+    assert_eq!(r.dollars_earned, 4, "GoldenTicket should earn $4 per Gold card in scoring hand");
 }
 
 #[test]
@@ -703,7 +703,7 @@ fn test_golden_ticket_earns_multiple_dollars_for_multiple_gold_cards() {
     let played = vec![gold_ace, gold_ace2];
     let jokers = vec![joker(0, JokerKind::GoldenTicket)];
     let r = score(&played, &played, &jokers);
-    assert_eq!(r.dollars_earned, 2, "GoldenTicket should earn $2 for 2 Gold cards");
+    assert_eq!(r.dollars_earned, 8, "GoldenTicket should earn $8 for 2 Gold cards");
 }
 
 #[test]
@@ -836,7 +836,7 @@ fn test_loyalty_card_fires_on_5th_modulo_6_total_plays() {
     // Set high card played=5 total
     levels.get_mut(&HandType::HighCard).unwrap().played = 5;
 
-    let r = score_hand(&played, &played, &jokers, &levels, 3, 3, 0, 40, 52, None, 5, 0, 0);
+    let r = score_hand(&played, &played, &jokers, &levels, 3, 3, 0, 40, 52, None, 5, 0, 0, 0);
     // x4 mult → HC: 16*4=64
     assert_eq!(r.final_score as i64, 64);
 }
@@ -849,7 +849,7 @@ fn test_loyalty_card_does_not_fire_on_other_totals() {
     let mut levels = default_hand_levels();
     levels.get_mut(&HandType::HighCard).unwrap().played = 3;
 
-    let r = score_hand(&played, &played, &jokers, &levels, 3, 3, 0, 40, 52, None, 5, 0, 0);
+    let r = score_hand(&played, &played, &jokers, &levels, 3, 3, 0, 40, 52, None, 5, 0, 0, 0);
     // No x4, just HC: 16*1=16
     assert_eq!(r.final_score as i64, 16);
 }
@@ -1131,20 +1131,19 @@ fn test_oops_all_6s_does_not_crash_during_round() {
 }
 
 // =========================================================
-// RaisedFist: +2x lowest scoring card chip value
+// RaisedFist: +2x rank of lowest held card to Mult
 // =========================================================
 
 #[test]
-fn test_raised_fist_doubles_lowest_card_chips() {
-    // Two of Spades = 2 chips (lowest), Ace = 11 chips
-    // Pair of 2s: chips = 2+2+10 base + 2*2*2 raised = ?
-    // Simpler: HC with just a Two
-    let played = vec![card(0, Rank::Two, Suit::Spades)];
-    let r_with = score(&played, &played, &[joker(0, JokerKind::RaisedFist)]);
-    let r_without = score(&played, &played, &[]);
-    // Two = 2 chips; RaisedFist adds 2*2=4 chips
-    assert_eq!((r_with.final_chips - r_without.final_chips) as i64, 4,
-        "RaisedFist should add 2x the lowest scoring card's chips");
+fn test_raised_fist_doubles_lowest_held_card_rank_to_mult() {
+    // Play Ace, hold Two in hand — Two is the lowest held card (rank value = 2)
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let hand = vec![card(1, Rank::Two, Suit::Clubs)];
+    let r_with = score(&played, &hand, &[joker(0, JokerKind::RaisedFist)]);
+    let r_without = score(&played, &hand, &[]);
+    // Two rank = 2; RaisedFist adds 2*2=4 Mult
+    assert_eq!((r_with.final_mult - r_without.final_mult) as i64, 4,
+        "RaisedFist should add 2x the rank of the lowest held card to Mult");
 }
 
 // =========================================================
