@@ -199,46 +199,29 @@ impl PackKind {
 
     pub fn cards_shown(&self) -> usize {
         match self {
-            PackKind::ArcanaPackSmall
-            | PackKind::CelestialPackSmall
-            | PackKind::SpectralPackSmall
-            | PackKind::StandardPackSmall
-            | PackKind::BuffoonPackSmall => 3,
-            PackKind::ArcanaPack
-            | PackKind::CelestialPack
-            | PackKind::SpectralPack
-            | PackKind::StandardPack
-            | PackKind::BuffoonPack => 3,
-            PackKind::ArcanaPackJumbo
-            | PackKind::CelestialPackJumbo
-            | PackKind::SpectralPackJumbo
-            | PackKind::StandardPackJumbo
-            | PackKind::BuffoonPackJumbo => 5,
-            PackKind::ArcanaPackMega
-            | PackKind::CelestialPackMega
-            | PackKind::SpectralPackMega
-            | PackKind::StandardPackMega
-            | PackKind::BuffoonPackMega => 5,
+            // Arcana/Celestial/Standard: Normal=3, Jumbo=5, Mega=5
+            PackKind::ArcanaPackSmall | PackKind::ArcanaPack => 3,
+            PackKind::CelestialPackSmall | PackKind::CelestialPack => 3,
+            PackKind::StandardPackSmall | PackKind::StandardPack => 3,
+            PackKind::ArcanaPackJumbo | PackKind::ArcanaPackMega => 5,
+            PackKind::CelestialPackJumbo | PackKind::CelestialPackMega => 5,
+            PackKind::StandardPackJumbo | PackKind::StandardPackMega => 5,
+            // Buffoon/Spectral: Normal=2, Jumbo=4, Mega=4
+            PackKind::BuffoonPackSmall | PackKind::BuffoonPack => 2,
+            PackKind::SpectralPackSmall | PackKind::SpectralPack => 2,
+            PackKind::BuffoonPackJumbo | PackKind::BuffoonPackMega => 4,
+            PackKind::SpectralPackJumbo | PackKind::SpectralPackMega => 4,
         }
     }
 
     pub fn picks_allowed(&self) -> usize {
         match self {
-            PackKind::ArcanaPackSmall
-            | PackKind::CelestialPackSmall
-            | PackKind::SpectralPackSmall
-            | PackKind::StandardPackSmall
-            | PackKind::BuffoonPackSmall => 1,
-            PackKind::ArcanaPack
-            | PackKind::CelestialPack
-            | PackKind::SpectralPack
-            | PackKind::StandardPack
-            | PackKind::BuffoonPack => 1,
-            PackKind::ArcanaPackJumbo
-            | PackKind::CelestialPackJumbo
-            | PackKind::SpectralPackJumbo
-            | PackKind::StandardPackJumbo
-            | PackKind::BuffoonPackJumbo => 2,
+            // Normal and Jumbo: choose 1; Mega: choose up to 2
+            PackKind::ArcanaPackSmall | PackKind::ArcanaPack | PackKind::ArcanaPackJumbo => 1,
+            PackKind::CelestialPackSmall | PackKind::CelestialPack | PackKind::CelestialPackJumbo => 1,
+            PackKind::SpectralPackSmall | PackKind::SpectralPack | PackKind::SpectralPackJumbo => 1,
+            PackKind::StandardPackSmall | PackKind::StandardPack | PackKind::StandardPackJumbo => 1,
+            PackKind::BuffoonPackSmall | PackKind::BuffoonPack | PackKind::BuffoonPackJumbo => 1,
             PackKind::ArcanaPackMega
             | PackKind::CelestialPackMega
             | PackKind::SpectralPackMega

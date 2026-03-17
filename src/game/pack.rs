@@ -132,12 +132,8 @@ impl GameState {
             PackCard::Consumable(c) => {
                 if self.consumables.len() < self.consumable_slots as usize {
                     self.consumables.push(c.clone());
-                    // Track planet/tarot usage
-                    match c {
-                        ConsumableCard::Planet(_) => self.planet_cards_used += 1,
-                        ConsumableCard::Tarot(_) => self.tarot_cards_used += 1,
-                        _ => {}
-                    }
+                    // Note: planet_cards_used / tarot_cards_used are incremented in use_consumable,
+                    // not here — counting on pick would double-count when the card is later used.
                     // Apply planet/tarot immediately? No - user uses it separately via use_consumable
 
                     // Hallucination: 1/2 chance to create a tarot card when picking a consumable from a pack
