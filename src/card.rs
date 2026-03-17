@@ -10,6 +10,9 @@ pub struct CardInstance {
     pub edition: Edition,
     pub seal: Seal,
     pub debuffed: bool,
+    /// Card is face-down (hidden from player): TheFish draws all new cards face-down;
+    /// TheWheel has a 1-in-7 chance per card. Cards still score normally.
+    pub face_down: bool,
     /// For chip_modifier from Hiker/Wee Joker/etc
     pub extra_chips: i64,
     /// For flip cards (Certificate joker)
@@ -26,6 +29,7 @@ impl CardInstance {
             edition: Edition::None,
             seal: Seal::None,
             debuffed: false,
+            face_down: false,
             extra_chips: 0,
             extra_mult: 0,
         }

@@ -113,6 +113,11 @@ impl GameState {
         self.draw_pile = (0..self.deck.len()).collect();
         self.rng.shuffle(&mut self.draw_pile);
 
+        // Reset face-down state for all cards
+        for card in self.deck.iter_mut() {
+            card.face_down = false;
+        }
+
         // Apply boss blind debuffs to cards
         self.apply_boss_blind_debuffs();
 
@@ -232,6 +237,39 @@ impl GameState {
         while self.hand.len() < hand_size && !self.draw_pile.is_empty() {
             let card_idx = self.draw_pile.remove(0);
             self.hand.push(card_idx);
+        }
+
+        // TheFish: all newly drawn cards after the first hand are face-down
+        // TheWheel: each newly drawn card has a 1-in-7 chance of being face-down
+        if matches!(self.current_blind, BlindKind::Boss) {
+            let luchador_active = self.jokers.iter().any(|j| {
+                (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
+            });
+            if !luchador_active {
+                let newly_drawn = start_hand_len..self.hand.len();
+                match self.boss_blind {
+                    Some(BossBlind::TheFish) => {
+                        // All cards face-down after the initial draw.
+                        // After the first play, hands_remaining < effective_max_hands().
+                        if self.hands_remaining < self.effective_max_hands() {
+                            for hand_idx in newly_drawn {
+                                let card_idx = self.hand[hand_idx];
+                                self.deck[card_idx].face_down = true;
+                            }
+                        }
+                    }
+                    Some(BossBlind::TheWheel) => {
+                        // 1-in-7 chance per newly drawn card
+                        for hand_idx in newly_drawn {
+                            if self.rng.range_usize(0, 6) == 0 {
+                                let card_idx = self.hand[hand_idx];
+                                self.deck[card_idx].face_down = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
 
         // CeruleanBell: one random newly-drawn card is always selected (forced)

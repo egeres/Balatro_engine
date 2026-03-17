@@ -108,8 +108,8 @@ pub fn score_hand(
     if let Some(boss) = boss_blind {
         match boss {
             BossBlind::TheFlint => {
-                chips = (chips / 2.0).floor();
-                mult = (mult / 2.0).floor();
+                chips = (chips / 2.0).ceil();
+                mult = (mult / 2.0).ceil();
                 events.push(ScoreEvent {
                     source: "The Flint".to_string(),
                     kind: ScoreEventKind::XMult,

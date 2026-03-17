@@ -356,6 +356,7 @@ impl GameState {
         sorted_sel.sort_by(|a, b| b.cmp(a));
         for si in &sorted_sel {
             let card_idx = self.hand.remove(*si);
+            self.deck[card_idx].face_down = false;
             self.discard_pile.push(card_idx);
         }
         self.selected_indices.clear();
@@ -417,6 +418,7 @@ impl GameState {
                         if self.hand.is_empty() { break; }
                         let pick = self.rng.range_usize(0, self.hand.len() - 1);
                         let card_idx = self.hand.remove(pick);
+                        self.deck[card_idx].face_down = false;
                         self.discard_pile.push(card_idx);
                     }
                 }
@@ -730,6 +732,7 @@ impl GameState {
         sorted_sel.sort_by(|a, b| b.cmp(a));
         for si in &sorted_sel {
             let card_idx = self.hand.remove(*si);
+            self.deck[card_idx].face_down = false;
             self.discard_pile.push(card_idx);
 
             // Purple Seal: create tarot when discarded
