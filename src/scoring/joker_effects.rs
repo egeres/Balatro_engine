@@ -596,11 +596,8 @@ pub(crate) fn calc_joker_main(joker: &JokerInstance, ctx: &ScoringContext) -> Jo
             }
         }
         JokerKind::DriversLicense => {
-            // x3 if 16+ enhanced cards in full deck (approximated by hand + scoring)
-            let enhanced_in_hand = hand.iter().filter(|c| c.enhancement != Enhancement::None).count();
-            let enhanced_in_play = played.iter().filter(|c| c.enhancement != Enhancement::None).count();
-            if enhanced_in_hand + enhanced_in_play >= 8 {
-                // simplified threshold
+            // x3 if 16+ enhanced cards in full deck
+            if ctx.enhanced_count_in_deck >= 16 {
                 effect.x_mult = 3.0;
             }
         }

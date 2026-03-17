@@ -14,6 +14,7 @@ impl GameState {
             ConsumableCard::Planet(p) => {
                 self.apply_planet(*p);
                 self.planet_cards_used += 1;
+                self.planet_types_used.insert(*p);
             }
             ConsumableCard::Tarot(t) => {
                 self.apply_tarot(*t, &targets)?;

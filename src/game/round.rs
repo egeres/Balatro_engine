@@ -218,6 +218,9 @@ impl GameState {
         let stone_count_in_deck = self.deck.iter()
             .filter(|c| c.is_stone())
             .count();
+        let enhanced_count_in_deck = self.deck.iter()
+            .filter(|c| c.enhancement != Enhancement::None)
+            .count();
 
         // TheArm: decrease the level of the played poker hand by 1 (minimum 1) before scoring
         if let Some(BossBlind::TheArm) = self.boss_blind {
@@ -286,6 +289,7 @@ impl GameState {
             self.tarot_cards_used,
             steel_count_in_deck,
             stone_count_in_deck,
+            enhanced_count_in_deck,
         );
 
         // CrimsonHeart: re-enable the temporarily disabled joker
@@ -543,14 +547,6 @@ impl GameState {
                         self.jokers[i].active = false;
                     }
                 }
-                JokerKind::Popcorn => {
-                    let cur = self.jokers[i].get_counter_i64("mult");
-                    let new = (cur - 4).max(0);
-                    self.jokers[i].set_counter_i64("mult", new);
-                    if new == 0 {
-                        self.jokers[i].active = false;
-                    }
-                }
                 JokerKind::SquareJoker => {
                     // +4 chips if 4 cards played exactly
                     if played.len() == 4 {
@@ -729,6 +725,15 @@ impl GameState {
                         }
                     }
                 }
+                JokerKind::Hiker => {
+                    // Permanently add +5 chips to each scoring card in the deck
+                    for &sci in &result.scoring_card_indices {
+                        let card_id = played[sci].id;
+                        if let Some(deck_card) = self.deck.iter_mut().find(|c| c.id == card_id) {
+                            deck_card.extra_chips += 5;
+                        }
+                    }
+                }
                 JokerKind::MidasMask => {
                     // Face cards scored become Gold enhancement
                     for &sci in &result.scoring_card_indices {
@@ -742,7 +747,7 @@ impl GameState {
                     }
                 }
                 JokerKind::Dna => {
-                    // On the first hand of a round, if only 1 card was played, add a permanent copy to deck
+                    // On the first hand of a round, if only 1 card was played, add a permanent copy to deck and draw it
                     let max_h = self.effective_max_hands();
                     let was_first_hand = self.hands_remaining + 1 == max_h;
                     if was_first_hand && played.len() == 1 {
@@ -752,7 +757,8 @@ impl GameState {
                         new_card.id = new_id;
                         let deck_idx = self.deck.len();
                         self.deck.push(new_card);
-                        self.draw_pile.push(deck_idx);
+                        // Draw directly to hand (wiki: "draw it to your hand")
+                        self.hand.push(deck_idx);
                     }
                 }
                 _ => {}
@@ -957,8 +963,8 @@ impl GameState {
             }
         }
 
-        // Satellite: +$1 per unique planet type used this run
-        let planet_types_used = self.planet_cards_used.min(9); // 9 unique planet types max
+        // Satellite: +$1 per unique planet type used this run (12 possible types)
+        let planet_types_used = self.planet_types_used.len();
         let satellite_count = self.jokers.iter().filter(|j| j.kind == JokerKind::Satellite && j.active).count();
         self.money += planet_types_used as i32 * satellite_count as i32;
 
@@ -1000,22 +1006,23 @@ impl GameState {
             }
         }
 
-        // InvisibleJoker: after 2 rounds, duplicate a random joker for free
+        // Popcorn: -4 mult per round (not per hand); destroyed when mult reaches 0
+        for i in 0..self.jokers.len() {
+            if self.jokers[i].kind == JokerKind::Popcorn && self.jokers[i].active {
+                let cur = self.jokers[i].get_counter_i64("mult");
+                let new = (cur - 4).max(0);
+                self.jokers[i].set_counter_i64("mult", new);
+                if new == 0 && !self.jokers[i].eternal {
+                    self.jokers[i].active = false;
+                }
+            }
+        }
+
+        // InvisibleJoker: increment round counter each round (duplication happens on sell, not here)
         for i in 0..self.jokers.len() {
             if self.jokers[i].kind == JokerKind::InvisibleJoker && self.jokers[i].active {
                 let rounds = self.jokers[i].get_counter_i64("rounds") + 1;
-                self.jokers[i].set_counter_i64("rounds", rounds % 2);
-                if rounds >= 2 && self.jokers.len() < self.joker_slots as usize {
-                    // Find a random joker that is not InvisibleJoker itself
-                    let candidates: Vec<usize> = (0..self.jokers.len())
-                        .filter(|&j| j != i && self.jokers[j].active && self.jokers[j].kind != JokerKind::InvisibleJoker)
-                        .collect();
-                    if !candidates.is_empty() {
-                        let pick = self.rng.range_usize(0, candidates.len() - 1);
-                        let dup = self.jokers[candidates[pick]].clone();
-                        self.jokers.push(dup);
-                    }
-                }
+                self.jokers[i].set_counter_i64("rounds", rounds);
             }
         }
 

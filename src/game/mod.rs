@@ -21,6 +21,8 @@ pub struct GameState {
     pub tags: Vec<TagKind>,
     pub tarot_cards_used: u32,
     pub planet_cards_used: u32,
+    /// Tracks which distinct PlanetCard types have been used this run (for Satellite joker)
+    pub planet_types_used: std::collections::HashSet<PlanetCard>,
 
     // Blind state
     pub current_blind: BlindKind,
@@ -142,6 +144,7 @@ impl GameState {
             tags: Vec::new(),
             tarot_cards_used: 0,
             planet_cards_used: 0,
+            planet_types_used: std::collections::HashSet::new(),
             current_blind: BlindKind::Small,
             boss_blind: None,
             score_goal: 0.0,

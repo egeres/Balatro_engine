@@ -57,6 +57,8 @@ pub struct ScoringContext<'a> {
     pub steel_count_in_deck: usize,
     /// Number of Stone-enhanced cards in the entire deck (used by Stone Joker)
     pub stone_count_in_deck: usize,
+    /// Number of enhanced (non-None) cards in the entire deck (used by Driver's License)
+    pub enhanced_count_in_deck: usize,
 }
 
 /// Score a played hand given game state
@@ -75,6 +77,7 @@ pub fn score_hand(
     tarot_cards_used: u32,
     steel_count_in_deck: usize,
     stone_count_in_deck: usize,
+    enhanced_count_in_deck: usize,
 ) -> ScoreResult {
     let has_four_fingers = jokers.iter().any(|j| j.kind == JokerKind::FourFingers && j.active);
     let has_shortcut = jokers.iter().any(|j| j.kind == JokerKind::Shortcut && j.active);
@@ -302,6 +305,7 @@ pub fn score_hand(
             tarot_cards_used,
             steel_count_in_deck,
             stone_count_in_deck,
+            enhanced_count_in_deck,
         };
         let effect = calc_joker_main(joker, &ctx);
         chips += effect.chips as f64;

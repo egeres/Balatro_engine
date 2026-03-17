@@ -786,11 +786,11 @@ fn test_hallucination_does_not_crash_when_picking_consumable_from_pack() {
 }
 
 // =========================================================
-// InvisibleJoker: after 2 rounds, duplicates a joker
+// InvisibleJoker: after 2 rounds, sell it to duplicate a random other joker
 // =========================================================
 
 #[test]
-fn test_invisible_joker_duplicates_after_two_rounds() {
+fn test_invisible_joker_duplicates_when_sold_after_two_rounds() {
     let mut gs = make_game();
     gs.jokers.push(joker(1, JokerKind::InvisibleJoker));
     gs.jokers.push(joker(2, JokerKind::Joker));
@@ -800,25 +800,49 @@ fn test_invisible_joker_duplicates_after_two_rounds() {
     setup_round(&mut gs, cards.clone(), 1);
     gs.score_goal = 1.0;
 
-    // Round 1
+    // Round 1 — counter becomes 1
     gs.select_card(0).unwrap();
     gs.play_hand().unwrap();
-    // Now in Shop
-    let joker_count_after_r1 = gs.jokers.len();
 
-    // Go to next blind
+    // Go to round 2
     gs.state = GameStateKind::BlindSelect;
     gs.current_blind = crate::game::BlindKind::Small;
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
     gs.score_goal = 1.0;
 
-    // Round 2
+    // Round 2 — counter becomes 2
     gs.select_card(0).unwrap();
     gs.play_hand().unwrap();
 
-    // After 2 rounds, InvisibleJoker should have triggered and duplicated Joker
-    assert!(gs.jokers.len() > joker_count_after_r1,
-        "InvisibleJoker should duplicate a joker after 2 rounds");
+    // No auto-duplication yet — must sell to trigger
+    let count_before_sell = gs.jokers.len();
+
+    // Sell InvisibleJoker (index 0) — should create a copy of Joker
+    gs.sell_joker(0).unwrap();
+    assert!(gs.jokers.len() > count_before_sell - 1,
+        "Selling InvisibleJoker after 2+ rounds should duplicate another joker");
+}
+
+#[test]
+fn test_invisible_joker_does_not_duplicate_before_two_rounds() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(1, JokerKind::InvisibleJoker));
+    gs.jokers.push(joker(2, JokerKind::Joker));
+    gs.joker_slots = 10;
+
+    let cards = vec![card(0, Rank::Ace, Suit::Spades)];
+    setup_round(&mut gs, cards.clone(), 1);
+    gs.score_goal = 1.0;
+
+    // Only 1 round — counter = 1, not yet 2
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+
+    let count_before_sell = gs.jokers.len();
+    gs.sell_joker(0).unwrap();
+    // Should NOT duplicate (only 1 round elapsed)
+    assert_eq!(gs.jokers.len(), count_before_sell - 1,
+        "InvisibleJoker should NOT duplicate when sold before 2 rounds");
 }
 
 // =========================================================
@@ -848,7 +872,7 @@ fn test_loyalty_card_fires_on_5th_modulo_6_total_plays() {
     // Set high card played=5 total
     levels.get_mut(&HandType::HighCard).unwrap().played = 5;
 
-    let r = score_hand(&played, &played, &jokers, &levels, 3, 3, 0, 40, 52, None, 5, 0, 0, 0);
+    let r = score_hand(&played, &played, &jokers, &levels, 3, 3, 0, 40, 52, None, 5, 0, 0, 0, 0);
     // x4 mult → HC: 16*4=64
     assert_eq!(r.final_score as i64, 64);
 }
@@ -861,7 +885,7 @@ fn test_loyalty_card_does_not_fire_on_other_totals() {
     let mut levels = default_hand_levels();
     levels.get_mut(&HandType::HighCard).unwrap().played = 3;
 
-    let r = score_hand(&played, &played, &jokers, &levels, 3, 3, 0, 40, 52, None, 5, 0, 0, 0);
+    let r = score_hand(&played, &played, &jokers, &levels, 3, 3, 0, 40, 52, None, 5, 0, 0, 0, 0);
     // No x4, just HC: 16*1=16
     assert_eq!(r.final_score as i64, 16);
 }

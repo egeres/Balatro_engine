@@ -291,7 +291,22 @@ impl GameState {
             }
         }
 
+        // InvisibleJoker: when sold after 2+ rounds, duplicate a random other joker
+        let is_invisible = self.jokers[joker_index].kind == JokerKind::InvisibleJoker;
+        let invisible_rounds = self.jokers[joker_index].get_counter_i64("rounds");
+
         self.jokers.remove(joker_index);
+
+        if is_invisible && invisible_rounds >= 2 && self.jokers.len() < self.joker_slots as usize {
+            let candidates: Vec<usize> = (0..self.jokers.len())
+                .filter(|&j| self.jokers[j].active && self.jokers[j].kind != JokerKind::InvisibleJoker)
+                .collect();
+            if !candidates.is_empty() {
+                let pick = self.rng.range_usize(0, candidates.len() - 1);
+                let dup = self.jokers[candidates[pick]].clone();
+                self.jokers.push(dup);
+            }
+        }
 
         // VerdantLeaf: first joker sold lifts the all-cards-debuffed effect
         if let Some(BossBlind::VerdantLeaf) = self.boss_blind {

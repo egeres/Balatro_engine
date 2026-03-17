@@ -96,6 +96,9 @@ pub fn score(
         played.iter().chain(hand.iter())
             .filter(|c| c.is_stone())
             .count(),
+        played.iter().chain(hand.iter())
+            .filter(|c| c.enhancement != Enhancement::None)
+            .count(),
     )
 }
 
@@ -130,6 +133,9 @@ pub fn score_full(
             .count(),
         played.iter().chain(hand.iter())
             .filter(|c| c.is_stone())
+            .count(),
+        played.iter().chain(hand.iter())
+            .filter(|c| c.enhancement != Enhancement::None)
             .count(),
     )
 }

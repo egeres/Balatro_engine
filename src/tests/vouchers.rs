@@ -237,7 +237,7 @@ fn test_observatory_increases_flush_score() {
     gs_no_obs.use_consumable(0, vec![]).unwrap();
     let result_no_obs = score_hand(
         &played, &[], &[], &gs_no_obs.hand_levels,
-        3, 3, 0, 40, 52, None, 5, 0, 0, 0,
+        3, 3, 0, 40, 52, None, 5, 0, 0, 0, 0,
     );
     assert_eq!(result_no_obs.final_score as i64, 426,
         "Without Observatory: L2 Flush score should be 426");
@@ -248,7 +248,7 @@ fn test_observatory_increases_flush_score() {
     gs.use_consumable(0, vec![]).unwrap();
     let result = score_hand(
         &played, &[], &[], &gs.hand_levels,
-        3, 3, 0, 40, 52, None, 5, 0, 0, 0,
+        3, 3, 0, 40, 52, None, 5, 0, 0, 0, 0,
     );
     assert_eq!(result.final_score as i64, 639,
         "Observatory should give X1.5 on Flush: expected 639, got {}",

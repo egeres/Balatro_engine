@@ -603,6 +603,7 @@ fn test_mystic_summit_fires_only_at_zero_discards() {
         0,
         0,
         0,
+        0,
     );
     // chips=16, mult=1+15=16 → 256
     assert_eq!(r2.final_score as i64, 256);
@@ -629,6 +630,7 @@ fn test_supernova_adds_mult_equal_to_times_played() {
         52,
         None,
         5,
+        0,
         0,
         0,
         0,
@@ -818,7 +820,7 @@ fn test_card_sharp_fires_when_hand_type_already_played_this_round() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
     let mut levels = default_hand_levels();
     levels.get_mut(&HandType::HighCard).unwrap().played_this_round = 1;
-    let r = score_hand(&played, &played, &[joker(0, JokerKind::CardSharp)], &levels, 3, 3, 0, 40, 52, None, 5, 0, 0, 0);
+    let r = score_hand(&played, &played, &[joker(0, JokerKind::CardSharp)], &levels, 3, 3, 0, 40, 52, None, 5, 0, 0, 0, 0);
     // HC: 16 chips, mult=1*3=3 → 48 (X3 because HighCard already played this round)
     assert_eq!(r.final_score as i64, 48);
 }
@@ -896,7 +898,8 @@ fn test_fortune_teller_adds_mult_per_tarot_used() {
 #[test]
 fn test_drivers_license_fires_with_enough_enhanced_cards() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
-    let hand: Vec<CardInstance> = (0..8).map(|i| {
+    // 16 enhanced cards in hand to meet full-deck threshold of 16
+    let hand: Vec<CardInstance> = (0..16).map(|i| {
         let mut c = card(i + 10, Rank::Two, Suit::Hearts);
         c.enhancement = Enhancement::Bonus;
         c
