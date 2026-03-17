@@ -97,6 +97,10 @@ pub fn score_hand(
 
     let mut chips: f64 = level_data.chips(hand_type) as f64;
     let mut mult: f64 = level_data.mult(hand_type) as f64;
+    // Observatory voucher: accumulated X1.5 per planet use for this hand type
+    if level_data.observatory_x_mult != 1.0 {
+        mult *= level_data.observatory_x_mult;
+    }
     let mut dollars_earned: i32 = 0;
     let mut events: Vec<ScoreEvent> = Vec::new();
 

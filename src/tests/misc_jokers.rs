@@ -214,10 +214,21 @@ fn test_certificate_adds_card_to_deck_on_blind_set() {
 
     // Should have added 1 card to deck
     assert_eq!(gs.deck.len(), deck_size_before + 1);
-    // The added card should have a non-None enhancement
+    // The added card should have a non-None seal (wiki: Certificate adds card with random seal)
     let last_card = gs.deck.last().unwrap();
-    assert_ne!(last_card.enhancement, Enhancement::None,
-        "Certificate should add an enhanced card");
+    assert_ne!(last_card.seal, Seal::None,
+        "Certificate should add a card with a random seal");
+}
+
+#[test]
+fn test_certificate_card_has_no_enhancement() {
+    // Certificate gives a seal, NOT an enhancement
+    let mut gs = make_game();
+    gs.jokers.push(joker(1, JokerKind::Certificate));
+    gs.select_blind().unwrap();
+    let last_card = gs.deck.last().unwrap();
+    assert_eq!(last_card.enhancement, Enhancement::None,
+        "Certificate card must have no enhancement (seal only)");
 }
 
 // =========================================================
@@ -867,9 +878,9 @@ fn test_mail_in_rebate_earns_per_matching_rank_discard() {
     gs.select_card(1).unwrap(); // Two of Hearts
     gs.discard_hand().unwrap();
 
-    // 2 Twos discarded → +$6
-    assert_eq!(gs.money, money_before + 6,
-        "MailInRebate should pay $3 per matching rank card discarded");
+    // 2 Twos discarded → +$10 ($5 each)
+    assert_eq!(gs.money, money_before + 10,
+        "MailInRebate should pay $5 per matching rank card discarded");
 }
 
 #[test]

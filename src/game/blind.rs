@@ -336,24 +336,20 @@ impl GameState {
                     }
                 }
                 JokerKind::Certificate => {
-                    // Add a playing card with a random enhancement to the hand
+                    // Add a playing card with a random seal to the hand
                     let suits = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds];
                     let ranks = [
                         Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six,
                         Rank::Seven, Rank::Eight, Rank::Nine, Rank::Ten,
                         Rank::Jack, Rank::Queen, Rank::King, Rank::Ace,
                     ];
-                    let enhancements = [
-                        Enhancement::Mult, Enhancement::Bonus, Enhancement::Wild,
-                        Enhancement::Glass, Enhancement::Steel, Enhancement::Stone,
-                        Enhancement::Gold, Enhancement::Lucky,
-                    ];
+                    let seals = [Seal::Gold, Seal::Red, Seal::Blue, Seal::Purple];
                     let suit_idx = self.rng.range_usize(0, 3);
                     let rank_idx = self.rng.range_usize(0, 12);
-                    let enh_idx = self.rng.range_usize(0, enhancements.len() - 1);
+                    let seal_idx = self.rng.range_usize(0, seals.len() - 1);
                     let new_id = self.next_id();
                     let mut new_card = CardInstance::new(new_id, ranks[rank_idx], suits[suit_idx]);
-                    new_card.enhancement = enhancements[enh_idx];
+                    new_card.seal = seals[seal_idx];
                     let deck_idx = self.deck.len();
                     self.deck.push(new_card);
                     self.draw_pile.push(deck_idx);

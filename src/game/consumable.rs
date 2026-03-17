@@ -51,6 +51,10 @@ impl GameState {
         let hand_type = planet.hand_type();
         if let Some(level) = self.hand_levels.get_mut(&hand_type) {
             level.level += 1;
+            // Observatory: each planet use gives X1.5 Mult for this hand type
+            if self.vouchers.contains(&VoucherKind::Observatory) {
+                level.observatory_x_mult *= 1.5;
+            }
         }
         self.last_consumable_used = Some(LastConsumable::Planet(planet));
         self.history.push(HistoryEvent {

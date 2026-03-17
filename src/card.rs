@@ -346,6 +346,8 @@ pub struct HandLevelData {
     pub played: u32,
     pub played_this_round: u32,
     pub visible: bool,
+    /// Cumulative X1.5 multiplier stacked by Observatory voucher each time a Planet card is used
+    pub observatory_x_mult: f64,
 }
 
 impl HandLevelData {
@@ -355,6 +357,7 @@ impl HandLevelData {
             played: 0,
             played_this_round: 0,
             visible,
+            observatory_x_mult: 1.0,
         }
     }
 

@@ -629,7 +629,7 @@ impl GameState {
             self.money += 5 * count as i32;
         }
 
-        // MailInRebate: +$3 for each discarded card matching the tracked rank
+        // MailInRebate: +$5 for each discarded card matching the tracked rank
         for j_idx in 0..self.jokers.len() {
             if self.jokers[j_idx].kind == JokerKind::MailInRebate && self.jokers[j_idx].active {
                 let rank_str = self.jokers[j_idx].counters.get("rank").and_then(|v| v.as_str()).unwrap_or("Two").to_string();
@@ -650,7 +650,7 @@ impl GameState {
                     _ => Rank::Two,
                 };
                 let matching = discarded_cards.iter().filter(|c| c.rank == target_rank).count();
-                self.money += 3 * matching as i32;
+                self.money += 5 * matching as i32;
             }
         }
 
@@ -743,6 +743,12 @@ impl GameState {
     fn win_round(&mut self) {
         let blind_dollars = self.blind_reward_dollars();
         self.money += blind_dollars;
+
+        // Gold Card enhancement: $3 per Gold card held in hand at end of round
+        let gold_cards_in_hand = self.hand.iter()
+            .filter(|&&di| self.deck[di].enhancement == Enhancement::Gold && !self.deck[di].debuffed)
+            .count();
+        self.money += 3 * gold_cards_in_hand as i32;
 
         // GoldenJoker: +$4 at end of round
         let golden_joker_count = self.jokers.iter().filter(|j| j.kind == JokerKind::GoldenJoker && j.active).count();
@@ -862,6 +868,15 @@ impl GameState {
             BlindKind::Small => self.blind_defeated_this_ante[0] = true,
             BlindKind::Big => self.blind_defeated_this_ante[1] = true,
             BlindKind::Boss => self.blind_defeated_this_ante[2] = true,
+        }
+
+        // Campfire: reset x_mult to X1 when Boss Blind is defeated
+        if matches!(self.current_blind, BlindKind::Boss) {
+            for j in self.jokers.iter_mut() {
+                if j.kind == JokerKind::Campfire && j.active {
+                    j.set_counter_f64("x_mult", 1.0);
+                }
+            }
         }
 
         // Anaglyph deck: gain a Double Tag (DoubleFun) after defeating each Boss Blind
