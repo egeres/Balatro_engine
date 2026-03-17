@@ -990,3 +990,100 @@ fn test_scenario_swap_jokers_changes_blueprint_scoring_across_rounds() {
         "Round 2: [Blueprint, Joker] should score 144"
     );
 }
+
+// ─────────────────────────────────────────────────────────────
+// Scenario 16 – four jokers, three swaps, four distinct scores
+// ─────────────────────────────────────────────────────────────
+//
+// Jokers in play: Joker(0), Blueprint(1), AbstractJoker(2), Brainstorm(3).
+// AbstractJoker gives +3×(joker count) = +3×4 = +12 mult throughout.
+// All rounds play a single Ace as High Card: chips=16, base mult=1.
+//
+// Blueprint (BP): copies the joker immediately to its right (skips BP/BS).
+// Brainstorm (BS): copies the leftmost non-BP/BS joker in the list.
+//
+// Stage 1: [Joker, Blueprint, AbstractJoker, Brainstorm]
+//   Joker:         +4          → 5
+//   Blueprint:     copies AJ   → +12       (AJ is to BP's right)
+//   AbstractJoker: +12
+//   Brainstorm:    copies Joker → +4        (leftmost non-BP/BS)
+//   mult = 1 + 4 + 12 + 12 + 4 = 33   →  16×33 = 528
+//
+// swap(1, 3) → [Joker, Brainstorm, AbstractJoker, Blueprint]
+//
+// Stage 2: [Joker, Brainstorm, AbstractJoker, Blueprint]
+//   Joker:         +4
+//   Brainstorm:    copies Joker → +4        (leftmost non-BP/BS)
+//   AbstractJoker: +12
+//   Blueprint:     nothing to its right → 0
+//   mult = 1 + 4 + 4 + 12 + 0 = 21   →  16×21 = 336
+//
+// swap(0, 3) → [Blueprint, Brainstorm, AbstractJoker, Joker]
+//
+// Stage 3: [Blueprint, Brainstorm, AbstractJoker, Joker]
+//   Blueprint:     copies BS → skip; no valid right neighbour → 0
+//   Brainstorm:    copies AJ → +12          (leftmost non-BP/BS)
+//   AbstractJoker: +12
+//   Joker:         +4
+//   mult = 1 + 0 + 12 + 12 + 4 = 29  →  16×29 = 464
+//
+// swap(1, 2) → [Blueprint, AbstractJoker, Brainstorm, Joker]
+//
+// Stage 4: [Blueprint, AbstractJoker, Brainstorm, Joker]
+//   Blueprint:     copies AJ → +12          (AJ is to BP's right)
+//   AbstractJoker: +12
+//   Brainstorm:    copies AJ → +12          (leftmost non-BP/BS)
+//   Joker:         +4
+//   mult = 1 + 12 + 12 + 12 + 4 = 41 →  16×41 = 656
+#[test]
+fn test_scenario_four_jokers_three_swaps_four_distinct_scores() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(0, JokerKind::Joker));
+    gs.jokers.push(joker(1, JokerKind::Blueprint));
+    gs.jokers.push(joker(2, JokerKind::AbstractJoker));
+    gs.jokers.push(joker(3, JokerKind::Brainstorm));
+
+    // helper: play a single Ace, assert score, then consume the round
+    macro_rules! play_round {
+        ($gs:expr, $card_id:expr, $expected:expr, $label:expr) => {{
+            setup_round(&mut $gs, vec![card($card_id, Rank::Ace, Suit::Spades)], 1);
+            $gs.score_goal = 1.0;
+            $gs.select_card(0).unwrap();
+            $gs.play_hand().unwrap();
+            assert_eq!($gs.score_accumulated as i64, $expected, $label);
+        }};
+    }
+
+    // ── Stage 1: [Joker, Blueprint, AbstractJoker, Brainstorm] → 528 ──
+    play_round!(gs, 10, 528, "Stage 1: [Joker, BP, AJ, BS] → 528");
+
+    // ── swap(1, 3) → [Joker, Brainstorm, AbstractJoker, Blueprint] ──
+    gs.swap_jokers(1, 3).unwrap();
+    assert_eq!(gs.jokers[0].kind, JokerKind::Joker,         "s1 slot0");
+    assert_eq!(gs.jokers[1].kind, JokerKind::Brainstorm,    "s1 slot1");
+    assert_eq!(gs.jokers[2].kind, JokerKind::AbstractJoker, "s1 slot2");
+    assert_eq!(gs.jokers[3].kind, JokerKind::Blueprint,     "s1 slot3");
+
+    // ── Stage 2: [Joker, Brainstorm, AbstractJoker, Blueprint] → 336 ──
+    play_round!(gs, 20, 336, "Stage 2: [Joker, BS, AJ, BP] → 336");
+
+    // ── swap(0, 3) → [Blueprint, Brainstorm, AbstractJoker, Joker] ──
+    gs.swap_jokers(0, 3).unwrap();
+    assert_eq!(gs.jokers[0].kind, JokerKind::Blueprint,     "s2 slot0");
+    assert_eq!(gs.jokers[1].kind, JokerKind::Brainstorm,    "s2 slot1");
+    assert_eq!(gs.jokers[2].kind, JokerKind::AbstractJoker, "s2 slot2");
+    assert_eq!(gs.jokers[3].kind, JokerKind::Joker,         "s2 slot3");
+
+    // ── Stage 3: [Blueprint, Brainstorm, AbstractJoker, Joker] → 464 ──
+    play_round!(gs, 30, 464, "Stage 3: [BP, BS, AJ, Joker] → 464");
+
+    // ── swap(1, 2) → [Blueprint, AbstractJoker, Brainstorm, Joker] ──
+    gs.swap_jokers(1, 2).unwrap();
+    assert_eq!(gs.jokers[0].kind, JokerKind::Blueprint,     "s3 slot0");
+    assert_eq!(gs.jokers[1].kind, JokerKind::AbstractJoker, "s3 slot1");
+    assert_eq!(gs.jokers[2].kind, JokerKind::Brainstorm,    "s3 slot2");
+    assert_eq!(gs.jokers[3].kind, JokerKind::Joker,         "s3 slot3");
+
+    // ── Stage 4: [Blueprint, AbstractJoker, Brainstorm, Joker] → 656 ──
+    play_round!(gs, 40, 656, "Stage 4: [BP, AJ, BS, Joker] → 656");
+}
