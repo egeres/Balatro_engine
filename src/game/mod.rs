@@ -340,14 +340,7 @@ impl GameState {
                 }
             }
         };
-        // Apply Violet Vessel (6x) or standard adjustments
-        let scaling = match self.stake {
-            Stake::White => 1.0,
-            Stake::Red => 1.0,
-            Stake::Green => 1.0,
-            Stake::Black | Stake::Blue | Stake::Purple | Stake::Orange | Stake::Gold => 1.0,
-        };
-        (base as f64) * mult * scaling
+        (base as f64) * mult
     }
 }
 
@@ -395,6 +388,13 @@ impl GameState {
         for &id in card_ids {
             self.destroy_deck_card(id);
         }
+    }
+
+    /// Returns `true` if Luchador or Chicot is active (disables all boss blind effects).
+    pub(crate) fn boss_blind_disabled(&self) -> bool {
+        self.jokers.iter().any(|j| {
+            (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
+        })
     }
 
     pub(crate) fn notify_face_card_destroyed(&mut self, card: &CardInstance) {

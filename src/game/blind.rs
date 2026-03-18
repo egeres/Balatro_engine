@@ -124,10 +124,7 @@ impl GameState {
         // AmberAcorn: shuffle joker order at the start of the blind
         if let Some(BossBlind::AmberAcorn) = self.boss_blind {
             if matches!(self.current_blind, BlindKind::Boss) {
-                let disabled = self.jokers.iter().any(|j| {
-                    (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
-                });
-                if !disabled {
+                if !self.boss_blind_disabled() {
                     self.rng.shuffle(&mut self.jokers);
                 }
             }
@@ -171,10 +168,7 @@ impl GameState {
         // TheWater: start with 0 discards
         if let Some(BossBlind::TheWater) = self.boss_blind {
             if matches!(self.current_blind, BlindKind::Boss) {
-                let disabled = self.jokers.iter().any(|j| {
-                    (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
-                });
-                if !disabled {
+                if !self.boss_blind_disabled() {
                     return 0;
                 }
             }
@@ -198,10 +192,7 @@ impl GameState {
         // TheManacle: -1 hand size during Boss blind
         if let Some(BossBlind::TheManacle) = self.boss_blind {
             if matches!(self.current_blind, BlindKind::Boss) {
-                let disabled = self.jokers.iter().any(|j| {
-                    (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
-                });
-                if !disabled {
+                if !self.boss_blind_disabled() {
                     size = size.saturating_sub(1);
                 }
             }
@@ -242,10 +233,7 @@ impl GameState {
         // TheFish: all newly drawn cards after the first hand are face-down
         // TheWheel: each newly drawn card has a 1-in-7 chance of being face-down
         if matches!(self.current_blind, BlindKind::Boss) {
-            let luchador_active = self.jokers.iter().any(|j| {
-                (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
-            });
-            if !luchador_active {
+            if !self.boss_blind_disabled() {
                 let newly_drawn = start_hand_len..self.hand.len();
                 match self.boss_blind {
                     Some(BossBlind::TheFish) => {
@@ -275,10 +263,7 @@ impl GameState {
         // CeruleanBell: one random newly-drawn card is always selected (forced)
         if let Some(BossBlind::CeruleanBell) = self.boss_blind {
             if matches!(self.current_blind, BlindKind::Boss) {
-                let luchador_active = self.jokers.iter().any(|j| {
-                    (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
-                });
-                if !luchador_active {
+                if !self.boss_blind_disabled() {
                     let newly_drawn_count = self.hand.len() - start_hand_len;
                     if newly_drawn_count > 0 {
                         let offset = self.rng.range_usize(0, newly_drawn_count - 1);
@@ -306,7 +291,7 @@ impl GameState {
         let Some(boss) = boss else { return };
 
         // Luchador and Chicot both disable the boss blind's special effect
-        if self.jokers.iter().any(|j| (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active) {
+        if self.boss_blind_disabled() {
             return;
         }
 
@@ -339,14 +324,7 @@ impl GameState {
                     }
                 }
             }
-            BossBlind::ThePlant => {
-                for card in self.deck.iter_mut() {
-                    if card.rank.is_face() {
-                        card.debuffed = true;
-                    }
-                }
-            }
-            BossBlind::TheMark => {
+            BossBlind::ThePlant | BossBlind::TheMark => {
                 for card in self.deck.iter_mut() {
                     if card.rank.is_face() {
                         card.debuffed = true;

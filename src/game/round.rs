@@ -121,10 +121,7 @@ impl GameState {
 
         // TheEye / TheMouth: evaluate hand type early to enforce restrictions
         if matches!(self.current_blind, BlindKind::Boss) {
-            let luchador_active = self.jokers.iter().any(|j| {
-                (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
-            });
-            if !luchador_active {
+            if !self.boss_blind_disabled() {
                 let has_four_fingers = self.jokers.iter().any(|j| j.kind == JokerKind::FourFingers && j.active);
                 let has_shortcut = self.jokers.iter().any(|j| j.kind == JokerKind::Shortcut && j.active);
                 let has_smeared = self.jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active);
@@ -225,10 +222,7 @@ impl GameState {
         // TheArm: decrease the level of the played poker hand by 1 (minimum 1) before scoring
         if let Some(BossBlind::TheArm) = self.boss_blind {
             if matches!(self.current_blind, BlindKind::Boss) {
-                let luchador_active = self.jokers.iter().any(|j| {
-                    (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
-                });
-                if !luchador_active {
+                if !self.boss_blind_disabled() {
                     // Determine the hand type that will be played
                     let has_four_fingers = self.jokers.iter().any(|j| j.kind == JokerKind::FourFingers && j.active);
                     let has_shortcut = self.jokers.iter().any(|j| j.kind == JokerKind::Shortcut && j.active);
@@ -247,10 +241,7 @@ impl GameState {
         // CrimsonHeart: disable one random active joker for the duration of this hand
         let crimson_disabled_joker_id: Option<u64> = if let Some(BossBlind::CrimsonHeart) = self.boss_blind {
             if matches!(self.current_blind, BlindKind::Boss) {
-                let luchador_active = self.jokers.iter().any(|j| {
-                    (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
-                });
-                if !luchador_active {
+                if !self.boss_blind_disabled() {
                     let active_jokers: Vec<usize> = self.jokers.iter().enumerate()
                         .filter(|(_, j)| j.active)
                         .map(|(i, _)| i)
@@ -308,10 +299,7 @@ impl GameState {
         // TheOx: playing the most-played hand type this run sets money to $0
         if let Some(BossBlind::TheOx) = self.boss_blind {
             if matches!(self.current_blind, BlindKind::Boss) {
-                let luchador_active = self.jokers.iter().any(|j| {
-                    (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
-                });
-                if !luchador_active {
+                if !self.boss_blind_disabled() {
                     let max_played = self.hand_levels.values().map(|h| h.played).max().unwrap_or(0);
                     if max_played > 0 {
                         let played_hand_count = self.hand_levels
@@ -463,10 +451,7 @@ impl GameState {
         // TheHook: discard 2 additional random cards from remaining hand after each play
         if let Some(BossBlind::TheHook) = self.boss_blind {
             if matches!(self.current_blind, BlindKind::Boss) {
-                let disabled = self.jokers.iter().any(|j| {
-                    (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
-                });
-                if !disabled {
+                if !self.boss_blind_disabled() {
                     let discard_count = 2.min(self.hand.len());
                     for _ in 0..discard_count {
                         if self.hand.is_empty() { break; }
@@ -482,9 +467,7 @@ impl GameState {
         // Draw: TheSerpent draws exactly 3; otherwise fill to hand size
         let is_serpent = matches!(self.boss_blind, Some(BossBlind::TheSerpent))
             && matches!(self.current_blind, BlindKind::Boss)
-            && !self.jokers.iter().any(|j| {
-                (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
-            });
+            && !self.boss_blind_disabled();
         if is_serpent {
             let draw_count = 3.min(self.draw_pile.len());
             for _ in 0..draw_count {
@@ -939,9 +922,7 @@ impl GameState {
         // TheSerpent: draw exactly 3 after discard instead of filling to hand size
         let is_serpent_discard = matches!(self.boss_blind, Some(BossBlind::TheSerpent))
             && matches!(self.current_blind, BlindKind::Boss)
-            && !self.jokers.iter().any(|j| {
-                (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
-            });
+            && !self.boss_blind_disabled();
         if is_serpent_discard {
             let draw_count = 3.min(self.draw_pile.len());
             for _ in 0..draw_count {

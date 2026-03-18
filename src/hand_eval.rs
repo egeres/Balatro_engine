@@ -93,7 +93,7 @@ pub fn evaluate_hand(
     }
 
     // Four of a Kind
-    if let Some((four_idxs, _kicker)) = find_four_of_kind(&groups, &eval_indices) {
+    if let Some((four_idxs, _kicker)) = find_four_of_kind(&groups) {
         let scoring = if splash {
             eval_indices.clone()
         } else {
@@ -134,7 +134,7 @@ pub fn evaluate_hand(
     }
 
     // Three of a Kind
-    if let Some((trip_idxs, _)) = find_three_of_kind(&groups, &eval_indices) {
+    if let Some((trip_idxs, _)) = find_three_of_kind(&groups) {
         let scoring = if splash {
             eval_indices.clone()
         } else {
@@ -147,7 +147,7 @@ pub fn evaluate_hand(
     }
 
     // Two Pair
-    if let Some(tp_idxs) = find_two_pair(&groups, &eval_indices) {
+    if let Some(tp_idxs) = find_two_pair(&groups) {
         let scoring = if splash {
             eval_indices.clone()
         } else {
@@ -160,7 +160,7 @@ pub fn evaluate_hand(
     }
 
     // Pair
-    if let Some((pair_idxs, _)) = find_pair(&groups, &eval_indices) {
+    if let Some((pair_idxs, _)) = find_pair(&groups) {
         let scoring = if splash {
             eval_indices.clone()
         } else {
@@ -175,8 +175,9 @@ pub fn evaluate_hand(
     // High Card - highest single card
     let best_idx = eval_indices
         .iter()
-        .max_by_key(|&&i| eval_cards[eval_indices.iter().position(|&x| x == i).unwrap()].rank.numeric_value())
-        .copied()
+        .enumerate()
+        .max_by_key(|&(p, _)| eval_cards[p].rank.numeric_value())
+        .map(|(_, &i)| i)
         .unwrap_or(0);
     HandEvalResult {
         hand_type: HandType::HighCard,
@@ -212,15 +213,14 @@ fn check_flush(
     };
 
     // Group cards by effective suit
-    let mut suit_groups: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut suit_groups: HashMap<Suit, Vec<usize>> = HashMap::new();
     let mut wild_indices: Vec<usize> = Vec::new();
 
-    for (pos, (&card, &orig_idx)) in cards.iter().zip(indices.iter()).enumerate() {
+    for (&card, &orig_idx) in cards.iter().zip(indices.iter()) {
         if card.enhancement == crate::types::Enhancement::Wild {
             wild_indices.push(orig_idx);
         } else {
-            let key = format!("{:?}", suit_fn(card.suit));
-            suit_groups.entry(key).or_default().push(orig_idx);
+            suit_groups.entry(suit_fn(card.suit)).or_default().push(orig_idx);
         }
     }
 
@@ -358,7 +358,6 @@ fn find_five_of_kind(cards: &[&CardInstance], indices: &[usize]) -> Option<Vec<u
 
 fn find_four_of_kind(
     groups: &HashMap<Rank, Vec<usize>>,
-    _all_indices: &[usize],
 ) -> Option<(Vec<usize>, Vec<usize>)> {
     let four = groups.values().find(|v| v.len() >= 4)?;
     let kicker: Vec<usize> = groups
@@ -371,7 +370,6 @@ fn find_four_of_kind(
 
 fn find_three_of_kind(
     groups: &HashMap<Rank, Vec<usize>>,
-    _all_indices: &[usize],
 ) -> Option<(Vec<usize>, Vec<usize>)> {
     let trip = groups.values().find(|v| v.len() >= 3)?;
     let kicker: Vec<usize> = groups
@@ -406,7 +404,6 @@ fn find_full_house(cards: &[&CardInstance], indices: &[usize]) -> Option<Vec<usi
 
 fn find_two_pair(
     groups: &HashMap<Rank, Vec<usize>>,
-    _all_indices: &[usize],
 ) -> Option<Vec<usize>> {
     let pairs: Vec<&Vec<usize>> = groups.values().filter(|v| v.len() >= 2).collect();
     if pairs.len() < 2 {
@@ -426,7 +423,6 @@ fn find_two_pair(
 
 fn find_pair(
     groups: &HashMap<Rank, Vec<usize>>,
-    _all_indices: &[usize],
 ) -> Option<(Vec<usize>, Vec<usize>)> {
     let mut pairs: Vec<(&Rank, &Vec<usize>)> = groups
         .iter()
