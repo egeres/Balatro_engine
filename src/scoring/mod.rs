@@ -126,8 +126,11 @@ pub fn score_hand(
         events.push(ScoreEvent { source: "The Flint".to_string(), kind: ScoreEventKind::XMult, value: 0.5 });
     }
 
+    // Pre-collect active jokers once; reused across Phase 1, 2, and 3.
+    let active_jokers: Vec<&JokerInstance> = jokers.iter().filter(|j| j.active).collect();
+
     // ── PHASE 1: hand-level effects before card scoring ───────────────────
-    for joker in jokers.iter().filter(|j| j.active) {
+    for joker in &active_jokers {
         let effect = calc_joker_before(joker, hand_type);
         chips += effect.chips as f64;
         mult  += effect.mult  as f64;
@@ -200,7 +203,7 @@ pub fn score_hand(
             }
 
             // Per-card joker effects
-            for joker in jokers.iter().filter(|j| j.active) {
+            for joker in &active_jokers {
                 let effect = calc_joker_individual(
                     joker, card_idx, card, &scoring_indices, played_cards, has_pareidolia,
                 );
@@ -228,7 +231,7 @@ pub fn score_hand(
             }
         }
 
-        for joker in jokers.iter().filter(|j| j.active) {
+        for joker in &active_jokers {
             let effect = calc_joker_hand_card(joker, card);
             mult  += effect.mult  as f64;
             mult  *= effect.x_mult;

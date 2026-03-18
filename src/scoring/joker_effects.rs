@@ -367,10 +367,11 @@ pub(crate) fn calc_joker_main(
             if has_club && has_non_club { effect.x_mult = 2.0; }
         }
         JokerKind::FlowerPot => {
-            let has_all_4 = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds]
+            let suits_present: std::collections::HashSet<Suit> = scoring_cards
                 .iter()
-                .all(|s| scoring_cards.iter().any(|&i| played[i].effective_suits().contains(s)));
-            if has_all_4 { effect.x_mult = 3.0; }
+                .flat_map(|&i| played[i].effective_suits())
+                .collect();
+            if suits_present.len() == 4 { effect.x_mult = 3.0; }
         }
         JokerKind::AncientJoker => {
             let suit_str = joker.counters.get("suit").and_then(|v| v.as_str()).unwrap_or("Hearts");

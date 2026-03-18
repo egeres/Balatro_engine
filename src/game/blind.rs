@@ -341,8 +341,10 @@ impl GameState {
             }
             BossBlind::ThePillar => {
                 // Debuff any card whose ID was played in an earlier round this Ante
+                let played_ids: std::collections::HashSet<u64> =
+                    self.played_card_ids_this_ante.iter().copied().collect();
                 for card in self.deck.iter_mut() {
-                    if self.played_card_ids_this_ante.contains(&card.id) {
+                    if played_ids.contains(&card.id) {
                         card.debuffed = true;
                     }
                 }
