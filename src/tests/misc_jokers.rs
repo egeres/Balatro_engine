@@ -1536,29 +1536,52 @@ fn test_to_do_list_does_not_earn_on_mismatch() {
 }
 
 // =========================================================
-// ToTheMoon: raises interest cap by $5 per joker
+// ToTheMoon: +$1 interest per $5 held (raises the rate, not the cap)
 // =========================================================
 
-#[test]
-fn test_to_the_moon_raises_interest_cap() {
+/// Run one round to completion and return the money gained beyond the blind reward.
+fn interest_earned(to_the_moon_count: usize, money: i32, max_interest: i32) -> i32 {
     let mut gs = make_game();
     let cards = vec![card(0, Rank::Ace, Suit::Spades)];
     setup_round(&mut gs, cards, 1);
-    gs.money = 50; // lots of money to earn interest
-    gs.max_interest = 5; // normally caps at $1 interest
-    gs.jokers.push(joker(1, JokerKind::ToTheMoon));
+    gs.money = money;
+    gs.max_interest = max_interest;
+    for i in 0..to_the_moon_count {
+        gs.jokers.push(joker(1 + i as u64, JokerKind::ToTheMoon));
+    }
     gs.score_goal = 1.0;
 
     let money_before = gs.money;
     gs.select_card(0).unwrap();
     gs.play_hand().unwrap();
+    gs.money - money_before - 3 // subtract the Small blind reward
+}
 
-    // With ToTheMoon, effective cap is 5+5=10 → interest = min(50/5, 10/5) = min(10, 2) = 2
-    // Without: interest = min(10, 1) = 1
-    // Difference shows ToTheMoon raised the cap
-    let interest_gained = gs.money - money_before - 3; // subtract blind reward
-    assert!(interest_gained >= 2,
-        "ToTheMoon should enable higher interest earnings, gained extra: {}", interest_gained);
+#[test]
+fn test_interest_pays_one_per_five_up_to_the_cap() {
+    // $25 held, default cap 25 → min(25/5, 25/5) = 5 steps × $1 = $5
+    assert_eq!(interest_earned(0, 25, 25), 5);
+    // $50 held is above the cap → still 5 steps
+    assert_eq!(interest_earned(0, 50, 25), 5);
+}
+
+#[test]
+fn test_to_the_moon_doubles_the_interest_rate() {
+    // ToTheMoon makes each $5 pay $2, and the cap stays at 5 steps → $10, not $5.
+    assert_eq!(interest_earned(1, 50, 25), 10);
+}
+
+#[test]
+fn test_to_the_moon_stacks_per_copy() {
+    // Two copies → $3 per step × 5 steps = $15
+    assert_eq!(interest_earned(2, 50, 25), 15);
+}
+
+#[test]
+fn test_to_the_moon_does_not_raise_the_cap() {
+    // Only $10 held → 2 steps regardless of cap; ToTheMoon doubles the rate → $4.
+    assert_eq!(interest_earned(0, 10, 25), 2);
+    assert_eq!(interest_earned(1, 10, 25), 4);
 }
 
 // =========================================================

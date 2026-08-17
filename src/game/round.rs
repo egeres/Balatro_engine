@@ -1026,7 +1026,8 @@ impl GameState {
             }
         }
 
-        // ToTheMoon: +$1 interest per $5 held (raises effective interest cap by 1 per joker)
+        // ToTheMoon raises the interest *amount* paid per $5, not the cap (card.lua:614 bumps
+        // G.GAME.interest_amount). Payout is amount × min(money/5, cap/5) — state_events.lua:1202.
         let to_the_moon_count = self.jokers.iter().filter(|j| j.kind == JokerKind::ToTheMoon && j.active).count();
 
         if self.deck_type == DeckType::Green {
@@ -1034,10 +1035,9 @@ impl GameState {
             self.money += self.hands_remaining as i32;
             self.money += self.discards_remaining as i32;
         } else {
-            // Interest: $1 per $5 held, up to max_interest (ToTheMoon raises cap by 5 each)
-            let effective_max = self.max_interest + 5 * to_the_moon_count as i32;
-            let interest = (self.money / 5).min(effective_max / 5).max(0);
-            self.money += interest;
+            let interest_amount = 1 + to_the_moon_count as i32;
+            let interest_steps = (self.money / 5).min(self.max_interest / 5).max(0);
+            self.money += interest_amount * interest_steps;
         }
 
         // Perishable jokers: decrement rounds remaining; disable when expired
