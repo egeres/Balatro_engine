@@ -8,6 +8,8 @@ from ._actions import (
     Action,
     BuyConsumable,
     BuyJoker,
+    BuyPlayingCard,
+    RerollBossBlind,
     BuyPack,
     BuyVoucher,
     DeselectAll,
@@ -166,6 +168,10 @@ class Game:
             return e.sell_joker(action.index)
         if isinstance(action, BuyConsumable):
             return e.buy_consumable(action.index)
+        if isinstance(action, BuyPlayingCard):
+            return e.buy_playing_card(action.index)
+        if isinstance(action, RerollBossBlind):
+            return e.reroll_boss_blind()
         if isinstance(action, BuyPack):
             return e.buy_pack(action.index)
         if isinstance(action, BuyVoucher):

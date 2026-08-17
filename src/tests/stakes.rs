@@ -59,16 +59,6 @@ fn test_white_stake_effective_discards_equal_to_max() {
         "White stake should not reduce discards");
 }
 
-#[test]
-fn test_white_stake_shop_has_no_spectral_pack() {
-    let mut gs = GameState::new(DeckType::Blue, Stake::White, Some("WHITE_SPEC".to_string()));
-    gs.generate_shop();
-    let has_spectral = gs.shop_offers.iter().any(|o| {
-        matches!(o.kind, ShopItem::Pack(PackKind::SpectralPack))
-    });
-    assert!(!has_spectral, "White stake shop should not contain a SpectralPack");
-}
-
 // =========================================================
 // Red stake: Small Blind gives no reward; still no stickers
 // =========================================================
@@ -219,16 +209,6 @@ fn test_blue_stake_effective_discards_reduced_by_one() {
 // =========================================================
 
 #[test]
-fn test_purple_stake_shop_contains_spectral_pack() {
-    let mut gs = GameState::new(DeckType::Blue, Stake::Purple, Some("PURPLE_SPEC".to_string()));
-    gs.generate_shop();
-    let has_spectral = gs.shop_offers.iter().any(|o| {
-        matches!(o.kind, ShopItem::Pack(PackKind::SpectralPack))
-    });
-    assert!(has_spectral, "Purple stake shop should always contain a SpectralPack");
-}
-
-#[test]
 fn test_purple_stake_effective_discards_reduced_by_one() {
     let gs = GameState::new(DeckType::Blue, Stake::Purple, Some("PURPLE_DISC".to_string()));
     assert_eq!(
@@ -283,16 +263,6 @@ fn test_orange_stake_never_produces_rental_jokers() {
             }
         }
     }
-}
-
-#[test]
-fn test_orange_stake_shop_contains_spectral_pack() {
-    let mut gs = GameState::new(DeckType::Blue, Stake::Orange, Some("ORANGE_SPEC".to_string()));
-    gs.generate_shop();
-    let has_spectral = gs.shop_offers.iter().any(|o| {
-        matches!(o.kind, ShopItem::Pack(PackKind::SpectralPack))
-    });
-    assert!(has_spectral, "Orange stake shop should contain a SpectralPack");
 }
 
 #[test]
@@ -382,4 +352,37 @@ fn test_eternal_and_perishable_never_coexist() {
             }
         }
     }
+}
+
+// =========================================================
+// Booster pack pool is not stake-gated
+// =========================================================
+
+/// Spectral packs sit in the normal booster pool at weight 0.3 (game.lua:681) - they are not
+/// unlocked by stake. Every family should be reachable at White.
+#[test]
+fn test_every_booster_family_is_reachable_at_white_stake() {
+    let mut gs = GameState::new(DeckType::Blue, Stake::White, Some("PACKS".to_string()));
+    let mut seen_arcana = false;
+    let mut seen_celestial = false;
+    let mut seen_spectral = false;
+    let mut seen_standard = false;
+    let mut seen_buffoon = false;
+
+    for _ in 0..400 {
+        gs.generate_shop();
+        for offer in &gs.shop_offers {
+            if let ShopItem::Pack(p) = offer.kind {
+                let name = format!("{:?}", p);
+                seen_arcana |= name.starts_with("Arcana");
+                seen_celestial |= name.starts_with("Celestial");
+                seen_spectral |= name.starts_with("Spectral");
+                seen_standard |= name.starts_with("Standard");
+                seen_buffoon |= name.starts_with("Buffoon");
+            }
+        }
+    }
+    assert!(seen_arcana && seen_celestial && seen_spectral && seen_standard && seen_buffoon,
+        "arcana={} celestial={} spectral={} standard={} buffoon={}",
+        seen_arcana, seen_celestial, seen_spectral, seen_standard, seen_buffoon);
 }

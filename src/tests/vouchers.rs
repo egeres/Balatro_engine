@@ -6,6 +6,7 @@
 ///   - Campfire joker: resets x_mult to X1 when Boss Blind is defeated
 
 use super::*;
+use crate::card::{PackCard, ShopItem};
 
 // Helper: apply a voucher directly to a GameState
 fn apply_voucher_to_game(voucher: VoucherKind) -> GameState {
@@ -130,11 +131,23 @@ fn test_palette_increases_hand_size() {
 // =========================================================
 
 #[test]
-fn test_directors_cut_gives_free_reroll() {
-    let gs_before = make_game();
-    let base = gs_before.free_rerolls;
-    let gs = apply_voucher_to_game(VoucherKind::DirectorsCut);
-    assert_eq!(gs.free_rerolls, base + 1);
+fn test_directors_cut_unlocks_one_boss_reroll_per_ante() {
+    let mut gs = make_game();
+    gs.money = 100;
+
+    // Without the voucher there is nothing to reroll with.
+    assert!(gs.reroll_boss_blind().is_err());
+
+    gs.vouchers.push(VoucherKind::DirectorsCut);
+    gs.reroll_boss_blind().unwrap();
+    assert_eq!(gs.money, 90, "a Boss reroll costs $10");
+    assert!(gs.reroll_boss_blind().is_err(), "only one per ante");
+
+    // Retcon lifts the per-ante limit.
+    gs.vouchers.push(VoucherKind::Retcon);
+    gs.reroll_boss_blind().unwrap();
+    gs.reroll_boss_blind().unwrap();
+    assert_eq!(gs.money, 70);
 }
 
 // =========================================================
@@ -349,4 +362,173 @@ fn test_campfire_not_reset_on_small_blind_win() {
         (gs.jokers[0].get_counter_f64("x_mult") - 2.5).abs() < 0.001,
         "Campfire must NOT reset on Small Blind win"
     );
+}
+
+// =========================================================
+// Shop composition and the rate vouchers
+// =========================================================
+
+fn shop_item_types(gs: &mut GameState, rounds: usize) -> std::collections::HashMap<&'static str, usize> {
+    let mut counts = std::collections::HashMap::new();
+    for _ in 0..rounds {
+        gs.generate_shop();
+        for offer in &gs.shop_offers {
+            let key = match &offer.kind {
+                ShopItem::Joker(_) => "joker",
+                ShopItem::Consumable(crate::card::ConsumableCard::Tarot(_)) => "tarot",
+                ShopItem::Consumable(crate::card::ConsumableCard::Planet(_)) => "planet",
+                ShopItem::Consumable(crate::card::ConsumableCard::Spectral(_)) => "spectral",
+                ShopItem::PlayingCard(_) => "playing_card",
+                ShopItem::Pack(_) => "pack",
+                ShopItem::Voucher(_) => "voucher",
+            };
+            *counts.entry(key).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+#[test]
+fn test_shop_stocks_consumables_alongside_jokers() {
+    let mut gs = make_game();
+    let counts = shop_item_types(&mut gs, 300);
+    assert!(counts.get("joker").copied().unwrap_or(0) > 0);
+    assert!(counts.get("tarot").copied().unwrap_or(0) > 0, "shop should stock tarots");
+    assert!(counts.get("planet").copied().unwrap_or(0) > 0, "shop should stock planets");
+}
+
+#[test]
+fn test_shop_offers_two_booster_packs() {
+    let mut gs = make_game();
+    gs.generate_shop();
+    let packs = gs.shop_offers.iter().filter(|o| matches!(o.kind, ShopItem::Pack(_))).count();
+    assert_eq!(packs, 2);
+}
+
+#[test]
+fn test_jokers_dominate_the_default_card_slots() {
+    // 20 / 4 / 4 weighting (game.lua:1901).
+    let mut gs = make_game();
+    let counts = shop_item_types(&mut gs, 400);
+    let jokers = counts.get("joker").copied().unwrap_or(0) as f64;
+    let tarots = counts.get("tarot").copied().unwrap_or(0) as f64;
+    assert!(jokers > tarots * 3.0, "jokers {} tarots {}", jokers, tarots);
+}
+
+#[test]
+fn test_no_playing_cards_or_spectrals_in_the_shop_by_default() {
+    let mut gs = make_game();
+    let counts = shop_item_types(&mut gs, 200);
+    assert_eq!(counts.get("playing_card").copied().unwrap_or(0), 0);
+    assert_eq!(counts.get("spectral").copied().unwrap_or(0), 0);
+}
+
+#[test]
+fn test_magic_trick_puts_playing_cards_in_the_shop() {
+    let mut gs = make_game();
+    gs.vouchers.push(VoucherKind::MagicTrick);
+    gs.playing_card_rate = 4.0;
+    let counts = shop_item_types(&mut gs, 200);
+    assert!(counts.get("playing_card").copied().unwrap_or(0) > 0);
+}
+
+#[test]
+fn test_ghost_deck_puts_spectrals_in_the_shop() {
+    let mut gs = GameState::new(DeckType::Ghost, Stake::White, Some("GHOSTSHOP".to_string()));
+    let counts = shop_item_types(&mut gs, 400);
+    assert!(counts.get("spectral").copied().unwrap_or(0) > 0);
+}
+
+#[test]
+fn test_tarot_merchant_raises_the_tarot_rate() {
+    let gs = apply_voucher_to_game(VoucherKind::TarotMerchant);
+    assert!((gs.tarot_rate - 9.6).abs() < 1e-9);
+    let gs = apply_voucher_to_game(VoucherKind::TarotTycoon);
+    assert_eq!(gs.tarot_rate, 32.0);
+}
+
+#[test]
+fn test_reroll_vouchers_cut_the_reroll_price() {
+    let base = make_game().base_reroll_cost;
+    let gs = apply_voucher_to_game(VoucherKind::RerollSurplus);
+    assert_eq!(gs.base_reroll_cost, base - 2);
+}
+
+#[test]
+fn test_hone_and_glow_up_scale_the_edition_rate() {
+    assert_eq!(make_game().edition_rate, 1.0);
+    assert_eq!(apply_voucher_to_game(VoucherKind::Hone).edition_rate, 2.0);
+    assert_eq!(apply_voucher_to_game(VoucherKind::GlowUp).edition_rate, 4.0);
+}
+
+#[test]
+fn test_hieroglyph_and_petroglyph_trade_an_ante_for_resources() {
+    let mut gs = make_game();
+    gs.ante = 3;
+    let hands = gs.max_hands;
+    let discards = gs.max_discards;
+
+    gs.state = GameStateKind::Shop;
+    gs.money = 50;
+    gs.shop_voucher = Some(VoucherKind::Hieroglyph);
+    gs.buy_voucher().unwrap();
+    assert_eq!(gs.ante, 2);
+    assert_eq!(gs.max_hands, hands - 1);
+
+    gs.money = 50;
+    gs.shop_voucher = Some(VoucherKind::Petroglyph);
+    gs.buy_voucher().unwrap();
+    assert_eq!(gs.ante, 1);
+    assert_eq!(gs.max_discards, discards - 1);
+}
+
+// =========================================================
+// Omen Globe and Telescope shape their packs
+// =========================================================
+
+#[test]
+fn test_omen_globe_seeds_spectrals_into_arcana_packs() {
+    let mut gs = make_game();
+    gs.vouchers.push(VoucherKind::OmenGlobe);
+    let mut spectrals = 0;
+    for _ in 0..200 {
+        let pack = gs.generate_pack_contents(PackKind::ArcanaPack);
+        spectrals += pack
+            .cards
+            .iter()
+            .filter(|c| matches!(c, PackCard::Consumable(crate::card::ConsumableCard::Spectral(_))))
+            .count();
+    }
+    assert!(spectrals > 0, "Omen Globe should occasionally swap in a Spectral");
+}
+
+#[test]
+fn test_telescope_leads_celestial_packs_with_the_most_played_planet() {
+    let mut gs = make_game();
+    gs.vouchers.push(VoucherKind::Telescope);
+    gs.hand_levels.get_mut(&HandType::Flush).unwrap().played = 9;
+
+    for _ in 0..20 {
+        let pack = gs.generate_pack_contents(PackKind::CelestialPack);
+        match &pack.cards[0] {
+            PackCard::Consumable(crate::card::ConsumableCard::Planet(p)) => {
+                assert_eq!(p.hand_type(), HandType::Flush);
+            }
+            other => panic!("expected a planet, got {:?}", other),
+        }
+    }
+}
+
+#[test]
+fn test_celestial_packs_are_random_without_telescope() {
+    let mut gs = make_game();
+    gs.hand_levels.get_mut(&HandType::Flush).unwrap().played = 9;
+    let mut firsts = std::collections::HashSet::new();
+    for _ in 0..60 {
+        let pack = gs.generate_pack_contents(PackKind::CelestialPack);
+        if let PackCard::Consumable(crate::card::ConsumableCard::Planet(p)) = &pack.cards[0] {
+            firsts.insert(*p);
+        }
+    }
+    assert!(firsts.len() > 1);
 }

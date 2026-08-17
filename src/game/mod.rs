@@ -96,6 +96,26 @@ pub struct GameState {
     /// (`G.GAME.ecto_minus`, card.lua:1495).
     pub ectoplasm_uses: u32,
 
+    /// Relative weights for what a shop card slot turns into (game.lua:1901-1905).
+    /// Vouchers rewrite these: Tarot Merchant/Tycoon set `tarot_rate`, Magic Trick/Illusion set
+    /// `playing_card_rate`, and the Ghost Deck raises `spectral_rate`.
+    pub joker_rate: f64,
+    pub tarot_rate: f64,
+    pub planet_rate: f64,
+    pub spectral_rate: f64,
+    pub playing_card_rate: f64,
+
+    /// Multiplier on Foil/Holographic/Polychrome chances (`G.GAME.edition_rate`, base 1).
+    /// Hone sets it to 2, Glow Up to 4.
+    pub edition_rate: f64,
+
+    /// Reroll price at the start of a shop, before the +$1-per-reroll escalation.
+    /// Reroll Surplus and Reroll Glut each knock $2 off it.
+    pub base_reroll_cost: u32,
+
+    /// Whether the Boss blind has already been rerolled this ante (Director's Cut allows one).
+    pub boss_rerolled_this_ante: bool,
+
     /// How many times each Boss blind has been used this run. Balatro draws from the
     /// least-used eligible bosses so a run cycles the roster (common_events.lua:2363).
     pub bosses_used: HashMap<BossBlind, u32>,
@@ -207,6 +227,14 @@ impl GameState {
             gros_michel_extinct: false,
             ectoplasm_uses: 0,
             bosses_used: HashMap::new(),
+            joker_rate: 20.0,
+            tarot_rate: 4.0,
+            planet_rate: 4.0,
+            spectral_rate: 0.0,
+            playing_card_rate: 0.0,
+            edition_rate: 1.0,
+            base_reroll_cost: 5,
+            boss_rerolled_this_ante: false,
             played_card_ids_this_ante: Vec::new(),
         };
 
@@ -293,6 +321,7 @@ impl GameState {
             DeckType::Ghost => {
                 // Spectral cards appear in the shop, and the run starts with a Hex
                 // (`spectral_rate = 2, consumables = {'c_hex'}`, game.lua:635)
+                self.spectral_rate = 2.0;
                 self.consumables.push(ConsumableCard::Spectral(SpectralCard::Hex));
             }
             DeckType::Zodiac => {

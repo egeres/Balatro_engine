@@ -1303,6 +1303,7 @@ impl GameState {
                 self.current_blind = BlindKind::Small;
                 self.blind_defeated_this_ante = [false; 3];
                 self.boss_blind = self.pick_boss_blind();
+                self.boss_rerolled_this_ante = false;
                 self.played_card_ids_this_ante.clear();
             }
         }

@@ -388,6 +388,8 @@ pub struct ShopOffer {
 pub enum ShopItem {
     Joker(JokerInstance),
     Consumable(ConsumableCard),
+    /// A loose playing card. Only stocked once Magic Trick has been redeemed.
+    PlayingCard(CardInstance),
     Pack(PackKind),
     Voucher(VoucherKind),
 }

@@ -219,6 +219,14 @@ fn shop_info_json(gs: &GameState) -> Value {
                     "type": c.card_type(),
                     "name": c.display_name(),
                 }),
+                card::ShopItem::PlayingCard(c) => serde_json::json!({
+                    "type": "PlayingCard",
+                    "rank": format!("{:?}", c.rank),
+                    "suit": format!("{:?}", c.suit),
+                    "enhancement": format!("{:?}", c.enhancement),
+                    "edition": format!("{:?}", c.edition),
+                    "seal": format!("{:?}", c.seal),
+                }),
                 card::ShopItem::Pack(p) => serde_json::json!({
                     "type": "Pack",
                     "kind": format!("{:?}", p),
@@ -393,6 +401,7 @@ fn available_actions_json(gs: &GameState) -> Value {
                             card::ShopItem::Joker(_) => "BuyJoker",
                             card::ShopItem::Pack(_) => "BuyPack",
                             card::ShopItem::Consumable(_) => "BuyConsumable",
+                            card::ShopItem::PlayingCard(_) => "BuyPlayingCard",
                             card::ShopItem::Voucher(_) => "BuyVoucher",
                         },
                         "price": offer.price,
@@ -577,6 +586,14 @@ impl BalatroEngine {
 
     fn buy_consumable(&mut self, index: usize) -> PyResult<()> {
         self.gs.buy_consumable(index).map_err(balatro_err_to_py)
+    }
+
+    fn buy_playing_card(&mut self, index: usize) -> PyResult<()> {
+        self.gs.buy_playing_card(index).map_err(balatro_err_to_py)
+    }
+
+    fn reroll_boss_blind(&mut self) -> PyResult<()> {
+        self.gs.reroll_boss_blind().map_err(balatro_err_to_py)
     }
 
     fn buy_pack(&mut self, index: usize) -> PyResult<()> {

@@ -58,6 +58,21 @@ class BuyJoker:
 
 
 @dataclass(frozen=True)
+class BuyPlayingCard:
+    """Buy a loose playing card from the shop by shop index.
+
+    Only offered once the Magic Trick voucher has been redeemed.
+    """
+
+    index: int
+
+
+@dataclass(frozen=True)
+class RerollBossBlind:
+    """Re-roll the upcoming Boss blind for $10 (needs Director's Cut or Retcon)."""
+
+
+@dataclass(frozen=True)
 class SellJoker:
     """Sell an owned joker by joker-slot index."""
 
@@ -135,6 +150,8 @@ Action = (
     | PlaySelectedHand
     | DiscardSelected
     | BuyJoker
+    | BuyPlayingCard
+    | RerollBossBlind
     | SellJoker
     | BuyConsumable
     | BuyPack

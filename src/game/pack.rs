@@ -3,6 +3,23 @@ use crate::types::*;
 use super::{GameState, GameStateKind, BalatroError};
 
 impl GameState {
+    /// The Planet for the hand type played most this run, if any has been played
+    /// (card.lua:1737). Used by Telescope.
+    fn most_played_planet(&self) -> Option<PlanetCard> {
+        let (&hand_type, _) = self
+            .hand_levels
+            .iter()
+            .filter(|(_, h)| h.visible && h.played > 0)
+            .max_by_key(|(ht, h)| (h.played, std::cmp::Reverse(ht.display_name())))?;
+        [
+            PlanetCard::Mercury, PlanetCard::Venus, PlanetCard::Earth, PlanetCard::Mars,
+            PlanetCard::Jupiter, PlanetCard::Saturn, PlanetCard::Uranus, PlanetCard::Neptune,
+            PlanetCard::Pluto, PlanetCard::PlanetX, PlanetCard::Ceres, PlanetCard::Eris,
+        ]
+        .into_iter()
+        .find(|p| p.hand_type() == hand_type)
+    }
+
     pub(crate) fn generate_pack_contents(&mut self, kind: PackKind) -> PackContents {
         let cards_shown = kind.cards_shown();
         let picks = kind.picks_allowed();
@@ -13,17 +30,35 @@ impl GameState {
             | PackKind::ArcanaPackSmall
             | PackKind::ArcanaPackJumbo
             | PackKind::ArcanaPackMega => {
+                // Omen Globe: each slot has a 1-in-5 chance of being a Spectral instead
+                // (card.lua:1731).
+                let omen_globe = self.has_voucher(VoucherKind::OmenGlobe);
                 for _ in 0..cards_shown {
-                    let t = self.random_tarot();
-                    cards.push(PackCard::Consumable(ConsumableCard::Tarot(t)));
+                    if omen_globe && self.rng.next_f64() > 0.8 {
+                        let sp = self.random_spectral();
+                        cards.push(PackCard::Consumable(ConsumableCard::Spectral(sp)));
+                    } else {
+                        let t = self.random_tarot();
+                        cards.push(PackCard::Consumable(ConsumableCard::Tarot(t)));
+                    }
                 }
             }
             PackKind::CelestialPack
             | PackKind::CelestialPackSmall
             | PackKind::CelestialPackJumbo
             | PackKind::CelestialPackMega => {
-                for _ in 0..cards_shown {
-                    let p = self.random_planet();
+                // Telescope: the first card is always the Planet for the most played hand
+                // (card.lua:1737).
+                let telescope_pick = if self.has_voucher(VoucherKind::Telescope) {
+                    self.most_played_planet()
+                } else {
+                    None
+                };
+                for i in 0..cards_shown {
+                    let p = match (i, telescope_pick) {
+                        (0, Some(planet)) => planet,
+                        _ => self.random_planet(),
+                    };
                     cards.push(PackCard::Consumable(ConsumableCard::Planet(p)));
                 }
             }
@@ -31,25 +66,9 @@ impl GameState {
             | PackKind::SpectralPackSmall
             | PackKind::SpectralPackJumbo
             | PackKind::SpectralPackMega => {
-                let spectrals = vec![
-                    SpectralCard::Familiar,
-                    SpectralCard::Grim,
-                    SpectralCard::Incantation,
-                    SpectralCard::Talisman,
-                    SpectralCard::Aura,
-                    SpectralCard::Wraith,
-                    SpectralCard::Ectoplasm,
-                    SpectralCard::Immolate,
-                    SpectralCard::Ankh,
-                    SpectralCard::DejaVu,
-                    SpectralCard::Hex,
-                    SpectralCard::Trance,
-                    SpectralCard::Medium,
-                    SpectralCard::Cryptid,
-                ];
                 for _ in 0..cards_shown {
-                    let idx = self.rng.range_usize(0, spectrals.len() - 1);
-                    cards.push(PackCard::Consumable(ConsumableCard::Spectral(spectrals[idx])));
+                    let sp = self.random_spectral();
+                    cards.push(PackCard::Consumable(ConsumableCard::Spectral(sp)));
                 }
             }
             PackKind::BuffoonPack
@@ -77,12 +96,8 @@ impl GameState {
                     let rank_idx = self.rng.range_usize(0, 12);
                     let id = self.next_id();
                     let mut card = CardInstance::new(id, ranks[rank_idx], suits[suit_idx]);
-                    // Edition probabilities: 4% Foil, 2.8% Holographic, 1.2% Polychrome
-                    let ed_roll = self.rng.next_f64();
-                    card.edition = if ed_roll < 0.012 { Edition::Polychrome }
-                        else if ed_roll < 0.04 { Edition::Holographic }
-                        else if ed_roll < 0.08 { Edition::Foil }
-                        else { Edition::None };
+                    // Hone / Glow Up scale the edition chances via edition_rate.
+                    card.edition = self.poll_edition(false);
                     cards.push(PackCard::PlayingCard(card));
                 }
             }

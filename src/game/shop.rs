@@ -4,45 +4,179 @@ use std::collections::HashMap;
 use super::{GameState, GameStateKind, BlindKind, BalatroError, HistoryEvent, upgraded_voucher};
 
 impl GameState {
+    /// Booster packs offered per shop, with Balatro's weights (game.lua:665-692).
+    /// Every family and size is reachable; Mega variants are rare.
+    const PACK_POOL: [(PackKind, f64); 20] = [
+        (PackKind::ArcanaPackSmall, 1.0),
+        (PackKind::ArcanaPack, 3.0),
+        (PackKind::ArcanaPackJumbo, 2.0),
+        (PackKind::ArcanaPackMega, 0.5),
+        (PackKind::CelestialPackSmall, 1.0),
+        (PackKind::CelestialPack, 3.0),
+        (PackKind::CelestialPackJumbo, 2.0),
+        (PackKind::CelestialPackMega, 0.5),
+        (PackKind::StandardPackSmall, 1.0),
+        (PackKind::StandardPack, 3.0),
+        (PackKind::StandardPackJumbo, 2.0),
+        (PackKind::StandardPackMega, 0.5),
+        (PackKind::BuffoonPackSmall, 0.6),
+        (PackKind::BuffoonPack, 0.6),
+        (PackKind::BuffoonPackJumbo, 0.6),
+        (PackKind::BuffoonPackMega, 0.15),
+        (PackKind::SpectralPackSmall, 0.3),
+        (PackKind::SpectralPack, 0.3),
+        (PackKind::SpectralPackJumbo, 0.3),
+        (PackKind::SpectralPackMega, 0.07),
+    ];
+
+    /// Pick one entry from `(item, weight)` pairs.
+    fn weighted_pick<T: Copy>(&mut self, pool: &[(T, f64)]) -> Option<T> {
+        let total: f64 = pool.iter().map(|(_, w)| *w).sum();
+        if total <= 0.0 {
+            return None;
+        }
+        let mut roll = self.rng.next_f64() * total;
+        for (item, weight) in pool {
+            roll -= *weight;
+            if roll <= 0.0 {
+                return Some(*item);
+            }
+        }
+        pool.last().map(|(item, _)| *item)
+    }
+
+    /// What a single shop card slot turns into, by the current rates (game.lua:1901).
+    fn roll_shop_slot(&mut self) -> Option<ShopItem> {
+        #[derive(Clone, Copy, PartialEq)]
+        enum Slot {
+            Joker,
+            Tarot,
+            Planet,
+            Spectral,
+            PlayingCard,
+        }
+        let pool = [
+            (Slot::Joker, self.joker_rate),
+            (Slot::Tarot, self.tarot_rate),
+            (Slot::Planet, self.planet_rate),
+            (Slot::Spectral, self.spectral_rate),
+            (Slot::PlayingCard, self.playing_card_rate),
+        ];
+        match self.weighted_pick(&pool)? {
+            Slot::Joker => self.generate_random_joker().map(ShopItem::Joker),
+            Slot::Tarot => {
+                let t = self.random_tarot();
+                Some(ShopItem::Consumable(ConsumableCard::Tarot(t)))
+            }
+            Slot::Planet => {
+                let p = self.random_planet();
+                Some(ShopItem::Consumable(ConsumableCard::Planet(p)))
+            }
+            Slot::Spectral => {
+                let sp = self.random_spectral();
+                Some(ShopItem::Consumable(ConsumableCard::Spectral(sp)))
+            }
+            Slot::PlayingCard => {
+                let c = self.random_playing_card();
+                Some(ShopItem::PlayingCard(c))
+            }
+        }
+    }
+
+    /// A random playing card for the shop. Illusion lets it carry an enhancement, an edition and
+    /// a seal 40% of the time (UI_definitions.lua:772).
+    pub(crate) fn random_playing_card(&mut self) -> CardInstance {
+        let suits = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds];
+        let ranks = [
+            Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six, Rank::Seven,
+            Rank::Eight, Rank::Nine, Rank::Ten, Rank::Jack, Rank::Queen, Rank::King, Rank::Ace,
+        ];
+        let suit = suits[self.rng.range_usize(0, 3)];
+        let rank = ranks[self.rng.range_usize(0, 12)];
+        let id = self.next_id();
+        let mut card = CardInstance::new(id, rank, suit);
+
+        if self.has_voucher(VoucherKind::Illusion) && self.rng.next_f64() > 0.6 {
+            let enhancements = [
+                Enhancement::Bonus, Enhancement::Mult, Enhancement::Wild, Enhancement::Glass,
+                Enhancement::Steel, Enhancement::Stone, Enhancement::Gold, Enhancement::Lucky,
+            ];
+            card.enhancement = enhancements[self.rng.range_usize(0, enhancements.len() - 1)];
+            card.edition = self.poll_edition(false);
+            let seals = [Seal::None, Seal::Gold, Seal::Red, Seal::Blue, Seal::Purple];
+            card.seal = seals[self.rng.range_usize(0, seals.len() - 1)];
+        }
+        card
+    }
+
+    /// Roll an edition using the run's `edition_rate` (common_events.lua:2069).
+    /// Hone doubles the Foil/Holo/Poly chances, Glow Up quadruples them.
+    pub(crate) fn poll_edition(&mut self, allow_negative: bool) -> Edition {
+        let rate = self.edition_rate;
+        let roll = self.rng.next_f64();
+        if allow_negative && roll > 1.0 - 0.003 {
+            Edition::Negative
+        } else if roll > 1.0 - 0.006 * rate {
+            Edition::Polychrome
+        } else if roll > 1.0 - 0.02 * rate {
+            Edition::Holographic
+        } else if roll > 1.0 - 0.04 * rate {
+            Edition::Foil
+        } else {
+            Edition::None
+        }
+    }
+
+    /// The Soul and Black Hole are hidden - they never come out of a normal Spectral roll.
+    pub(crate) fn random_spectral(&mut self) -> SpectralCard {
+        const POOL: [SpectralCard; 16] = [
+            SpectralCard::Familiar, SpectralCard::Grim, SpectralCard::Incantation,
+            SpectralCard::Talisman, SpectralCard::Aura, SpectralCard::Wraith,
+            SpectralCard::Sigil, SpectralCard::Ouija, SpectralCard::Ectoplasm,
+            SpectralCard::Immolate, SpectralCard::Ankh, SpectralCard::DejaVu,
+            SpectralCard::Hex, SpectralCard::Trance, SpectralCard::Medium,
+            SpectralCard::Cryptid,
+        ];
+        POOL[self.rng.range_usize(0, POOL.len() - 1)]
+    }
+
     pub(crate) fn generate_shop(&mut self) {
-        // Count shop slots (base: 2 jokers + extras from vouchers)
-        let joker_slots = 2 + if self.has_voucher(VoucherKind::Overstock) { 1 } else { 0 }
+        // Card slots: base 2, +1 per Overstock voucher (game.lua:1885).
+        let card_slots = 2
+            + if self.has_voucher(VoucherKind::Overstock) { 1 } else { 0 }
             + if self.has_voucher(VoucherKind::OverstockPlus) { 1 } else { 0 };
 
         // Cleared up front and filled in place, so each joker rolled is visible to the pool
         // filter and cannot be rolled twice in the same shop.
         self.shop_offers.clear();
 
-        // Generate jokers
-        for _ in 0..joker_slots {
-            if let Some(joker) = self.generate_random_joker() {
-                let price = joker.kind.base_cost();
+        for _ in 0..card_slots {
+            if let Some(item) = self.roll_shop_slot() {
+                let price = match &item {
+                    ShopItem::Joker(j) => j.kind.base_cost(),
+                    ShopItem::Consumable(c) => c.base_cost(),
+                    ShopItem::PlayingCard(_) => 1,
+                    ShopItem::Pack(p) => p.base_cost(),
+                    ShopItem::Voucher(_) => 10,
+                };
+                self.shop_offers.push(ShopOffer { kind: item, price, sold: false });
+            }
+        }
+
+        // Two booster pack slots, drawn from the full weighted pool.
+        for _ in 0..2 {
+            if let Some(pack) = self.weighted_pick(&Self::PACK_POOL) {
+                let price = pack.base_cost();
                 self.shop_offers.push(ShopOffer {
-                    kind: ShopItem::Joker(joker),
+                    kind: ShopItem::Pack(pack),
                     price,
                     sold: false,
                 });
             }
         }
-        let mut offers: Vec<ShopOffer> = std::mem::take(&mut self.shop_offers);
 
-        // Booster packs: Arcana + Celestial always; Spectral at Purple stake or Ghost deck
-        let mut packs = vec![PackKind::ArcanaPack, PackKind::CelestialPack];
-        if self.stake as u8 >= Stake::Purple as u8 || self.deck_type == DeckType::Ghost {
-            packs.push(PackKind::SpectralPack);
-        }
-        for &pack in &packs {
-            let price = pack.base_cost();
-            offers.push(ShopOffer {
-                kind: ShopItem::Pack(pack),
-                price,
-                sold: false,
-            });
-        }
-
-        self.shop_offers = offers;
         self.shop_voucher = Some(self.random_voucher());
-        self.reroll_cost = 5;
+        self.reroll_cost = self.base_reroll_cost;
 
         // ChaosTheClown: +1 free reroll per shop visit
         let chaos_count = self.jokers.iter().filter(|j| j.kind == JokerKind::ChaosTheClown && j.active).count();
@@ -483,14 +617,17 @@ impl GameState {
             VoucherKind::ClearanceSale | VoucherKind::Liquidation => {
                 // Price discounts — handled in calculate_shop_price
             }
-            VoucherKind::Hone | VoucherKind::GlowUp => {
-                // Enhanced editions in booster packs — handled in generate_pack_contents
+            VoucherKind::Hone => {
+                // Foil/Holo/Poly appear twice as often (card.lua:1900).
+                self.edition_rate = 2.0;
             }
-            VoucherKind::RerollSurplus => {
-                // -$1 reroll cost (handled in reroll_shop via voucher check)
+            VoucherKind::GlowUp => {
+                self.edition_rate = 4.0;
             }
-            VoucherKind::RerollGlut => {
-                // -$1 more reroll cost
+            VoucherKind::RerollSurplus | VoucherKind::RerollGlut => {
+                // Rerolls cost $2 less each (card.lua:1925).
+                self.base_reroll_cost = self.base_reroll_cost.saturating_sub(2);
+                self.reroll_cost = self.reroll_cost.saturating_sub(2);
             }
             VoucherKind::CrystalBall => {
                 self.consumable_slots += 1;
@@ -520,12 +657,12 @@ impl GameState {
                 self.max_discards += 1;
                 self.discards_remaining = self.discards_remaining.saturating_add(1);
             }
-            VoucherKind::TarotMerchant | VoucherKind::TarotTycoon => {
-                // Price discounts on tarots — handled in calculate_shop_price
-            }
-            VoucherKind::PlanetMerchant | VoucherKind::PlanetTycoon => {
-                // Price discounts on planets — handled in calculate_shop_price
-            }
+            // These raise how often the card type shows up in the shop, they are not discounts
+            // (card.lua:1890, `tarot_rate = 4 * extra`).
+            VoucherKind::TarotMerchant => self.tarot_rate = 9.6,
+            VoucherKind::TarotTycoon => self.tarot_rate = 32.0,
+            VoucherKind::PlanetMerchant => self.planet_rate = 9.6,
+            VoucherKind::PlanetTycoon => self.planet_rate = 32.0,
             VoucherKind::SeedMoney => {
                 // Sets the cap outright rather than adding to it (game.lua:602).
                 self.max_interest = self.max_interest.max(50);
@@ -540,16 +677,27 @@ impl GameState {
                 self.joker_slots += 1;
             }
             VoucherKind::MagicTrick | VoucherKind::Illusion => {
-                // Playing cards available in shop — handled in generate_shop
+                // Loose playing cards start appearing in the shop (card.lua:1905).
+                // Illusion additionally lets them carry enhancements/editions/seals.
+                self.playing_card_rate = 4.0;
             }
-            VoucherKind::Hieroglyph | VoucherKind::Petroglyph => {
-                // Reduces winning ante requirement — handled in win condition check
+            VoucherKind::Hieroglyph => {
+                // -1 Ante, at the cost of a hand each round (card.lua:1957).
+                self.ante = self.ante.saturating_sub(1).max(1);
+                self.max_hands = self.max_hands.saturating_sub(1);
+                self.hands_remaining = self.hands_remaining.saturating_sub(1);
+            }
+            VoucherKind::Petroglyph => {
+                // -1 Ante, at the cost of a discard each round.
+                self.ante = self.ante.saturating_sub(1).max(1);
+                self.max_discards = self.max_discards.saturating_sub(1);
+                self.discards_remaining = self.discards_remaining.saturating_sub(1);
             }
             VoucherKind::DirectorsCut => {
-                self.free_rerolls += 1;
+                // Unlocks a paid Boss blind reroll; no immediate effect.
             }
             VoucherKind::Retcon => {
-                // Allows rerolling boss blind — handled in advance_blind
+                // Unlimited paid Boss blind rerolls; no immediate effect.
             }
             VoucherKind::PaintBrush => {
                 self.hand_size += 1;
@@ -588,7 +736,7 @@ impl GameState {
         }
 
         self.money -= actual_cost as i32;
-        self.reroll_cost += 1; // Increases by 1 each time (normally)
+        self.reroll_cost += 1; // Escalates by $1 per reroll within a shop
 
         // Regenerate joker offers
         self.generate_shop();
@@ -601,6 +749,66 @@ impl GameState {
             }
         }
 
+        Ok(())
+    }
+
+    /// Buy a loose playing card from the shop and add it to the deck.
+    /// Only reachable once Magic Trick has been redeemed.
+    pub fn buy_playing_card(&mut self, shop_index: usize) -> Result<(), BalatroError> {
+        if !matches!(self.state, GameStateKind::Shop) {
+            return Err(BalatroError::NotInShop);
+        }
+        if shop_index >= self.shop_offers.len() {
+            return Err(BalatroError::IndexOutOfRange(shop_index, self.shop_offers.len()));
+        }
+        let offer = &self.shop_offers[shop_index];
+        if offer.sold {
+            return Err(BalatroError::AlreadySold);
+        }
+        let ShopItem::PlayingCard(card) = offer.kind.clone() else {
+            return Err(BalatroError::WrongItemType("Expected playing card".to_string()));
+        };
+        let price = self.calculate_shop_price(offer.price);
+        if !self.can_afford(price as i32) {
+            return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
+        }
+
+        self.money -= price as i32;
+        self.shop_offers[shop_index].sold = true;
+
+        let deck_idx = self.deck.len();
+        self.deck.push(card);
+        self.draw_pile.push(deck_idx);
+
+        // Hologram gains +0.25 Xmult for each playing card added to the deck.
+        for j in self.jokers.iter_mut() {
+            if j.kind == JokerKind::Hologram && j.active {
+                let cur = j.get_counter_f64("x_mult");
+                j.set_counter_f64("x_mult", cur + 0.25);
+            }
+        }
+        Ok(())
+    }
+
+    /// Re-roll the upcoming Boss blind for $10. Director's Cut allows one per ante;
+    /// Retcon lifts the limit (game.lua:606, :620).
+    pub fn reroll_boss_blind(&mut self) -> Result<(), BalatroError> {
+        let unlimited = self.has_voucher(VoucherKind::Retcon);
+        if !unlimited && !self.has_voucher(VoucherKind::DirectorsCut) {
+            return Err(BalatroError::NoVoucherAvailable);
+        }
+        if !unlimited && self.boss_rerolled_this_ante {
+            return Err(BalatroError::BossBlindEffect(
+                "Director's Cut allows only one Boss reroll per ante".to_string(),
+            ));
+        }
+        let price = 10u32;
+        if !self.can_afford(price as i32) {
+            return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
+        }
+        self.money -= price as i32;
+        self.boss_rerolled_this_ante = true;
+        self.boss_blind = self.pick_boss_blind();
         Ok(())
     }
 
