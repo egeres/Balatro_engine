@@ -277,3 +277,46 @@ fn test_ride_the_bus_resets_before_scoring() {
     // Reset happens before scoring, so no +7 this hand. HC 15 chips, mult 1.
     assert_eq!(r.final_mult as i64, 1);
 }
+
+/// Wee Joker gains +8 Chips per *scoring* 2 during card scoring, so the gain counts on the
+/// hand that triggered it (card.lua:3083).
+#[test]
+fn test_wee_joker_upgrade_applies_to_the_same_hand() {
+    let deck = vec![
+        card(0, Rank::Two, Suit::Spades),
+        card(1, Rank::Two, Suit::Hearts),
+    ];
+    let (gs, r) = play_with(deck, 2, vec![joker(0, JokerKind::WeeJoker)], &[0, 1]);
+    assert_eq!(gs.jokers[0].get_counter_i64("chips"), 16);
+    // Pair: 10 base + 2 + 2 = 14, +16 from Wee = 30
+    assert_eq!(r.final_chips as i64, 30);
+}
+
+/// Only *scoring* 2s count — a 2 left out of the scoring hand does nothing.
+#[test]
+fn test_wee_joker_ignores_non_scoring_twos() {
+    let deck = vec![
+        card(0, Rank::Ace, Suit::Spades),
+        card(1, Rank::Ace, Suit::Hearts),
+        card(2, Rank::Two, Suit::Clubs), // kicker, does not score
+    ];
+    let (gs, _) = play_with(deck, 3, vec![joker(0, JokerKind::WeeJoker)], &[0, 1, 2]);
+    assert_eq!(gs.jokers[0].get_counter_i64("chips"), 0);
+}
+
+/// Retriggers stack: Hack retriggers 2s, so each scoring 2 feeds Wee Joker twice.
+#[test]
+fn test_wee_joker_counts_retriggers() {
+    let deck = vec![
+        card(0, Rank::Two, Suit::Spades),
+        card(1, Rank::Two, Suit::Hearts),
+    ];
+    let (gs, _) = play_with(
+        deck,
+        2,
+        vec![joker(0, JokerKind::WeeJoker), joker(1, JokerKind::Hack)],
+        &[0, 1],
+    );
+    // 2 twos x 2 triggers each x 8 = 32
+    assert_eq!(gs.jokers[0].get_counter_i64("chips"), 32);
+}

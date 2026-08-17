@@ -50,6 +50,28 @@ impl GameState {
                         self.jokers[i].set_counter_i64("chips", cur + 4);
                     }
                 }
+                JokerKind::WeeJoker => {
+                    // +8 Chips per *scoring* 2 (card.lua:3083, `context.individual`), counted
+                    // once per trigger so retriggers — Hack in particular — stack. Individual
+                    // effects run before joker_main, so the gain counts on this hand.
+                    let twos: usize = scoring
+                        .iter()
+                        .filter(|&&s| played[s].rank == Rank::Two && !played[s].debuffed)
+                        .map(|&s| {
+                            1 + crate::scoring::count_retriggers(
+                                s,
+                                &played[s],
+                                &self.jokers,
+                                scoring,
+                                self.hands_remaining.saturating_sub(1),
+                            )
+                        })
+                        .sum();
+                    if twos > 0 {
+                        let cur = self.jokers[i].get_counter_i64("chips");
+                        self.jokers[i].set_counter_i64("chips", cur + 8 * twos as i64);
+                    }
+                }
                 JokerKind::Runner => {
                     if hand_type.contains_straight() {
                         let cur = self.jokers[i].get_counter_i64("chips");
@@ -679,15 +701,7 @@ impl GameState {
                         self.jokers[i].active = false;
                     }
                 }
-                                JokerKind::WeeJoker => {
-                    // +8 chips for each 2 played
-                    let twos = played.iter().filter(|c| c.rank == Rank::Two).count();
-                    if twos > 0 {
-                        let cur = self.jokers[i].get_counter_i64("chips");
-                        self.jokers[i].set_counter_i64("chips", cur + 8 * twos as i64);
-                    }
-                }
-                                                                JokerKind::Hologram => {
+                                                                                                JokerKind::Hologram => {
                     // +0.25 Xmult for each playing card added to deck
                     // (tracked when cards are added to deck)
                 }
