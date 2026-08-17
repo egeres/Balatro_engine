@@ -7,6 +7,151 @@ use std::collections::HashMap;
 use super::{GameState, GameStateKind, BlindKind, BalatroError, HistoryEvent, LastConsumable};
 
 impl GameState {
+    /// Evaluate a set of cards with the current jokers' hand-shape modifiers applied
+    /// (Four Fingers, Shortcut, Smeared Joker, Splash).
+    pub(crate) fn preview_hand(&self, cards: &[CardInstance]) -> crate::hand_eval::HandEvalResult {
+        let has = |k: JokerKind| self.jokers.iter().any(|j| j.kind == k && j.active);
+        evaluate_hand(
+            cards,
+            has(JokerKind::FourFingers),
+            has(JokerKind::Shortcut),
+            has(JokerKind::SmearedJoker),
+            has(JokerKind::Splash),
+        )
+    }
+
+    /// Joker effects that Balatro evaluates under `context.before` (card.lua:3411-3570), i.e.
+    /// after the hand type is known but *before* any card scores. Their upgraded values therefore
+    /// count towards the hand currently being played, not the next one.
+    ///
+    /// `played` is the working copy that will be scored, so mutations here (Vampire eating an
+    /// enhancement, Midas Mask gilding a face card) apply to this hand.
+    fn pre_score_joker_updates(
+        &mut self,
+        played: &mut [CardInstance],
+        eval: &crate::hand_eval::HandEvalResult,
+    ) {
+        let hand_type = eval.hand_type;
+        let scoring = &eval.scoring_indices;
+        let oops_mult = if self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active) {
+            2.0_f64
+        } else {
+            1.0_f64
+        };
+
+        for i in 0..self.jokers.len() {
+            if !self.jokers[i].active {
+                continue;
+            }
+            match self.jokers[i].kind {
+                JokerKind::SquareJoker => {
+                    if played.len() == 4 {
+                        let cur = self.jokers[i].get_counter_i64("chips");
+                        self.jokers[i].set_counter_i64("chips", cur + 4);
+                    }
+                }
+                JokerKind::Runner => {
+                    if hand_type.contains_straight() {
+                        let cur = self.jokers[i].get_counter_i64("chips");
+                        self.jokers[i].set_counter_i64("chips", cur + 15);
+                    }
+                }
+                JokerKind::GreenJoker => {
+                    let cur = self.jokers[i].get_counter_i64("mult");
+                    self.jokers[i].set_counter_i64("mult", cur + 1);
+                }
+                JokerKind::SpareTrousers => {
+                    if hand_type.contains_two_pair() {
+                        let cur = self.jokers[i].get_counter_i64("mult");
+                        self.jokers[i].set_counter_i64("mult", cur + 2);
+                    }
+                }
+                JokerKind::RideTheBus => {
+                    let has_face = scoring.iter().any(|&s| played[s].rank.is_face());
+                    if has_face {
+                        self.jokers[i].set_counter_i64("mult", 0);
+                    } else {
+                        let cur = self.jokers[i].get_counter_i64("mult");
+                        self.jokers[i].set_counter_i64("mult", cur + 1);
+                    }
+                }
+                JokerKind::Obelisk => {
+                    // Reset unless some *other* visible hand has been played at least as often
+                    // (card.lua:3543). `played` for this hand type is incremented after scoring,
+                    // so add 1 here to match Balatro, which increments up front.
+                    let this_plays = self
+                        .hand_levels
+                        .get(&hand_type)
+                        .map(|h| h.played)
+                        .unwrap_or(0)
+                        + 1;
+                    let another_is_at_least_as_played = self
+                        .hand_levels
+                        .iter()
+                        .any(|(ht, h)| *ht != hand_type && h.visible && h.played >= this_plays);
+                    if another_is_at_least_as_played {
+                        let cur = self.jokers[i].get_counter_f64("x_mult");
+                        self.jokers[i].set_counter_f64("x_mult", cur + 0.2);
+                    } else {
+                        self.jokers[i].set_counter_f64("x_mult", 1.0);
+                    }
+                }
+                JokerKind::Vampire => {
+                    // +0.1 Xmult per scoring enhanced card, and the enhancement is eaten before
+                    // the card scores — an eaten Glass card does not give its X2 this hand.
+                    let victims: Vec<usize> = scoring
+                        .iter()
+                        .copied()
+                        .filter(|&s| played[s].enhancement != Enhancement::None)
+                        .collect();
+                    if !victims.is_empty() {
+                        let cur = self.jokers[i].get_counter_f64("x_mult");
+                        self.jokers[i].set_counter_f64("x_mult", cur + 0.1 * victims.len() as f64);
+                        for s in victims {
+                            let id = played[s].id;
+                            played[s].enhancement = Enhancement::None;
+                            if let Some(c) = self.deck.iter_mut().find(|c| c.id == id) {
+                                c.enhancement = Enhancement::None;
+                            }
+                        }
+                    }
+                }
+                JokerKind::MidasMask => {
+                    for &s in scoring {
+                        if played[s].rank.is_face() {
+                            let id = played[s].id;
+                            played[s].enhancement = Enhancement::Gold;
+                            if let Some(c) = self.deck.iter_mut().find(|c| c.id == id) {
+                                c.enhancement = Enhancement::Gold;
+                            }
+                        }
+                    }
+                }
+                JokerKind::SpaceJoker => {
+                    // 1/4 to level up the played hand — before scoring, so the new level counts.
+                    if self.rng.next_bool_prob((0.25 * oops_mult).min(1.0)) {
+                        if let Some(level) = self.hand_levels.get_mut(&hand_type) {
+                            level.level += 1;
+                        }
+                    }
+                }
+                JokerKind::Dna => {
+                    // First hand of the round, exactly one card played: copy it into the deck
+                    // and draw the copy.
+                    let max_h = self.effective_max_hands();
+                    if self.hands_remaining == max_h && played.len() == 1 {
+                        let mut copy = played[0].clone();
+                        copy.id = self.next_id();
+                        let deck_idx = self.deck.len();
+                        self.deck.push(copy);
+                        self.hand.push(deck_idx);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     pub fn select_card(&mut self, hand_index: usize) -> Result<(), BalatroError> {
         if !matches!(self.state, GameStateKind::Round) {
             return Err(BalatroError::NotInRound);
@@ -153,6 +298,12 @@ impl GameState {
                 }
             }
         }
+
+        // The hand type is locked in before any joker gets to touch the cards
+        // (get_poker_hand_info runs at the top of evaluate_play), so compute it once here and
+        // hand it to the `before` pass.
+        let pre_eval = self.preview_hand(&played_cards);
+        self.pre_score_joker_updates(&mut played_cards, &pre_eval);
 
         // OopsAll6s: doubles all listed probabilities when active
         let oops_active = self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active);
@@ -518,14 +669,7 @@ impl GameState {
         for i in 0..self.jokers.len() {
             let kind = self.jokers[i].kind;
             match kind {
-                JokerKind::Runner => {
-                    // +15 chips if straight
-                    if hand_type == HandType::Straight || hand_type == HandType::StraightFlush {
-                        let cur = self.jokers[i].get_counter_i64("chips");
-                        self.jokers[i].set_counter_i64("chips", cur + 15);
-                    }
-                }
-                JokerKind::IceCream => {
+                                JokerKind::IceCream => {
                     // -5 chips per hand played
                     let cur = self.jokers[i].get_counter_i64("chips");
                     let new = (cur - 5).max(0);
@@ -535,14 +679,7 @@ impl GameState {
                         self.jokers[i].active = false;
                     }
                 }
-                JokerKind::SquareJoker => {
-                    // +4 chips if 4 cards played exactly
-                    if played.len() == 4 {
-                        let cur = self.jokers[i].get_counter_i64("chips");
-                        self.jokers[i].set_counter_i64("chips", cur + 4);
-                    }
-                }
-                JokerKind::WeeJoker => {
+                                JokerKind::WeeJoker => {
                     // +8 chips for each 2 played
                     let twos = played.iter().filter(|c| c.rank == Rank::Two).count();
                     if twos > 0 {
@@ -550,82 +687,11 @@ impl GameState {
                         self.jokers[i].set_counter_i64("chips", cur + 8 * twos as i64);
                     }
                 }
-                JokerKind::GreenJoker => {
-                    // +1 mult per hand played, -1 per discard
-                    let cur = self.jokers[i].get_counter_i64("mult");
-                    self.jokers[i].set_counter_i64("mult", cur + 1);
-                }
-                JokerKind::SpareTrousers => {
-                    if hand_type.contains_two_pair() {
-                        let cur = self.jokers[i].get_counter_i64("mult");
-                        self.jokers[i].set_counter_i64("mult", cur + 2);
-                    }
-                }
-                JokerKind::RideTheBus => {
-                    let scoring_has_face = result
-                        .scoring_card_indices
-                        .iter()
-                        .any(|&i| played[i].rank.is_face());
-                    if !scoring_has_face {
-                        let cur = self.jokers[i].get_counter_i64("mult");
-                        self.jokers[i].set_counter_i64("mult", cur + 1);
-                    } else {
-                        self.jokers[i].set_counter_i64("mult", 0);
-                    }
-                }
-                JokerKind::Hologram => {
+                                                                JokerKind::Hologram => {
                     // +0.25 Xmult for each playing card added to deck
                     // (tracked when cards are added to deck)
                 }
-                JokerKind::Vampire => {
-                    // +0.1 Xmult for each enhanced card scored, remove enhancement
-                    let enhanced: Vec<usize> = result
-                        .scoring_card_indices
-                        .iter()
-                        .filter(|&&si| played[si].enhancement != Enhancement::None)
-                        .copied()
-                        .collect();
-                    if !enhanced.is_empty() {
-                        let cur = self.jokers[i].get_counter_f64("x_mult");
-                        let new = cur + 0.1 * enhanced.len() as f64;
-                        self.jokers[i].set_counter_f64("x_mult", new);
-                        // Remove enhancements from those cards in deck
-                        for si in enhanced {
-                            let deck_idx = self.hand
-                                .iter()
-                                .find(|&&di| {
-                                    self.deck[di].id == played[si].id
-                                });
-                            if let Some(&di) = deck_idx {
-                                self.deck[di].enhancement = Enhancement::None;
-                            }
-                        }
-                    }
-                }
-                JokerKind::Obelisk => {
-                    // Xmult increases if you play different hand types
-                    // Track which hand type was played most
-                    // simplified: +0.2 if this hand type is NOT the most played
-                    let this_plays = self
-                        .hand_levels
-                        .get(&hand_type)
-                        .map(|h| h.played)
-                        .unwrap_or(0);
-                    let most_plays = self
-                        .hand_levels
-                        .values()
-                        .map(|h| h.played)
-                        .max()
-                        .unwrap_or(0);
-                    if this_plays < most_plays {
-                        let cur = self.jokers[i].get_counter_f64("x_mult");
-                        self.jokers[i].set_counter_f64("x_mult", cur + 0.2);
-                    } else {
-                        // Reset obelisk if this is the most played
-                        self.jokers[i].set_counter_f64("x_mult", 1.0);
-                    }
-                }
-                JokerKind::Madness => {
+                                                JokerKind::Madness => {
                     // +0.5 Xmult when blind is entered (done at begin_round)
                 }
                 JokerKind::Castle => {
@@ -662,15 +728,7 @@ impl GameState {
                         self.jokers[i].active = false;
                     }
                 }
-                JokerKind::SpaceJoker => {
-                    // 1/4 chance to level up the played hand (1/2 with OopsAll6s)
-                    if self.rng.next_bool_prob((0.25 * oops_mult).min(1.0)) {
-                        if let Some(level) = self.hand_levels.get_mut(&result.hand_type) {
-                            level.level += 1;
-                        }
-                    }
-                }
-                JokerKind::Seance => {
+                                JokerKind::Seance => {
                     // Create a spectral card if a Straight Flush is played
                     if matches!(result.hand_type, HandType::StraightFlush | HandType::FlushFive) {
                         if self.consumables.len() < self.consumable_slots as usize {
@@ -722,34 +780,7 @@ impl GameState {
                         }
                     }
                 }
-                JokerKind::MidasMask => {
-                    // Face cards scored become Gold enhancement
-                    for &sci in &result.scoring_card_indices {
-                        if played[sci].rank.is_face() {
-                            // Find the card in deck by id and set enhancement
-                            let card_id = played[sci].id;
-                            if let Some(deck_card) = self.deck.iter_mut().find(|c| c.id == card_id) {
-                                deck_card.enhancement = Enhancement::Gold;
-                            }
-                        }
-                    }
-                }
-                JokerKind::Dna => {
-                    // On the first hand of a round, if only 1 card was played, add a permanent copy to deck and draw it
-                    let max_h = self.effective_max_hands();
-                    let was_first_hand = self.hands_remaining + 1 == max_h;
-                    if was_first_hand && played.len() == 1 {
-                        let card_to_copy = played[0].clone();
-                        let new_id = self.next_id();
-                        let mut new_card = card_to_copy;
-                        new_card.id = new_id;
-                        let deck_idx = self.deck.len();
-                        self.deck.push(new_card);
-                        // Draw directly to hand (wiki: "draw it to your hand")
-                        self.hand.push(deck_idx);
-                    }
-                }
-                _ => {}
+                                                _ => {}
             }
         }
     }

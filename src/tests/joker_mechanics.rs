@@ -172,3 +172,108 @@ fn test_pareidolia_makes_non_face_cards_count_as_face() {
     // With Pareidolia: HC 5+2+30=37 chips, mult=1 → 37
     assert_eq!(with_par.final_score as i64, 37);
 }
+
+// =========================================================
+// `before`-phase scaling: the upgrade counts towards the hand that triggered it
+// =========================================================
+
+/// Play `played_idx` from a controlled hand and return the resulting state + score.
+fn play_with(
+    deck: Vec<CardInstance>,
+    hand_size: usize,
+    jokers: Vec<JokerInstance>,
+    select: &[usize],
+) -> (GameState, crate::scoring::ScoreResult) {
+    let mut gs = make_game();
+    setup_round(&mut gs, deck, hand_size);
+    gs.jokers = jokers;
+    gs.score_goal = f64::MAX; // never end the round
+    for &i in select {
+        gs.select_card(i).unwrap();
+    }
+    let r = gs.play_hand().unwrap();
+    (gs, r)
+}
+
+/// Green Joker gains +1 Mult under `context.before` (card.lua:3563), so the very first hand
+/// already scores with +1.
+#[test]
+fn test_green_joker_upgrade_applies_to_the_same_hand() {
+    let deck = vec![card(0, Rank::Ace, Suit::Spades)];
+    let (gs, r) = play_with(deck, 1, vec![joker(0, JokerKind::GreenJoker)], &[0]);
+    assert_eq!(gs.jokers[0].get_counter_i64("mult"), 1);
+    // HC: 16 chips, mult 1 + 1 = 2 → 32
+    assert_eq!(r.final_mult as i64, 2);
+}
+
+/// Runner's +15 Chips lands before the hand scores.
+#[test]
+fn test_runner_upgrade_applies_to_the_same_hand() {
+    let deck = vec![
+        card(0, Rank::Two, Suit::Spades),
+        card(1, Rank::Three, Suit::Hearts),
+        card(2, Rank::Four, Suit::Clubs),
+        card(3, Rank::Five, Suit::Diamonds),
+        card(4, Rank::Six, Suit::Spades),
+    ];
+    let (gs, r) = play_with(deck, 5, vec![joker(0, JokerKind::Runner)], &[0, 1, 2, 3, 4]);
+    assert_eq!(gs.jokers[0].get_counter_i64("chips"), 15);
+    // Straight: 30 base + 2+3+4+5+6 = 50, +15 from Runner = 65
+    assert_eq!(r.final_chips as i64, 65);
+}
+
+/// Square Joker's +4 Chips lands before the hand scores.
+#[test]
+fn test_square_joker_upgrade_applies_to_the_same_hand() {
+    let deck = vec![
+        card(0, Rank::Two, Suit::Spades),
+        card(1, Rank::Two, Suit::Hearts),
+        card(2, Rank::Two, Suit::Clubs),
+        card(3, Rank::Two, Suit::Diamonds),
+    ];
+    let (gs, r) = play_with(deck, 4, vec![joker(0, JokerKind::SquareJoker)], &[0, 1, 2, 3]);
+    assert_eq!(gs.jokers[0].get_counter_i64("chips"), 4);
+    // FourOfAKind: 60 base + 2+2+2+2 = 68, +4 = 72
+    assert_eq!(r.final_chips as i64, 72);
+}
+
+/// Spare Trousers' +2 Mult lands before the hand scores.
+#[test]
+fn test_spare_trousers_upgrade_applies_to_the_same_hand() {
+    let deck = vec![
+        card(0, Rank::Two, Suit::Spades),
+        card(1, Rank::Two, Suit::Hearts),
+        card(2, Rank::Three, Suit::Clubs),
+        card(3, Rank::Three, Suit::Diamonds),
+    ];
+    let (gs, r) = play_with(deck, 4, vec![joker(0, JokerKind::SpareTrousers)], &[0, 1, 2, 3]);
+    assert_eq!(gs.jokers[0].get_counter_i64("mult"), 2);
+    // TwoPair: mult 2 + 2 = 4
+    assert_eq!(r.final_mult as i64, 4);
+}
+
+/// Vampire eats the enhancement *before* the card scores, so an eaten Glass card
+/// does not give its X2 on the hand that fed Vampire.
+#[test]
+fn test_vampire_eats_the_enhancement_before_it_scores() {
+    let mut glass = card(0, Rank::Ace, Suit::Spades);
+    glass.enhancement = Enhancement::Glass;
+    let (gs, r) = play_with(vec![glass], 1, vec![joker(0, JokerKind::Vampire)], &[0]);
+
+    assert!((gs.jokers[0].get_counter_f64("x_mult") - 1.1).abs() < 1e-9);
+    // HC 16 chips. Glass X2 is gone; Vampire's own X1.1 applies → mult 1.1
+    assert!((r.final_mult - 1.1).abs() < 1e-9, "got {}", r.final_mult);
+    assert_eq!(gs.deck[0].enhancement, Enhancement::None);
+}
+
+/// Ride the Bus resets before scoring when the hand contains a scoring face card.
+#[test]
+fn test_ride_the_bus_resets_before_scoring() {
+    let deck = vec![card(0, Rank::King, Suit::Spades)];
+    let mut j = joker(0, JokerKind::RideTheBus);
+    j.set_counter_i64("mult", 7);
+    let (gs, r) = play_with(deck, 1, vec![j], &[0]);
+    assert_eq!(gs.jokers[0].get_counter_i64("mult"), 0);
+    // Reset happens before scoring, so no +7 this hand. HC 15 chips, mult 1.
+    assert_eq!(r.final_mult as i64, 1);
+}
