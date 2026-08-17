@@ -15,6 +15,13 @@ impl GameState {
                 self.apply_planet(*p);
                 self.planet_cards_used += 1;
                 self.planet_types_used.insert(*p);
+                // Constellation gains +0.1 Xmult per Planet card used (card.lua:2727)
+                for j in self.jokers.iter_mut() {
+                    if j.kind == JokerKind::Constellation && j.active {
+                        let cur = j.get_counter_f64("x_mult");
+                        j.set_counter_f64("x_mult", cur + 0.1);
+                    }
+                }
             }
             ConsumableCard::Tarot(t) => {
                 self.apply_tarot(*t, &targets)?;

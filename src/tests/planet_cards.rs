@@ -183,3 +183,48 @@ fn test_planet_consumed_is_removed_from_consumables() {
     gs.use_consumable(0, vec![]).unwrap();
     assert_eq!(gs.consumables.len(), 0, "Planet card should be consumed after use");
 }
+
+// =========================================================
+// Constellation: +X0.1 per Planet card used
+// =========================================================
+
+fn use_planets(count: usize) -> GameState {
+    let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    gs.jokers.push(joker(0, JokerKind::Constellation));
+    for _ in 0..count {
+        gs.consumables
+            .push(crate::card::ConsumableCard::Planet(PlanetCard::Mercury));
+        gs.use_consumable(0, vec![]).unwrap();
+    }
+    gs
+}
+
+#[test]
+fn test_constellation_starts_at_x1() {
+    let gs = use_planets(0);
+    assert_eq!(gs.jokers[0].get_counter_f64("x_mult"), 1.0);
+}
+
+#[test]
+fn test_constellation_gains_on_planet_use() {
+    let gs = use_planets(1);
+    assert!((gs.jokers[0].get_counter_f64("x_mult") - 1.1).abs() < 1e-9);
+}
+
+#[test]
+fn test_constellation_stacks_across_planet_uses() {
+    let gs = use_planets(5);
+    assert!((gs.jokers[0].get_counter_f64("x_mult") - 1.5).abs() < 1e-9);
+}
+
+#[test]
+fn test_constellation_ignores_tarot_use() {
+    let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    gs.jokers.push(joker(0, JokerKind::Constellation));
+    gs.consumables
+        .push(crate::card::ConsumableCard::Tarot(TarotCard::TheDevil));
+    gs.use_consumable(0, vec![0]).unwrap();
+    assert_eq!(gs.jokers[0].get_counter_f64("x_mult"), 1.0);
+}
