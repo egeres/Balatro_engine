@@ -252,11 +252,8 @@ pub(crate) fn calc_joker_individual(
                 effect.mult += 5;
             }
         }
-        JokerKind::Hiker => {
-            if is_scoring {
-                effect.chips += 5;
-            }
-        }
+        // Hiker adds no chips directly. It writes perma_bonus onto the card (card.lua:3067),
+        // which the engine applies after the hand in post_play_joker_updates.
         JokerKind::Arrowhead => {
             if is_scoring && card.effective_suits().contains(&Suit::Spades) {
                 effect.chips += 50;

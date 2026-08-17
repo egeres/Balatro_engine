@@ -786,11 +786,27 @@ impl GameState {
                     }
                 }
                 JokerKind::Hiker => {
-                    // Permanently add +5 chips to each scoring card in the deck
+                    // +5 permanent Chips per scoring card, once per trigger (card.lua:3067 runs
+                    // under `context.individual`, which repeats with retriggers).
+                    //
+                    // Balatro writes perma_bonus mid-scoring, so on a retriggered card the later
+                    // triggers already score the boosted value. Here the bonus lands after the
+                    // hand instead, which only differs when the card is retriggered.
                     for &sci in &result.scoring_card_indices {
-                        let card_id = played[sci].id;
+                        let card = &played[sci];
+                        if card.debuffed {
+                            continue;
+                        }
+                        let triggers = 1 + crate::scoring::count_retriggers(
+                            sci,
+                            card,
+                            &self.jokers,
+                            &result.scoring_card_indices,
+                            self.hands_remaining,
+                        );
+                        let card_id = card.id;
                         if let Some(deck_card) = self.deck.iter_mut().find(|c| c.id == card_id) {
-                            deck_card.extra_chips += 5;
+                            deck_card.extra_chips += 5 * triggers as i64;
                         }
                     }
                 }

@@ -346,12 +346,14 @@ fn test_photograph_fires_on_first_face_card_only() {
     assert_eq!(r.final_score as i64, 120);
 }
 
+/// Hiker adds no chips to the hand it fires on: it writes a permanent bonus onto the card,
+/// which only shows up the next time that card is played (card.lua:3067).
 #[test]
-fn test_hiker_adds_chips_per_scoring_card() {
+fn test_hiker_adds_no_chips_to_the_current_hand() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
     let r = score(&played, &played, &[joker(0, JokerKind::Hiker)]);
-    // HC: 5+11+5=21 chips, mult=1 → 21
-    assert_eq!(r.final_score as i64, 21);
+    // HC: 5 + 11 = 16 chips, mult 1 → 16
+    assert_eq!(r.final_score as i64, 16);
 }
 
 #[test]

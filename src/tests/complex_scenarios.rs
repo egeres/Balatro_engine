@@ -879,7 +879,8 @@ fn test_scenario_four_of_a_kind_lvl3_eight_jokers_face_avalanche() {
 //   Blinds:    4 skipped this run (Throwback scales up)
 //
 // Jokers (9 total):
-//   1. Hiker                     — +5 chips per scoring card played
+//   1. Hiker                     — +5 *permanent* chips per scoring card; adds
+//                                  nothing to this hand's score
 //   2. SquareJoker        (+120) — counter chips = 120
 //   3. Madness     [Neg]  (×2.5) — counter x_mult = 2.5 (Negative edition → +1 slot)
 //   4. Throwback   [Neg]  (×2.0) — 4 blind skips: 1+0.25×4=2.0 (Negative edition → +1 slot)
@@ -894,12 +895,12 @@ fn test_scenario_four_of_a_kind_lvl3_eight_jokers_face_avalanche() {
 // Phase 1: nothing
 //
 // Phase 2 (all 5×8 score, mixed suits):
-//   Each 8♥: +8 chips (rank) + 5 chips (Hiker) = +13 per card × 5 = +65
-//   After Phase 2: chips = 255, mult = 18
+//   Each 8: +8 chips (rank) × 5 = +40
+//   After Phase 2: chips = 230, mult = 18
 //
 // Phase 4 (x_mult applied immediately per joker; Negative edition → no extra bonus):
 //   Hiker:          no main effect
-//   SquareJoker:    +120 chips      → chips = 375
+//   SquareJoker:    +120 chips      → chips = 350
 //   Madness [Neg]:  ×2.5            → mult = 45   ; edition → no bonus
 //   Throwback [Neg]:×2.0            → mult = 90   ; edition → no bonus
 //   HitTheRoad [Neg]:×1.5           → mult = 135  ; edition → no bonus
@@ -908,7 +909,7 @@ fn test_scenario_four_of_a_kind_lvl3_eight_jokers_face_avalanche() {
 //   CardSharp:      ×3.0            → mult = 2430
 //   MysticSummit (discards=0): +15  → mult = 2445
 //
-// Final: 375 × 2445 = 916875
+// Final: 350 × 2445 = 855750
 // =========================================================
 
 #[test]
@@ -971,9 +972,9 @@ fn test_scenario_five_of_a_kind_lvl3_nine_jokers_zero_discards() {
     );
 
     assert_eq!(r.hand_type, HandType::FiveOfAKind);
-    assert_eq!(r.final_chips as i64, 375,    "chips mismatch");
+    assert_eq!(r.final_chips as i64, 350,    "chips mismatch");
     assert_eq!(r.final_mult  as i64, 2445,   "mult mismatch");
-    assert_eq!(r.final_score as i64, 916875, "score mismatch");
+    assert_eq!(r.final_score as i64, 855750, "score mismatch");
 }
 
 // ─────────────────────────────────────────────────────────────

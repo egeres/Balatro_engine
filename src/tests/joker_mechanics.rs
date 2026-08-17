@@ -403,3 +403,49 @@ fn test_blueprint_copying_mime_adds_a_repetition() {
     // hand-card phase, which contributes no direct effect. 1.5^3 = 3.375
     assert!((r.final_mult - 3.375).abs() < 1e-9, "got {}", r.final_mult);
 }
+
+// =========================================================
+// Hiker writes a permanent bonus rather than scoring chips
+// =========================================================
+
+#[test]
+fn test_hiker_permanently_boosts_the_card_it_scored() {
+    let deck = vec![card(0, Rank::Ace, Suit::Spades)];
+    let (gs, r) = play_with(deck, 1, vec![joker(0, JokerKind::Hiker)], &[0]);
+    // Nothing extra this hand...
+    assert_eq!(r.final_chips as i64, 16);
+    // ...but the card is permanently worth 5 more.
+    assert_eq!(gs.deck[0].extra_chips, 5);
+}
+
+#[test]
+fn test_hiker_bonus_shows_up_on_the_next_play() {
+    let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    gs.jokers = vec![joker(0, JokerKind::Hiker)];
+    gs.score_goal = f64::MAX;
+
+    gs.select_card(0).unwrap();
+    let first = gs.play_hand().unwrap();
+    assert_eq!(first.final_chips as i64, 16);
+
+    // Replay the same (now boosted) card.
+    gs.hand = vec![0];
+    gs.select_card(0).unwrap();
+    let second = gs.play_hand().unwrap();
+    assert_eq!(second.final_chips as i64, 21, "the +5 should be baked into the card");
+    assert_eq!(gs.deck[0].extra_chips, 10);
+}
+
+#[test]
+fn test_hiker_counts_each_retrigger() {
+    // Hack retriggers the 2, so Hiker fires twice on it.
+    let deck = vec![card(0, Rank::Two, Suit::Spades)];
+    let (gs, _) = play_with(
+        deck,
+        1,
+        vec![joker(0, JokerKind::Hiker), joker(1, JokerKind::Hack)],
+        &[0],
+    );
+    assert_eq!(gs.deck[0].extra_chips, 10);
+}
