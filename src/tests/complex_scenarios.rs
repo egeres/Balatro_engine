@@ -308,32 +308,26 @@ fn test_scenario_flush_five_lvl3_five_jokers() {
 //
 // TwoPair L2: chips = 20 + 20×1 = 40, mult = 2 + 1×1 = 3
 //
-// Phase 1:
-//   MadJoker   → +10 mult  (mult = 13)
-//   CleverJoker → +80 chips (chips = 120)
-//
-// Phase 2 (A♠ A♥ K♣ K♦ score; 2♠ kicker does NOT score):
+// Card phase (A♠ A♥ K♣ K♦ score; 2♠ kicker does NOT score):
 //   A♠ (Glass):
-//     chip_value = 11 → chips = 131
-//     flat_mult_bonus = 0
-//     x_mult_factor (Glass) = ×2 → mult = 26
-//     Scholar (Ace): +20 chips, +4 mult → chips = 151, mult = 30
+//     chip_value = 11 → chips = 51
+//     x_mult_factor (Glass) = ×2 → mult = 6
+//     Scholar (Ace): +20 chips, +4 mult → chips = 71, mult = 10
 //   A♥:
-//     +11 chips → 162
-//     Scholar: +20, +4 mult → chips = 182, mult = 34
-//   K♣:
-//     +10 chips → 192
-//   K♦:
-//     +10 chips → 202
+//     +11 chips → 82
+//     Scholar: +20, +4 mult → chips = 102, mult = 14
+//   K♣: +10 chips → 112
+//   K♦: +10 chips → 122
 //
-// Phase 4:
-//   MadJoker:   nothing in main
-//   CleverJoker: nothing in main
-//   Scholar:    nothing in main
-//   Joker (Polychrome): +4 mult → 38; then ×1.5 (poly) → 57
-//   GlassJoker (×1.5): × 1.5 → 85.5 → 85 (truncated as i64)
+// Joker phase, left to right — note MadJoker's +10 lands AFTER the Glass card's ×2,
+// which is the whole point of running hand-type jokers here rather than up front:
+//   MadJoker    (TwoPair): +10 mult   → 24
+//   CleverJoker (TwoPair): +80 chips  → 202
+//   Scholar:               nothing in main
+//   Joker (Polychrome):    +4 mult → 28; then ×1.5 (poly) → 42
+//   GlassJoker (×1.5):     ×1.5 → 63
 //
-// Final: 202 × 85.5 = 17271
+// Final: 202 × 63 = 12726
 // =========================================================
 
 #[test]
@@ -366,9 +360,9 @@ fn test_scenario_two_pair_lvl2_glass_card_polychrome_joker() {
 
     assert_eq!(r.hand_type, HandType::TwoPair);
     assert_eq!(r.final_chips as i64, 202, "chips mismatch");
-    // mult: 34 (after phase2) + 4 (Joker) = 38, ×1.5 (Polychrome) = 57, ×1.5 (GlassJoker) = 85.5
-    assert!((r.final_mult - 85.5).abs() < 0.01, "mult mismatch: got {}", r.final_mult);
-    assert!((r.final_score - 17271.0).abs() < 1.0, "score mismatch: got {}", r.final_score);
+    // mult: 14 (after cards) + 10 (Mad) + 4 (Joker) = 28, ×1.5 (Polychrome) = 42, ×1.5 (Glass) = 63
+    assert!((r.final_mult - 63.0).abs() < 0.01, "mult mismatch: got {}", r.final_mult);
+    assert!((r.final_score - 12726.0).abs() < 1.0, "score mismatch: got {}", r.final_score);
 }
 
 // =========================================================

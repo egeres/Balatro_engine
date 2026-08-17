@@ -65,7 +65,7 @@ impl Default for RoundTargets {
     }
 }
 
-/// Context passed to the joker evaluators in Phase 4
+/// Context passed to the joker evaluators in the main joker phase
 pub struct ScoringContext<'a> {
     pub hand_type: HandType,
     pub scoring_cards: &'a [usize],
@@ -161,19 +161,10 @@ pub fn score_hand(
         events.push(ScoreEvent { source: "The Flint".to_string(), kind: ScoreEventKind::XMult, value: 0.5 });
     }
 
-    // Pre-collect active jokers once; reused across Phase 1, 2, and 3.
+    // Pre-collect active jokers once; reused across the card phases below.
     let active_jokers: Vec<&JokerInstance> = jokers.iter().filter(|j| j.active).collect();
 
-    // ── PHASE 1: hand-level effects before card scoring ───────────────────
-    for joker in &active_jokers {
-        let effect = calc_joker_before(joker, hand_type);
-        chips += effect.chips as f64;
-        mult  += effect.mult  as f64;
-        mult  *= effect.x_mult;
-        dollars_earned += effect.dollars;
-    }
-
-    // ── PHASE 2: score each card in the scoring hand ──────────────────────
+    // ── PHASE 1: score each card in the scoring hand ──────────────────────
     for &card_idx in &scoring_indices {
         let card = &played_cards[card_idx];
 
@@ -252,7 +243,7 @@ pub fn score_hand(
         }
     }
 
-    // ── PHASE 3: held-hand cards — Steel x-mult and hand-card joker effects ──
+    // ── PHASE 2: held-hand cards — Steel x-mult and hand-card joker effects ──
     for card in hand_cards.iter().filter(|c| !c.debuffed) {
         let steel_xmult = card.steel_x_mult();
         if steel_xmult != 1.0 {
@@ -275,7 +266,7 @@ pub fn score_hand(
         }
     }
 
-    // ── PHASE 4: main joker effects (once per joker) ──────────────────────
+    // ── PHASE 3: main joker effects, in joker order (once per joker) ──────
     let ctx = ScoringContext {
         hand_type,
         scoring_cards: &scoring_indices,
@@ -335,6 +326,6 @@ pub fn score_hand(
 
 pub(crate) mod joker_effects;
 pub(crate) use joker_effects::{
-    JokerEffect, calc_joker_before, calc_joker_individual,
+    JokerEffect, calc_joker_individual,
     calc_joker_hand_card, calc_joker_main, count_retriggers,
 };

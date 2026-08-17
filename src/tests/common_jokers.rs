@@ -140,7 +140,7 @@ fn test_fibonacci_does_not_fire_on_non_fibonacci_rank() {
 }
 
 // =========================================================
-// Hand-type flat mult jokers (before scoring cards)
+// Hand-type flat mult jokers (evaluated in the joker phase, after card scoring)
 // =========================================================
 
 #[test]
@@ -1058,4 +1058,59 @@ fn test_throwback_scales_with_blind_skips() {
     let r = score(&played, &played, &[j]);
     // x(1+0.25*4)=x2 → HC: 16*2=32
     assert_eq!(r.final_score as i64, 32);
+}
+
+// =========================================================
+// Hand-type jokers score in the joker phase, after card effects
+// =========================================================
+
+/// Jolly Joker is a `joker_main` effect (card.lua:3660), so its +8 Mult is applied *after* the
+/// played cards' X-mults, not before. A Glass card must not multiply it.
+#[test]
+fn test_hand_type_joker_mult_is_not_multiplied_by_card_xmult() {
+    let mut glass_ace = card(0, Rank::Ace, Suit::Spades);
+    glass_ace.enhancement = Enhancement::Glass;
+    let played = vec![glass_ace, card(1, Rank::Ace, Suit::Hearts)];
+
+    let r = score(&played, &[], &[joker(0, JokerKind::JollyJoker)]);
+    // Pair: 10 + 11 + 11 = 32 chips.
+    // mult: 2, Glass x2 -> 4, then Jolly +8 -> 12.  (Applying Jolly first would give 20.)
+    assert_eq!(r.final_chips as i64, 32);
+    assert_eq!(r.final_mult as i64, 12);
+    assert_eq!(r.final_score as i64, 384);
+}
+
+/// Same for the chip variants: Sly Joker's +50 lands in the joker phase.
+#[test]
+fn test_sly_joker_chips_land_in_the_joker_phase() {
+    let played = vec![
+        card(0, Rank::Ace, Suit::Spades),
+        card(1, Rank::Ace, Suit::Hearts),
+    ];
+    let r = score(&played, &[], &[joker(0, JokerKind::SlyJoker)]);
+    // Pair: 10 + 11 + 11 + 50 = 82 chips, mult 2 -> 164
+    assert_eq!(r.final_score as i64, 164);
+}
+
+/// Hand-type jokers respect joker order relative to X-mult jokers.
+#[test]
+fn test_hand_type_joker_respects_joker_order() {
+    let played = vec![
+        card(0, Rank::Ace, Suit::Spades),
+        card(1, Rank::Ace, Suit::Hearts),
+    ];
+    let mut xmult = joker(1, JokerKind::Hologram);
+    xmult.set_counter_f64("x_mult", 2.0);
+
+    // Jolly first: (2 + 8) x2 = 20
+    let jolly_first = score(
+        &played,
+        &[],
+        &[joker(0, JokerKind::JollyJoker), xmult.clone()],
+    );
+    assert_eq!(jolly_first.final_mult as i64, 20);
+
+    // Jolly second: (2 x2) + 8 = 12
+    let jolly_second = score(&played, &[], &[xmult, joker(0, JokerKind::JollyJoker)]);
+    assert_eq!(jolly_second.final_mult as i64, 12);
 }

@@ -65,28 +65,6 @@ pub(crate) fn count_retriggers(
 }
 
 // ---------------------------------------------------------------------------
-// Phase 1 — hand-level effects triggered before card scoring
-// ---------------------------------------------------------------------------
-
-pub(crate) fn calc_joker_before(joker: &JokerInstance, hand_type: HandType) -> JokerEffect {
-    let mut effect = JokerEffect::new();
-    match joker.kind {
-        JokerKind::JollyJoker  if hand_type.contains_pair()           => { effect.mult  +=  8; }
-        JokerKind::ZanyJoker   if hand_type.contains_three_of_a_kind() => { effect.mult  += 12; }
-        JokerKind::MadJoker    if hand_type.contains_two_pair()        => { effect.mult  += 10; }
-        JokerKind::CrazyJoker  if hand_type.contains_straight()        => { effect.mult  += 12; }
-        JokerKind::DrollJoker  if hand_type.contains_flush()           => { effect.mult  += 10; }
-        JokerKind::SlyJoker    if hand_type.contains_pair()            => { effect.chips += 50; }
-        JokerKind::WilyJoker   if hand_type.contains_three_of_a_kind() => { effect.chips += 100; }
-        JokerKind::CleverJoker if hand_type.contains_two_pair()        => { effect.chips += 80; }
-        JokerKind::DeviousJoker if hand_type.contains_straight()       => { effect.chips += 100; }
-        JokerKind::CraftyJoker if hand_type.contains_flush()           => { effect.chips += 80; }
-        _ => {}
-    }
-    effect
-}
-
-// ---------------------------------------------------------------------------
 // Phase 2 — per scoring-card effects
 // ---------------------------------------------------------------------------
 
@@ -253,6 +231,20 @@ pub(crate) fn calc_joker_main(
     let hand = ctx.hand_cards;
 
     match joker.kind {
+        // ── Hand-type effects (t_mult / t_chips, card.lua:3660) ───────────
+        // These live in `joker_main` like every other joker effect, so they land *after* card
+        // scoring. Applying them earlier would let a card's X-mult multiply them.
+        JokerKind::JollyJoker   if hand_type.contains_pair()            => { effect.mult  +=   8; }
+        JokerKind::ZanyJoker    if hand_type.contains_three_of_a_kind() => { effect.mult  +=  12; }
+        JokerKind::MadJoker     if hand_type.contains_two_pair()        => { effect.mult  +=  10; }
+        JokerKind::CrazyJoker   if hand_type.contains_straight()        => { effect.mult  +=  12; }
+        JokerKind::DrollJoker   if hand_type.contains_flush()           => { effect.mult  +=  10; }
+        JokerKind::SlyJoker     if hand_type.contains_pair()            => { effect.chips +=  50; }
+        JokerKind::WilyJoker    if hand_type.contains_three_of_a_kind() => { effect.chips += 100; }
+        JokerKind::CleverJoker  if hand_type.contains_two_pair()        => { effect.chips +=  80; }
+        JokerKind::DeviousJoker if hand_type.contains_straight()        => { effect.chips += 100; }
+        JokerKind::CraftyJoker  if hand_type.contains_flush()           => { effect.chips +=  80; }
+
         // ── Fixed numeric effects ─────────────────────────────────────────
         JokerKind::Joker      => { effect.mult  +=  4; }
         JokerKind::GrosMichel => { effect.mult  += 15; }
