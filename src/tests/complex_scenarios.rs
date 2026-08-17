@@ -31,6 +31,7 @@ fn score_levels(
         played.iter().chain(hand.iter()).filter(|c| c.is_stone()).count(),
         played.iter().chain(hand.iter()).filter(|c| c.enhancement != Enhancement::None).count(),
         RoundTargets::default(),
+        false,
     )
 }
 
@@ -514,6 +515,7 @@ fn test_scenario_flush_lvl2_blackboard_money_jokers() {
         0,   // stone_count_in_deck
         0,   // enhanced_count_in_deck
         RoundTargets::default(),
+        false,
     );
 
     assert_eq!(r.hand_type, HandType::Flush);
@@ -582,6 +584,7 @@ fn test_scenario_high_card_lvl2_deck_and_economy_jokers() {
         0,   // stone_count_in_deck
         0,   // enhanced_count_in_deck
         RoundTargets::default(),
+        false,
     );
 
     assert_eq!(r.hand_type, HandType::HighCard);
@@ -655,6 +658,7 @@ fn test_scenario_straight_lvl2_walkietalkie_order_erosion() {
         0,   // stone_count_in_deck
         0,   // enhanced_count_in_deck
         RoundTargets::default(),
+        false,
     );
 
     assert_eq!(r.hand_type, HandType::Straight);
@@ -763,6 +767,7 @@ fn test_scenario_flushhouse_lvl3_nine_jokers_last_hand() {
         0,   // stone_count_in_deck
         0,   // enhanced_count_in_deck
         RoundTargets::default(),
+        false,
     );
 
     assert_eq!(r.hand_type, HandType::FlushHouse);
@@ -860,6 +865,7 @@ fn test_scenario_four_of_a_kind_lvl3_eight_jokers_face_avalanche() {
         0,   // stone_count_in_deck
         0,   // enhanced_count_in_deck
         RoundTargets::default(),
+        false,
     );
 
     assert_eq!(r.hand_type, HandType::FourOfAKind);
@@ -969,6 +975,7 @@ fn test_scenario_five_of_a_kind_lvl3_nine_jokers_zero_discards() {
         0,   // stone_count_in_deck
         0,   // enhanced_count_in_deck
         RoundTargets::default(),
+        false,
     );
 
     assert_eq!(r.hand_type, HandType::FiveOfAKind);

@@ -2,7 +2,7 @@
 ///
 /// Boss blinds are set via `GameState::boss_blind` and take effect either during
 /// `begin_round()` (card debuffs), `play_hand()` (hand restrictions / money penalties),
-/// `effective_hand_size()` (ThePsychic), or inside `score_hand(, RoundTargets::default())` (TheFlint).
+/// `effective_hand_size()` (ThePsychic), or inside `score_hand(, RoundTargets::default(), false)` (TheFlint).
 ///
 /// What is covered here:
 ///
@@ -47,8 +47,8 @@
 ///
 ///  12.  No-op bosses — TheOx, TheHook, TheMouth, TheFish, TheManacle, TheWall,
 ///         TheHouse, TheWheel, TheArm, TheWater, TheEye, TheSerpent, ThePillar, and
-///         all showdown bosses have no effect on `score_hand(, RoundTargets::default())`.
-///         score_hand(, RoundTargets::default()) with these bosses == score_hand(, RoundTargets::default()) with boss_blind = None.
+///         all showdown bosses have no effect on `score_hand(, RoundTargets::default(), false)`.
+///         score_hand(, RoundTargets::default(), false) with these bosses == score_hand(, RoundTargets::default(), false) with boss_blind = None.
 
 use super::*;
 use crate::game::{BalatroError, BlindKind};
@@ -68,12 +68,12 @@ fn boss_select(boss: BossBlind) -> GameState {
 
 /// Call `score_hand` with a specific boss blind, no jokers, and default Level-1 hands.
 fn score_with_boss(played: &[CardInstance], boss: BossBlind) -> crate::scoring::ScoreResult {
-    score_hand(played, &[], &[], &default_hand_levels(), 3, 3, 0, 40, 52, 52, Some(boss), 5, 0, 0, 0, 0, RoundTargets::default())
+    score_hand(played, &[], &[], &default_hand_levels(), 3, 3, 0, 40, 52, 52, Some(boss), 5, 0, 0, 0, 0, RoundTargets::default(), false)
 }
 
 /// Call `score_hand` with no boss blind — the baseline to compare against.
 fn score_baseline(played: &[CardInstance]) -> crate::scoring::ScoreResult {
-    score_hand(played, &[], &[], &default_hand_levels(), 3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0, RoundTargets::default())
+    score_hand(played, &[], &[], &default_hand_levels(), 3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0, RoundTargets::default(), false)
 }
 
 /// Five mixed low Spades that form a Flush (2,3,4,5,7 — no straight).
@@ -974,7 +974,7 @@ fn test_the_needle_does_not_modify_score() {
 
 #[test]
 fn test_the_tooth_does_not_modify_score_calculation() {
-    // TheTooth deducts money in play_hand(), not inside score_hand(, RoundTargets::default()) — score result unchanged.
+    // TheTooth deducts money in play_hand(), not inside score_hand(, RoundTargets::default(), false) — score result unchanged.
     let p = flush_spades();
     assert_eq!(score_with_boss(&p, BossBlind::TheTooth).final_score, score_baseline(&p).final_score);
 }
@@ -1145,6 +1145,7 @@ fn test_crimson_heart_disables_joker_during_scoring() {
         &default_hand_levels(), 3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0,
     
         RoundTargets::default(),
+        false,
     );
     assert_eq!(result_no_boss.final_score as i64, 130);
 
@@ -1956,5 +1957,69 @@ fn test_the_wheel_face_down_cleared_after_play() {
     assert!(
         gs.discard_pile.iter().all(|&i| !gs.deck[i].face_down),
         "face_down must be cleared when a card leaves the hand"
+    );
+}
+
+// =========================================================
+// Matador: $8 when the Boss blind's ability fires on the hand
+// =========================================================
+
+/// Play a single Ace under `boss` with Matador in play, and return the money gained.
+fn matador_payout(boss: Option<BossBlind>, deck: Vec<CardInstance>, extra: &[JokerInstance]) -> i32 {
+    let mut gs = make_game();
+    if let Some(b) = boss {
+        gs.boss_blind = Some(b);
+        gs.current_blind = BlindKind::Boss;
+    }
+    gs.select_blind().unwrap();
+    setup_round(&mut gs, deck, 1);
+    if let Some(b) = boss {
+        gs.boss_blind = Some(b);
+        gs.current_blind = BlindKind::Boss;
+    }
+    gs.jokers.push(joker(0, JokerKind::Matador));
+    for j in extra {
+        gs.jokers.push(j.clone());
+    }
+    gs.score_goal = f64::MAX;
+    let before = gs.money;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    gs.money - before
+}
+
+#[test]
+fn test_matador_pays_nothing_outside_a_boss_blind() {
+    let deck = vec![card(0, Rank::Ace, Suit::Spades)];
+    assert_eq!(matador_payout(None, deck, &[]), 0);
+}
+
+#[test]
+fn test_matador_pays_under_the_flint() {
+    let deck = vec![card(0, Rank::Ace, Suit::Spades)];
+    assert_eq!(matador_payout(Some(BossBlind::TheFlint), deck, &[]), 8);
+}
+
+#[test]
+fn test_matador_pays_when_a_scoring_card_is_debuffed() {
+    // The Club debuffs Clubs; playing one trips the blind.
+    let mut clubs = card(0, Rank::Ace, Suit::Clubs);
+    clubs.debuffed = true;
+    assert_eq!(matador_payout(Some(BossBlind::TheClub), vec![clubs], &[]), 8);
+}
+
+#[test]
+fn test_matador_pays_nothing_when_the_blind_does_not_fire() {
+    // The Club only debuffs Clubs — a Spade leaves the blind untriggered.
+    let deck = vec![card(0, Rank::Ace, Suit::Spades)];
+    assert_eq!(matador_payout(Some(BossBlind::TheClub), deck, &[]), 0);
+}
+
+#[test]
+fn test_matador_pays_nothing_when_the_blind_is_disabled() {
+    let chicot = joker(50, JokerKind::Chicot);
+    assert_eq!(
+        matador_payout(Some(BossBlind::TheFlint), vec![card(0, Rank::Ace, Suit::Spades)], &[chicot]),
+        0
     );
 }

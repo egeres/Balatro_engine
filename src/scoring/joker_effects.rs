@@ -600,6 +600,13 @@ pub(crate) fn calc_joker_main(
         JokerKind::Bootstraps => {
             effect.mult += (ctx.money / 5).max(0) as i64 * 2;
         }
+        JokerKind::Matador => {
+            // $8 when the Boss blind's ability fires on this hand (card.lua:3719, gated on
+            // G.GAME.blind.triggered).
+            if ctx.boss_ability_triggered {
+                effect.dollars += 8;
+            }
+        }
         JokerKind::Bull => {
             effect.chips += ctx.money.max(0) as i64 * 2;
         }

@@ -20,6 +20,47 @@ impl GameState {
         )
     }
 
+    /// Whether the current Boss blind's ability actually fires on this hand
+    /// (`G.GAME.blind.triggered`, reset per play at state_events.lua:455). Matador pays out on it.
+    ///
+    /// Bosses that reject the hand outright — The Eye, The Mouth, The Psychic — also set it, but
+    /// this engine surfaces those as an error from `play_hand` rather than playing a rejected
+    /// hand, so they can never reach scoring.
+    fn boss_ability_triggers(
+        &self,
+        eval: &crate::hand_eval::HandEvalResult,
+        played: &[CardInstance],
+    ) -> bool {
+        if !matches!(self.current_blind, BlindKind::Boss) || self.boss_blind_disabled() {
+            return false;
+        }
+        let Some(boss) = self.boss_blind else { return false };
+
+        // A debuffed card in the scoring hand trips the blind (state_events.lua:656).
+        if eval.scoring_indices.iter().any(|&i| played[i].debuffed) {
+            return true;
+        }
+
+        match boss {
+            // Fire on every hand played under them (blind.lua:484, :505, :513).
+            BossBlind::TheHook | BossBlind::TheTooth | BossBlind::TheFlint => true,
+            BossBlind::CrimsonHeart => !self.jokers.is_empty(),
+            // The Arm only trips when there is a level to take away (blind.lua:551).
+            BossBlind::TheArm => self
+                .hand_levels
+                .get(&eval.hand_type)
+                .map(|h| h.level > 1)
+                .unwrap_or(false),
+            // The Ox trips on the most-played hand type (blind.lua:561).
+            BossBlind::TheOx => {
+                let this = self.hand_levels.get(&eval.hand_type).map(|h| h.played).unwrap_or(0);
+                let most = self.hand_levels.values().map(|h| h.played).max().unwrap_or(0);
+                most > 0 && this >= most
+            }
+            _ => false,
+        }
+    }
+
     /// Joker effects that Balatro evaluates under `context.before` (card.lua:3411-3570), i.e.
     /// after the hand type is known but *before* any card scores. Their upgraded values therefore
     /// count towards the hand currently being played, not the next one.
@@ -325,6 +366,7 @@ impl GameState {
         // (get_poker_hand_info runs at the top of evaluate_play), so compute it once here and
         // hand it to the `before` pass.
         let pre_eval = self.preview_hand(&played_cards);
+        let boss_ability_triggered = self.boss_ability_triggers(&pre_eval, &played_cards);
         self.pre_score_joker_updates(&mut played_cards, &pre_eval);
 
         // OopsAll6s: doubles all listed probabilities when active
@@ -456,6 +498,7 @@ impl GameState {
             stone_count_in_deck,
             enhanced_count_in_deck,
             self.round_targets,
+            boss_ability_triggered,
         );
 
         // CrimsonHeart: re-enable the temporarily disabled joker

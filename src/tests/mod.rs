@@ -102,6 +102,7 @@ pub fn score(
             .count(),
     
         RoundTargets::default(),
+        false,
     )
 }
 
@@ -131,6 +132,7 @@ pub fn score_with_targets(
             .filter(|c| c.enhancement != Enhancement::None)
             .count(),
         targets,
+        false,
     )
 }
 
@@ -172,6 +174,7 @@ pub fn score_full(
             .count(),
     
         RoundTargets::default(),
+        false,
     )
 }
 

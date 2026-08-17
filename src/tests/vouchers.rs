@@ -240,6 +240,7 @@ fn test_observatory_increases_flush_score() {
         3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0,
     
         RoundTargets::default(),
+        false,
     );
     assert_eq!(result_no_obs.final_score as i64, 426,
         "Without Observatory: L2 Flush score should be 426");
@@ -253,6 +254,7 @@ fn test_observatory_increases_flush_score() {
         3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0,
     
         RoundTargets::default(),
+        false,
     );
     assert_eq!(result.final_score as i64, 639,
         "Observatory should give X1.5 on Flush: expected 639, got {}",

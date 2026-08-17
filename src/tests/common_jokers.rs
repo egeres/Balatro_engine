@@ -644,6 +644,7 @@ fn test_mystic_summit_fires_only_at_zero_discards() {
         0,
     
         RoundTargets::default(),
+        false,
     );
     // chips=16, mult=1+15=16 → 256
     assert_eq!(r2.final_score as i64, 256);
@@ -677,6 +678,7 @@ fn test_supernova_adds_mult_equal_to_times_played() {
         0,
     
         RoundTargets::default(),
+        false,
     );
     // chips=16, mult=1+5=6 → 96
     assert_eq!(r2.final_score as i64, 96);
@@ -901,7 +903,7 @@ fn test_card_sharp_fires_when_hand_type_already_played_this_round() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
     let mut levels = default_hand_levels();
     levels.get_mut(&HandType::HighCard).unwrap().played_this_round = 1;
-    let r = score_hand(&played, &played, &[joker(0, JokerKind::CardSharp)], &levels, 3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0, RoundTargets::default());
+    let r = score_hand(&played, &played, &[joker(0, JokerKind::CardSharp)], &levels, 3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0, RoundTargets::default(), false);
     // HC: 16 chips, mult=1*3=3 → 48 (X3 because HighCard already played this round)
     assert_eq!(r.final_score as i64, 48);
 }
@@ -1031,6 +1033,7 @@ fn test_erosion_uses_starting_deck_size_not_52() {
         None, 5, 0, 0, 0, 0,
     
         RoundTargets::default(),
+        false,
     );
     // No cards removed → no Erosion mult. HC: (5+11) * 1 = 16
     assert_eq!(r.final_score as i64, 16);

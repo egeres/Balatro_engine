@@ -82,6 +82,9 @@ pub struct ScoringContext<'a> {
     /// 52 for most decks, 40 for Abandoned. Used by Erosion.
     pub starting_deck_size: usize,
     pub boss_blind: Option<BossBlind>,
+    /// Whether this Boss blind's ability actually did something to this hand
+    /// (`G.GAME.blind.triggered`). Matador pays out on it.
+    pub boss_ability_triggered: bool,
     pub joker_count: usize,
     pub joker_slot_count: usize,
     pub tarot_cards_used: u32,
@@ -129,6 +132,7 @@ pub fn score_hand(
     stone_count_in_deck: usize,
     enhanced_count_in_deck: usize,
     round_targets: RoundTargets,
+    boss_ability_triggered: bool,
 ) -> ScoreResult {
     let has_four_fingers = jokers.iter().any(|j| j.kind == JokerKind::FourFingers && j.active);
     let has_shortcut    = jokers.iter().any(|j| j.kind == JokerKind::Shortcut     && j.active);
@@ -298,6 +302,7 @@ pub fn score_hand(
         total_deck_size: total_deck,
         starting_deck_size,
         boss_blind,
+        boss_ability_triggered,
         joker_count: jokers.len(),
         joker_slot_count,
         tarot_cards_used,
