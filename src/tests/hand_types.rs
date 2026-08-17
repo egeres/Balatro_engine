@@ -189,3 +189,53 @@ fn test_hand_levels_upgrade_increases_base_score() {
     assert!(l2_chips > l1_chips, "Level 2 Pair should have more chips");
     assert!(l2_mult > l1_mult, "Level 2 Pair should have more mult");
 }
+
+// =========================================================
+// Scoring-card ordering
+// =========================================================
+
+/// Balatro sorts the scoring hand left-to-right before scoring (state_events.lua:600).
+/// Grouping by rank otherwise leaves the order at the mercy of HashMap iteration.
+#[test]
+fn test_scoring_indices_are_in_played_order() {
+    // Two pair: the lower pair sits to the left of the higher pair.
+    let played = vec![
+        card(0, Rank::Three, Suit::Spades),
+        card(1, Rank::King, Suit::Hearts),
+        card(2, Rank::Three, Suit::Clubs),
+        card(3, Rank::King, Suit::Diamonds),
+        card(4, Rank::Nine, Suit::Spades),
+    ];
+    let r = crate::hand_eval::evaluate_hand(&played, false, false, false, false);
+    assert_eq!(r.hand_type, HandType::TwoPair);
+    assert_eq!(r.scoring_indices, vec![0, 1, 2, 3]);
+}
+
+/// Hanging Chad retriggers `scoring_hand[1]` — the leftmost scoring card, not whichever
+/// card the rank grouping happened to emit first.
+#[test]
+fn test_hanging_chad_retriggers_the_leftmost_scoring_card() {
+    // 3♠ K♥ 3♣ K♦ 9♠ → two pair; leftmost scoring card is the 3♠ (3 chips).
+    let played = vec![
+        card(0, Rank::Three, Suit::Spades),
+        card(1, Rank::King, Suit::Hearts),
+        card(2, Rank::Three, Suit::Clubs),
+        card(3, Rank::King, Suit::Diamonds),
+        card(4, Rank::Nine, Suit::Spades),
+    ];
+    let r = score(&played, &played, &[joker(0, JokerKind::HangingChad)]);
+    // TwoPair: 20 base + 3 + 10 + 3 + 10 = 46, plus the 3♠ scored twice more (+6) = 52
+    assert_eq!(r.final_chips as i64, 52);
+}
+
+/// Photograph fires on the first *face* card in played order.
+#[test]
+fn test_photograph_fires_on_the_leftmost_face_card() {
+    let played = vec![
+        card(0, Rank::Queen, Suit::Spades),
+        card(1, Rank::Queen, Suit::Hearts),
+    ];
+    let r = score(&played, &played, &[joker(0, JokerKind::Photograph)]);
+    // Pair: 10 + 10 + 10 = 30 chips, mult 2 x2 (one Photograph trigger) = 4 → 120
+    assert_eq!(r.final_score as i64, 120);
+}

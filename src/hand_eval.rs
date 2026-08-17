@@ -21,6 +21,22 @@ pub fn evaluate_hand(
     smeared: bool,
     splash: bool,
 ) -> HandEvalResult {
+    let mut result = evaluate_hand_inner(cards, four_fingers, shortcut, smeared, splash);
+    // Balatro sorts the scoring hand left-to-right by on-screen position before scoring
+    // (state_events.lua:600). Jokers that key off "the first scoring card" — Hanging Chad,
+    // Photograph — depend on this, and grouping the hand by rank leaves them in an order that
+    // depends on HashMap iteration, which is not stable between runs.
+    result.scoring_indices.sort_unstable();
+    result
+}
+
+fn evaluate_hand_inner(
+    cards: &[CardInstance],
+    four_fingers: bool,
+    shortcut: bool,
+    smeared: bool,
+    splash: bool,
+) -> HandEvalResult {
     // Collect non-stone cards for hand evaluation (stone cards don't count for hand type)
     let eval_indices: Vec<usize> = cards
         .iter()
