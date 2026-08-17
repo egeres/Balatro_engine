@@ -2,7 +2,7 @@
 ///
 /// Boss blinds are set via `GameState::boss_blind` and take effect either during
 /// `begin_round()` (card debuffs), `play_hand()` (hand restrictions / money penalties),
-/// `effective_hand_size()` (ThePsychic), or inside `score_hand()` (TheFlint).
+/// `effective_hand_size()` (ThePsychic), or inside `score_hand(, RoundTargets::default())` (TheFlint).
 ///
 /// What is covered here:
 ///
@@ -47,8 +47,8 @@
 ///
 ///  12.  No-op bosses — TheOx, TheHook, TheMouth, TheFish, TheManacle, TheWall,
 ///         TheHouse, TheWheel, TheArm, TheWater, TheEye, TheSerpent, ThePillar, and
-///         all showdown bosses have no effect on `score_hand()`.
-///         score_hand() with these bosses == score_hand() with boss_blind = None.
+///         all showdown bosses have no effect on `score_hand(, RoundTargets::default())`.
+///         score_hand(, RoundTargets::default()) with these bosses == score_hand(, RoundTargets::default()) with boss_blind = None.
 
 use super::*;
 use crate::game::{BalatroError, BlindKind};
@@ -68,12 +68,12 @@ fn boss_select(boss: BossBlind) -> GameState {
 
 /// Call `score_hand` with a specific boss blind, no jokers, and default Level-1 hands.
 fn score_with_boss(played: &[CardInstance], boss: BossBlind) -> crate::scoring::ScoreResult {
-    score_hand(played, &[], &[], &default_hand_levels(), 3, 3, 0, 40, 52, 52, Some(boss), 5, 0, 0, 0, 0)
+    score_hand(played, &[], &[], &default_hand_levels(), 3, 3, 0, 40, 52, 52, Some(boss), 5, 0, 0, 0, 0, RoundTargets::default())
 }
 
 /// Call `score_hand` with no boss blind — the baseline to compare against.
 fn score_baseline(played: &[CardInstance]) -> crate::scoring::ScoreResult {
-    score_hand(played, &[], &[], &default_hand_levels(), 3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0)
+    score_hand(played, &[], &[], &default_hand_levels(), 3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0, RoundTargets::default())
 }
 
 /// Five mixed low Spades that form a Flush (2,3,4,5,7 — no straight).
@@ -974,7 +974,7 @@ fn test_the_needle_does_not_modify_score() {
 
 #[test]
 fn test_the_tooth_does_not_modify_score_calculation() {
-    // TheTooth deducts money in play_hand(), not inside score_hand() — score result unchanged.
+    // TheTooth deducts money in play_hand(), not inside score_hand(, RoundTargets::default()) — score result unchanged.
     let p = flush_spades();
     assert_eq!(score_with_boss(&p, BossBlind::TheTooth).final_score, score_baseline(&p).final_score);
 }
@@ -1143,6 +1143,8 @@ fn test_crimson_heart_disables_joker_during_scoring() {
     let result_no_boss = score_hand(
         &played, &[], &[joker(10, JokerKind::AbstractJoker)],
         &default_hand_levels(), 3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0,
+    
+        RoundTargets::default(),
     );
     assert_eq!(result_no_boss.final_score as i64, 130);
 

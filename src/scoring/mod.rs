@@ -36,6 +36,35 @@ pub enum ScoreEventKind {
     CardDestroyed,
 }
 
+/// Randomised targets that Balatro stores on `G.GAME.current_round` and re-rolls at the start of
+/// every round (`state_events.lua:273-276`). They are global, not per-joker: two copies of The
+/// Idol chase the same card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RoundTargets {
+    /// The Idol: X2 Mult for each scoring card of this exact rank *and* suit.
+    pub idol_rank: Rank,
+    pub idol_suit: Suit,
+    /// Ancient Joker: X1.5 Mult per scoring card of this suit.
+    pub ancient_suit: Suit,
+    /// Castle: +3 Chips per discarded card of this suit.
+    pub castle_suit: Suit,
+    /// Mail-In Rebate: $5 per discarded card of this rank.
+    pub mail_rank: Rank,
+}
+
+impl Default for RoundTargets {
+    /// Balatro's pre-roll defaults (`common_events.lua:2272`, `:2289`, `game.lua:1949-1952`).
+    fn default() -> Self {
+        Self {
+            idol_rank: Rank::Ace,
+            idol_suit: Suit::Spades,
+            ancient_suit: Suit::Spades,
+            castle_suit: Suit::Spades,
+            mail_rank: Rank::Ace,
+        }
+    }
+}
+
 /// Context passed to the joker evaluators in Phase 4
 pub struct ScoringContext<'a> {
     pub hand_type: HandType,
@@ -59,6 +88,7 @@ pub struct ScoringContext<'a> {
     pub steel_count_in_deck: usize,
     pub stone_count_in_deck: usize,
     pub enhanced_count_in_deck: usize,
+    pub round_targets: RoundTargets,
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +128,7 @@ pub fn score_hand(
     steel_count_in_deck: usize,
     stone_count_in_deck: usize,
     enhanced_count_in_deck: usize,
+    round_targets: RoundTargets,
 ) -> ScoreResult {
     let has_four_fingers = jokers.iter().any(|j| j.kind == JokerKind::FourFingers && j.active);
     let has_shortcut    = jokers.iter().any(|j| j.kind == JokerKind::Shortcut     && j.active);
@@ -210,6 +241,7 @@ pub fn score_hand(
             for joker in &active_jokers {
                 let effect = calc_joker_individual(
                     joker, card_idx, card, &scoring_indices, played_cards, has_pareidolia,
+                    round_targets,
                 );
                 chips += effect.chips as f64;
                 mult  += effect.mult  as f64;
@@ -264,6 +296,7 @@ pub fn score_hand(
         steel_count_in_deck,
         stone_count_in_deck,
         enhanced_count_in_deck,
+        round_targets,
     };
 
     for (joker_idx, joker) in jokers.iter().enumerate() {

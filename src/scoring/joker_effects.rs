@@ -1,6 +1,6 @@
 use crate::card::{CardInstance, JokerInstance};
 use crate::types::*;
-use super::ScoringContext;
+use super::{RoundTargets, ScoringContext};
 
 pub struct JokerEffect {
     pub chips: i64,
@@ -97,6 +97,7 @@ pub(crate) fn calc_joker_individual(
     scoring_indices: &[usize],
     played_cards: &[CardInstance],
     pareidolia: bool,
+    targets: RoundTargets,
 ) -> JokerEffect {
     let mut effect = JokerEffect::new();
     let is_scoring = scoring_indices.contains(&card_idx);
@@ -201,14 +202,12 @@ pub(crate) fn calc_joker_individual(
             }
         }
         JokerKind::TheIdol => {
-            if is_scoring {
-                let rank_match = joker.counters.get("rank").and_then(|v| v.as_str())
-                    == Some(&format!("{:?}", card.rank));
-                let suit_match = joker.counters.get("suit").and_then(|v| v.as_str())
-                    == Some(&format!("{:?}", card.suit));
-                if rank_match && suit_match {
-                    effect.x_mult = 2.0;
-                }
+            // Target is the round-wide idol card, re-rolled each round (card.lua:3127).
+            if is_scoring
+                && card.rank == targets.idol_rank
+                && card.effective_suits().contains(&targets.idol_suit)
+            {
+                effect.x_mult = 2.0;
             }
         }
         _ => {}
@@ -385,13 +384,8 @@ pub(crate) fn calc_joker_main(
             if suits_present.len() == 4 { effect.x_mult = 3.0; }
         }
         JokerKind::AncientJoker => {
-            let suit_str = joker.counters.get("suit").and_then(|v| v.as_str()).unwrap_or("Hearts");
-            let target = match suit_str {
-                "Spades"   => Suit::Spades,
-                "Clubs"    => Suit::Clubs,
-                "Diamonds" => Suit::Diamonds,
-                _          => Suit::Hearts,
-            };
+            // Target suit is re-rolled every round (card.lua:3255).
+            let target = ctx.round_targets.ancient_suit;
             for &idx in scoring_cards {
                 if played[idx].effective_suits().contains(&target) {
                     effect.x_mult *= 1.5;

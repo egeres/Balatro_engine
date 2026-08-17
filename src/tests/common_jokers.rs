@@ -523,13 +523,20 @@ fn test_triboulet_stacks_on_pair_of_kings() {
     assert_eq!(r.final_score as i64, 240);
 }
 
+/// The Idol's target is round-wide state, not a per-joker counter.
+fn idol_targets(rank: Rank, suit: Suit) -> RoundTargets {
+    RoundTargets { idol_rank: rank, idol_suit: suit, ..RoundTargets::default() }
+}
+
 #[test]
 fn test_the_idol_fires_on_matching_rank_and_suit() {
     let played = vec![card(0, Rank::Two, Suit::Spades)];
-    let mut idol = joker(0, JokerKind::TheIdol);
-    idol.counters.insert("rank".to_string(), serde_json::json!("Two"));
-    idol.counters.insert("suit".to_string(), serde_json::json!("Spades"));
-    let r = score(&played, &played, &[idol]);
+    let r = score_with_targets(
+        &played,
+        &played,
+        &[joker(0, JokerKind::TheIdol)],
+        idol_targets(Rank::Two, Suit::Spades),
+    );
     // HC: 5+2=7 chips, mult=1*2=2 → 14
     assert_eq!(r.final_score as i64, 14);
 }
@@ -537,11 +544,39 @@ fn test_the_idol_fires_on_matching_rank_and_suit() {
 #[test]
 fn test_the_idol_does_not_fire_on_wrong_suit() {
     let played = vec![card(0, Rank::Two, Suit::Hearts)];
-    let mut idol = joker(0, JokerKind::TheIdol);
-    idol.counters.insert("rank".to_string(), serde_json::json!("Two"));
-    idol.counters.insert("suit".to_string(), serde_json::json!("Spades"));
-    let r = score(&played, &played, &[idol]);
+    let r = score_with_targets(
+        &played,
+        &played,
+        &[joker(0, JokerKind::TheIdol)],
+        idol_targets(Rank::Two, Suit::Spades),
+    );
     assert_eq!(r.final_score as i64, 7);
+}
+
+#[test]
+fn test_the_idol_does_not_fire_on_wrong_rank() {
+    let played = vec![card(0, Rank::Three, Suit::Spades)];
+    let r = score_with_targets(
+        &played,
+        &played,
+        &[joker(0, JokerKind::TheIdol)],
+        idol_targets(Rank::Two, Suit::Spades),
+    );
+    assert_eq!(r.final_score as i64, 8);
+}
+
+/// Two copies of The Idol chase the same round-wide card, so they stack on one match.
+#[test]
+fn test_two_idols_share_the_same_target() {
+    let played = vec![card(0, Rank::Two, Suit::Spades)];
+    let r = score_with_targets(
+        &played,
+        &played,
+        &[joker(0, JokerKind::TheIdol), joker(1, JokerKind::TheIdol)],
+        idol_targets(Rank::Two, Suit::Spades),
+    );
+    // 7 chips, mult = 1 * 2 * 2 = 4 → 28
+    assert_eq!(r.final_score as i64, 28);
 }
 
 // =========================================================
@@ -605,6 +640,8 @@ fn test_mystic_summit_fires_only_at_zero_discards() {
         0,
         0,
         0,
+    
+        RoundTargets::default(),
     );
     // chips=16, mult=1+15=16 → 256
     assert_eq!(r2.final_score as i64, 256);
@@ -636,6 +673,8 @@ fn test_supernova_adds_mult_equal_to_times_played() {
         0,
         0,
         0,
+    
+        RoundTargets::default(),
     );
     // chips=16, mult=1+5=6 → 96
     assert_eq!(r2.final_score as i64, 96);
@@ -733,14 +772,39 @@ fn test_the_tribe_fires_on_flush() {
 
 #[test]
 fn test_ancient_joker_multiplies_per_designated_suit_in_scoring() {
-    // Default suit is Hearts; Pair 2♥2♦ → 1 Heart in scoring → x1.5
+    // The round's Ancient suit is Hearts; Pair 2♥2♦ → 1 Heart in scoring → x1.5
     let played = vec![
         card(0, Rank::Two, Suit::Hearts),
         card(1, Rank::Two, Suit::Diamonds),
     ];
-    let r = score(&played, &played, &[joker(0, JokerKind::AncientJoker)]);
+    let targets = RoundTargets { ancient_suit: Suit::Hearts, ..RoundTargets::default() };
+    let r = score_with_targets(&played, &played, &[joker(0, JokerKind::AncientJoker)], targets);
     // Pair: 10+2+2=14 chips, mult=2*1.5=3 → 42
     assert_eq!(r.final_score as i64, 42);
+}
+
+#[test]
+fn test_ancient_joker_stacks_per_matching_card() {
+    let played = vec![
+        card(0, Rank::Two, Suit::Hearts),
+        card(1, Rank::Two, Suit::Hearts),
+    ];
+    let targets = RoundTargets { ancient_suit: Suit::Hearts, ..RoundTargets::default() };
+    let r = score_with_targets(&played, &played, &[joker(0, JokerKind::AncientJoker)], targets);
+    // Pair: 14 chips, mult = 2 * 1.5 * 1.5 = 4.5 → 63
+    assert_eq!(r.final_score as i64, 63);
+}
+
+#[test]
+fn test_ancient_joker_follows_the_round_suit() {
+    let played = vec![
+        card(0, Rank::Two, Suit::Hearts),
+        card(1, Rank::Two, Suit::Diamonds),
+    ];
+    let targets = RoundTargets { ancient_suit: Suit::Clubs, ..RoundTargets::default() };
+    let r = score_with_targets(&played, &played, &[joker(0, JokerKind::AncientJoker)], targets);
+    // No Clubs in the scoring hand → no bonus. 14 chips * 2 mult = 28
+    assert_eq!(r.final_score as i64, 28);
 }
 
 #[test]
@@ -835,7 +899,7 @@ fn test_card_sharp_fires_when_hand_type_already_played_this_round() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
     let mut levels = default_hand_levels();
     levels.get_mut(&HandType::HighCard).unwrap().played_this_round = 1;
-    let r = score_hand(&played, &played, &[joker(0, JokerKind::CardSharp)], &levels, 3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0);
+    let r = score_hand(&played, &played, &[joker(0, JokerKind::CardSharp)], &levels, 3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0, RoundTargets::default());
     // HC: 16 chips, mult=1*3=3 → 48 (X3 because HighCard already played this round)
     assert_eq!(r.final_score as i64, 48);
 }
@@ -963,6 +1027,8 @@ fn test_erosion_uses_starting_deck_size_not_52() {
         gs.deck.len(),           // total_deck = 40
         gs.starting_deck_size,   // starting_deck_size = 40
         None, 5, 0, 0, 0, 0,
+    
+        RoundTargets::default(),
     );
     // No cards removed → no Erosion mult. HC: (5+11) * 1 = 16
     assert_eq!(r.final_score as i64, 16);

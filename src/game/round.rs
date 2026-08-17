@@ -282,6 +282,7 @@ impl GameState {
             steel_count_in_deck,
             stone_count_in_deck,
             enhanced_count_in_deck,
+            self.round_targets,
         );
 
         // CrimsonHeart: re-enable the temporarily disabled joker
@@ -797,29 +798,19 @@ impl GameState {
             self.money += 5 * count as i32;
         }
 
-        // MailInRebate: +$5 for each discarded card matching the tracked rank
-        for j_idx in 0..self.jokers.len() {
-            if self.jokers[j_idx].kind == JokerKind::MailInRebate && self.jokers[j_idx].active {
-                let rank_str = self.jokers[j_idx].counters.get("rank").and_then(|v| v.as_str()).unwrap_or("Two").to_string();
-                let target_rank = match rank_str.as_str() {
-                    "Two" => Rank::Two,
-                    "Three" => Rank::Three,
-                    "Four" => Rank::Four,
-                    "Five" => Rank::Five,
-                    "Six" => Rank::Six,
-                    "Seven" => Rank::Seven,
-                    "Eight" => Rank::Eight,
-                    "Nine" => Rank::Nine,
-                    "Ten" => Rank::Ten,
-                    "Jack" => Rank::Jack,
-                    "Queen" => Rank::Queen,
-                    "King" => Rank::King,
-                    "Ace" => Rank::Ace,
-                    _ => Rank::Two,
-                };
-                let matching = discarded_cards.iter().filter(|c| c.rank == target_rank).count();
-                self.money += 5 * matching as i32;
-            }
+        // MailInRebate: +$5 per discarded card matching the round's rank, which is re-rolled
+        // every round (common_events.lua:2288).
+        let mail_count = self
+            .jokers
+            .iter()
+            .filter(|j| j.kind == JokerKind::MailInRebate && j.active)
+            .count();
+        if mail_count > 0 {
+            let matching = discarded_cards
+                .iter()
+                .filter(|c| c.rank == self.round_targets.mail_rank)
+                .count();
+            self.money += 5 * matching as i32 * mail_count as i32;
         }
 
         // TradingCard: if first discard of the round and only 1 card, earn $3 and destroy the card
@@ -873,19 +864,8 @@ impl GameState {
                     }
                 }
                 JokerKind::Castle => {
-                    let suit_str = self.jokers[i]
-                        .counters
-                        .get("suit")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("Spades")
-                        .to_string();
-                    let target_suit = match suit_str.as_str() {
-                        "Spades" => Suit::Spades,
-                        "Hearts" => Suit::Hearts,
-                        "Clubs" => Suit::Clubs,
-                        "Diamonds" => Suit::Diamonds,
-                        _ => Suit::Spades,
-                    };
+                    // Target suit is re-rolled every round (common_events.lua:2312).
+                    let target_suit = self.round_targets.castle_suit;
                     let count = discarded_cards
                         .iter()
                         .filter(|c| c.suit == target_suit)

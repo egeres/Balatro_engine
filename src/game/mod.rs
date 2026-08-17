@@ -1,6 +1,6 @@
 use crate::card::*;
 use crate::rng::Rng;
-use crate::scoring::{score_hand, ScoreResult};
+use crate::scoring::{score_hand, RoundTargets, ScoreResult};
 use crate::types::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -83,6 +83,10 @@ pub struct GameState {
     /// passively while held), Luchador only disables the blind at the moment it is sold, so the
     /// effect has to be latched for the rest of the round. Cleared when a new round begins.
     pub boss_blind_manually_disabled: bool,
+
+    /// Randomised targets for The Idol / Ancient Joker / Castle / Mail-In Rebate. Shared by all
+    /// copies of a joker and re-rolled at the start of every round.
+    pub round_targets: RoundTargets,
 
     /// ThePillar: IDs of cards played in earlier rounds of the current Ante.
     /// Cleared when a new Ante begins. Used to debuff those cards during the Boss blind.
@@ -187,6 +191,7 @@ impl GameState {
             cerulean_forced_card_id: None,
             verdant_leaf_joker_sold: false,
             boss_blind_manually_disabled: false,
+            round_targets: RoundTargets::default(),
             played_card_ids_this_ante: Vec::new(),
         };
 

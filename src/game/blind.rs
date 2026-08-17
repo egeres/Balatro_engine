@@ -110,6 +110,8 @@ impl GameState {
             data.played_this_round = 0;
         }
 
+        self.reroll_round_targets();
+
         // Reset draw pile
         self.draw_pile = (0..self.deck.len()).collect();
         self.rng.shuffle(&mut self.draw_pile);
@@ -139,6 +141,45 @@ impl GameState {
 
         // Notify jokers of blind selection
         self.notify_jokers_setting_blind();
+    }
+
+    /// Re-roll the round-wide joker targets (`state_events.lua:273-276`).
+    ///
+    /// The Idol, Castle and Mail-In Rebate each sample a random non-Stone card from the full deck
+    /// and read a property off it; Ancient Joker picks a suit *different* from the current one, so
+    /// it always changes. Defaults (Ace of Spades / Spades / Ace) stand in if the deck has no
+    /// eligible card, matching `common_events.lua:2272`.
+    fn reroll_round_targets(&mut self) {
+        let eligible: Vec<usize> = self
+            .deck
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| !c.is_stone())
+            .map(|(i, _)| i)
+            .collect();
+
+        let mut targets = crate::scoring::RoundTargets::default();
+
+        if !eligible.is_empty() {
+            let idol = self.deck[eligible[self.rng.range_usize(0, eligible.len() - 1)]].clone();
+            targets.idol_rank = idol.rank;
+            targets.idol_suit = idol.suit;
+
+            let mail = self.deck[eligible[self.rng.range_usize(0, eligible.len() - 1)]].clone();
+            targets.mail_rank = mail.rank;
+
+            let castle = self.deck[eligible[self.rng.range_usize(0, eligible.len() - 1)]].clone();
+            targets.castle_suit = castle.suit;
+        }
+
+        // Ancient Joker never repeats the previous round's suit.
+        let others: Vec<Suit> = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds]
+            .into_iter()
+            .filter(|s| *s != self.round_targets.ancient_suit)
+            .collect();
+        targets.ancient_suit = others[self.rng.range_usize(0, others.len() - 1)];
+
+        self.round_targets = targets;
     }
 
     pub(crate) fn effective_max_hands(&self) -> u32 {

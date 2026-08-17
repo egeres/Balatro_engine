@@ -168,8 +168,8 @@ impl JokerInstance {
                 counters.insert("mult".to_string(), serde_json::json!(0));
             }
             JokerKind::Castle => {
+                // Target suit lives on GameState.round_targets: it is round-wide, not per-joker.
                 counters.insert("chips".to_string(), serde_json::json!(0));
-                counters.insert("suit".to_string(), serde_json::json!("Spades"));
             }
             JokerKind::Hologram => {
                 counters.insert("x_mult".to_string(), serde_json::json!(1.0_f64));
@@ -221,12 +221,6 @@ impl JokerInstance {
             JokerKind::Campfire => {
                 counters.insert("x_mult".to_string(), serde_json::json!(1.0_f64));
             }
-            JokerKind::AncientJoker => {
-                counters.insert(
-                    "suit".to_string(),
-                    serde_json::json!("Hearts"),
-                );
-            }
             JokerKind::Rocket => {
                 counters.insert("dollars".to_string(), serde_json::json!(1));
             }
@@ -255,10 +249,6 @@ impl JokerInstance {
             }
             JokerKind::Egg => {
                 counters.insert("sell_bonus".to_string(), serde_json::json!(0));
-            }
-            JokerKind::MailInRebate => {
-                // Default rank is "Two", can be changed
-                counters.insert("rank".to_string(), serde_json::json!("Two"));
             }
             _ => {}
         }

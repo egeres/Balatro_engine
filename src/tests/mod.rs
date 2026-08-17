@@ -37,7 +37,7 @@ mod vouchers;
 
 use crate::card::{CardInstance, HandLevelData, JokerInstance};
 use crate::game::{GameState, GameStateKind};
-use crate::scoring::score_hand;
+use crate::scoring::{score_hand, RoundTargets};
 use crate::types::*;
 use std::collections::HashMap;
 
@@ -100,6 +100,37 @@ pub fn score(
         played.iter().chain(hand.iter())
             .filter(|c| c.enhancement != Enhancement::None)
             .count(),
+    
+        RoundTargets::default(),
+    )
+}
+
+/// Score with the round-wide joker targets (The Idol, Ancient Joker) set explicitly.
+pub fn score_with_targets(
+    played: &[CardInstance],
+    hand: &[CardInstance],
+    jokers: &[JokerInstance],
+    targets: RoundTargets,
+) -> crate::scoring::ScoreResult {
+    score_hand(
+        played,
+        hand,
+        jokers,
+        &default_hand_levels(),
+        3, 3, 0, 40, 52, 52,
+        None,
+        5,
+        0,
+        played.iter().chain(hand.iter())
+            .filter(|c| c.enhancement == Enhancement::Steel)
+            .count(),
+        played.iter().chain(hand.iter())
+            .filter(|c| c.is_stone())
+            .count(),
+        played.iter().chain(hand.iter())
+            .filter(|c| c.enhancement != Enhancement::None)
+            .count(),
+        targets,
     )
 }
 
@@ -139,6 +170,8 @@ pub fn score_full(
         played.iter().chain(hand.iter())
             .filter(|c| c.enhancement != Enhancement::None)
             .count(),
+    
+        RoundTargets::default(),
     )
 }
 

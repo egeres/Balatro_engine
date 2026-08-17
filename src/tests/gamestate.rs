@@ -303,3 +303,56 @@ fn test_swap_consumables_empty_list_returns_error() {
     let err = gs.swap_consumables(0, 1).unwrap_err();
     assert!(matches!(err, BalatroError::IndexOutOfRange(_, _)));
 }
+
+// =========================================================
+// Round-wide joker targets (The Idol / Ancient / Castle / Mail-In Rebate)
+// =========================================================
+
+/// The Idol, Castle and Mail all sample a real card from the deck, so their targets must be
+/// ranks/suits that actually exist in it.
+#[test]
+fn test_round_targets_are_drawn_from_the_deck() {
+    let mut gs = make_game();
+    gs.select_blind().unwrap();
+    let t = gs.round_targets;
+    assert!(gs.deck.iter().any(|c| c.rank == t.idol_rank && c.suit == t.idol_suit));
+    assert!(gs.deck.iter().any(|c| c.suit == t.castle_suit));
+    assert!(gs.deck.iter().any(|c| c.rank == t.mail_rank));
+}
+
+/// Ancient Joker picks a suit different from the previous round's (common_events.lua:2303).
+#[test]
+fn test_ancient_suit_always_changes_between_rounds() {
+    let mut gs = make_game();
+    gs.select_blind().unwrap();
+    let mut prev = gs.round_targets.ancient_suit;
+    for _ in 0..8 {
+        gs.state = GameStateKind::BlindSelect;
+        gs.select_blind().unwrap();
+        let next = gs.round_targets.ancient_suit;
+        assert_ne!(next, prev, "Ancient Joker suit must change every round");
+        prev = next;
+    }
+}
+
+/// Targets are re-rolled per round rather than frozen at joker creation.
+#[test]
+fn test_round_targets_are_rerolled_each_round() {
+    let mut gs = make_game();
+    gs.select_blind().unwrap();
+    let first = gs.round_targets;
+    let mut changed = false;
+    for _ in 0..20 {
+        gs.state = GameStateKind::BlindSelect;
+        gs.select_blind().unwrap();
+        if gs.round_targets.idol_rank != first.idol_rank
+            || gs.round_targets.idol_suit != first.idol_suit
+            || gs.round_targets.castle_suit != first.castle_suit
+            || gs.round_targets.mail_rank != first.mail_rank
+        {
+            changed = true;
+            break;
+        }
+    }
+    assert!(changed, "round targets should be re-rolled between rounds");
+}
