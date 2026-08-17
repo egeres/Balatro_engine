@@ -26,13 +26,16 @@ fn score_levels(
     jokers: &[JokerInstance],
     levels: &std::collections::HashMap<HandType, HandLevelData>,
 ) -> crate::scoring::ScoreResult {
-    score_hand(played, hand, jokers, levels, 3, 3, 0, 40, 52, 52, None, 5, 0,
-        played.iter().chain(hand.iter()).filter(|c| c.enhancement == Enhancement::Steel).count(),
-        played.iter().chain(hand.iter()).filter(|c| c.is_stone()).count(),
-        played.iter().chain(hand.iter()).filter(|c| c.enhancement != Enhancement::None).count(),
-        RoundTargets::default(),
-        false,
-    )
+    {
+        let mut si = ScoreInputs::new(played, hand, jokers, levels);
+        si.hands_remaining = 3;
+        si.discards_remaining = 3;
+        si.deck_cards_remaining = 40;
+        si.steel_count_in_deck = played.iter().chain(hand.iter()).filter(|c| c.enhancement == Enhancement::Steel).count();
+        si.stone_count_in_deck = played.iter().chain(hand.iter()).filter(|c| c.is_stone()).count();
+        si.enhanced_count_in_deck = played.iter().chain(hand.iter()).filter(|c| c.enhancement != Enhancement::None).count();
+        score_hand(si)
+    }
 }
 
 // =========================================================
@@ -500,23 +503,14 @@ fn test_scenario_flush_lvl2_blackboard_money_jokers() {
         joker(4, JokerKind::Bootstraps),
     ];
     let levels = levels_with(HandType::Flush, 2);
-    let r = score_hand(
-        &played, &played, &jokers, &levels,
-        2,   // hands_remaining
-        2,   // discards_remaining
-        15,  // money
-        40,  // deck_remaining
-        52,  // total_deck
-        52,  // starting_deck_size
-        None,
-        5,   // joker_slot_count
-        0,   // tarot_cards_used
-        0,   // steel_count_in_deck
-        0,   // stone_count_in_deck
-        0,   // enhanced_count_in_deck
-        RoundTargets::default(),
-        false,
-    );
+    let r = {
+        let mut si = ScoreInputs::new(&played, &played, &jokers, &levels);
+        si.hands_remaining = 2;
+        si.discards_remaining = 2;
+        si.money = 15;
+        si.deck_cards_remaining = 40;
+        score_hand(si)
+    };
 
     assert_eq!(r.hand_type, HandType::Flush);
     assert_eq!(r.final_chips as i64, 175,   "chips mismatch");
@@ -569,23 +563,14 @@ fn test_scenario_high_card_lvl2_deck_and_economy_jokers() {
         ice_cream,
     ];
     let levels = levels_with(HandType::HighCard, 2);
-    let r = score_hand(
-        &played, &played, &jokers, &levels,
-        3,   // hands_remaining
-        3,   // discards_remaining
-        0,   // money
-        30,  // deck_remaining
-        52,  // total_deck
-        52,  // starting_deck_size
-        None,
-        5,   // joker_slot_count
-        8,   // tarot_cards_used
-        0,   // steel_count_in_deck
-        0,   // stone_count_in_deck
-        0,   // enhanced_count_in_deck
-        RoundTargets::default(),
-        false,
-    );
+    let r = {
+        let mut si = ScoreInputs::new(&played, &played, &jokers, &levels);
+        si.hands_remaining = 3;
+        si.discards_remaining = 3;
+        si.deck_cards_remaining = 30;
+        si.tarot_cards_used = 8;
+        score_hand(si)
+    };
 
     assert_eq!(r.hand_type, HandType::HighCard);
     assert_eq!(r.final_chips as i64, 336,  "chips mismatch");
@@ -643,23 +628,14 @@ fn test_scenario_straight_lvl2_walkietalkie_order_erosion() {
         joker(4, JokerKind::Erosion),
     ];
     let levels = levels_with(HandType::Straight, 2);
-    let r = score_hand(
-        &played, &played, &jokers, &levels,
-        3,   // hands_remaining
-        3,   // discards_remaining
-        0,   // money
-        42,  // deck_remaining
-        42,  // total_deck (10 cards permanently removed from starting 52)
-        52,  // starting_deck_size
-        None,
-        5,   // joker_slot_count
-        0,   // tarot_cards_used
-        0,   // steel_count_in_deck
-        0,   // stone_count_in_deck
-        0,   // enhanced_count_in_deck
-        RoundTargets::default(),
-        false,
-    );
+    let r = {
+        let mut si = ScoreInputs::new(&played, &played, &jokers, &levels);
+        si.hands_remaining = 3;
+        si.discards_remaining = 3;
+        si.deck_cards_remaining = 42;
+        si.total_deck_size = 42;
+        score_hand(si)
+    };
 
     assert_eq!(r.hand_type, HandType::Straight);
     assert_eq!(r.final_chips as i64, 100,   "chips mismatch");
@@ -752,23 +728,14 @@ fn test_scenario_flushhouse_lvl3_nine_jokers_last_hand() {
     ];
 
     let levels = levels_with(HandType::FlushHouse, 3);
-    let r = score_hand(
-        &played, &played, &jokers, &levels,
-        0,   // hands_remaining — final hand of the round, Acrobat fires
-        3,   // discards_remaining
-        0,   // money
-        52,  // deck_remaining
-        52,  // total_deck
-        52,  // starting_deck_size
-        None,
-        9,   // joker_slot_count (Blank + Antimatter vouchers + 3 Negative jokers)
-        0,   // tarot_cards_used
-        0,   // steel_count_in_deck
-        0,   // stone_count_in_deck
-        0,   // enhanced_count_in_deck
-        RoundTargets::default(),
-        false,
-    );
+    let r = {
+        let mut si = ScoreInputs::new(&played, &played, &jokers, &levels);
+        si.hands_remaining = 0;
+        si.discards_remaining = 3;
+        si.deck_cards_remaining = 52;
+        si.joker_slot_count = 9;
+        score_hand(si)
+    };
 
     assert_eq!(r.hand_type, HandType::FlushHouse);
     assert_eq!(r.final_chips as i64, 273,    "chips mismatch");
@@ -850,23 +817,14 @@ fn test_scenario_four_of_a_kind_lvl3_eight_jokers_face_avalanche() {
     ];
 
     let levels = levels_with(HandType::FourOfAKind, 3);
-    let r = score_hand(
-        &played, &played, &jokers, &levels,
-        3,   // hands_remaining
-        3,   // discards_remaining
-        0,   // money
-        40,  // deck_remaining
-        52,  // total_deck
-        52,  // starting_deck_size
-        None,
-        8,   // joker_slot_count (Blank voucher + 2 Negative jokers)
-        0,   // tarot_cards_used
-        0,   // steel_count_in_deck
-        0,   // stone_count_in_deck
-        0,   // enhanced_count_in_deck
-        RoundTargets::default(),
-        false,
-    );
+    let r = {
+        let mut si = ScoreInputs::new(&played, &played, &jokers, &levels);
+        si.hands_remaining = 3;
+        si.discards_remaining = 3;
+        si.deck_cards_remaining = 40;
+        si.joker_slot_count = 8;
+        score_hand(si)
+    };
 
     assert_eq!(r.hand_type, HandType::FourOfAKind);
     assert_eq!(r.final_chips as i64, 460,    "chips mismatch");
@@ -960,23 +918,14 @@ fn test_scenario_five_of_a_kind_lvl3_nine_jokers_zero_discards() {
 
     let mut levels = levels_with(HandType::FiveOfAKind, 3);
     levels.get_mut(&HandType::FiveOfAKind).unwrap().played_this_round = 1; // CardSharp fires
-    let r = score_hand(
-        &played, &played, &jokers, &levels,
-        3,   // hands_remaining
-        0,   // discards_remaining — all used (Wasteful + Recyclomancy vouchers), MysticSummit fires
-        0,   // money
-        40,  // deck_remaining
-        52,  // total_deck
-        52,  // starting_deck_size
-        None,
-        9,   // joker_slot_count (Blank + Antimatter + 3 Negative jokers)
-        0,   // tarot_cards_used
-        0,   // steel_count_in_deck
-        0,   // stone_count_in_deck
-        0,   // enhanced_count_in_deck
-        RoundTargets::default(),
-        false,
-    );
+    let r = {
+        let mut si = ScoreInputs::new(&played, &played, &jokers, &levels);
+        si.hands_remaining = 3;
+        si.discards_remaining = 0;
+        si.deck_cards_remaining = 40;
+        si.joker_slot_count = 9;
+        score_hand(si)
+    };
 
     assert_eq!(r.hand_type, HandType::FiveOfAKind);
     assert_eq!(r.final_chips as i64, 350,    "chips mismatch");

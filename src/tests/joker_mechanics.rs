@@ -449,3 +449,87 @@ fn test_hiker_counts_each_retrigger() {
     );
     assert_eq!(gs.deck[0].extra_chips, 10);
 }
+
+/// Balatro writes Hiker's perma_bonus mid-scoring, so a retriggered card scores the boosted
+/// value on its later triggers (card.lua:3067).
+#[test]
+fn test_hiker_bonus_compounds_within_a_single_hand() {
+    // Hack retriggers the 2, so it scores twice: once at 2 chips, once at 2 + 5.
+    let deck = vec![card(0, Rank::Two, Suit::Spades)];
+    let (gs, r) = play_with(
+        deck,
+        1,
+        vec![joker(0, JokerKind::Hiker), joker(1, JokerKind::Hack)],
+        &[0],
+    );
+    // High Card base 5, then 2 + 7 from the two triggers = 14
+    assert_eq!(r.final_chips as i64, 14);
+    assert_eq!(gs.deck[0].extra_chips, 10);
+}
+
+#[test]
+fn test_hiker_without_retriggers_adds_nothing_to_this_hand() {
+    let deck = vec![card(0, Rank::Two, Suit::Spades)];
+    let (gs, r) = play_with(deck, 1, vec![joker(0, JokerKind::Hiker)], &[0]);
+    // Single trigger: 5 + 2, the bonus lands after.
+    assert_eq!(r.final_chips as i64, 7);
+    assert_eq!(gs.deck[0].extra_chips, 5);
+}
+
+// =========================================================
+// The hand type is locked in before jokers touch the cards
+// =========================================================
+
+/// Balatro decides the hand at the top of evaluate_play (state_events.lua:572), before the
+/// `before` pass. Vampire eating a Wild Card's enhancement must not retroactively break the
+/// flush that Wild Card was completing.
+#[test]
+fn test_vampire_eating_a_wild_card_does_not_break_the_flush() {
+    let mut wild = card(4, Rank::Nine, Suit::Hearts);
+    wild.enhancement = Enhancement::Wild;
+    let deck = vec![
+        card(0, Rank::Two, Suit::Spades),
+        card(1, Rank::Four, Suit::Spades),
+        card(2, Rank::Six, Suit::Spades),
+        card(3, Rank::Eight, Suit::Spades),
+        wild,
+    ];
+    let (gs, r) = play_with(deck, 5, vec![joker(0, JokerKind::Vampire)], &[0, 1, 2, 3, 4]);
+
+    assert_eq!(r.hand_type, HandType::Flush, "the flush was locked in before Vampire ate it");
+    assert_eq!(gs.deck[4].enhancement, Enhancement::None, "the Wild is still consumed");
+    assert!((gs.jokers[0].get_counter_f64("x_mult") - 1.1).abs() < 1e-9);
+    // Flush: 35 base + 2 + 4 + 6 + 8 + 9 = 64 chips
+    assert_eq!(r.final_chips as i64, 64);
+}
+
+/// Without Vampire the same hand is a plain flush, so the guard above is not hiding a change
+/// in how the hand is read.
+#[test]
+fn test_wild_card_flush_scores_the_same_without_vampire() {
+    let mut wild = card(4, Rank::Nine, Suit::Hearts);
+    wild.enhancement = Enhancement::Wild;
+    let deck = vec![
+        card(0, Rank::Two, Suit::Spades),
+        card(1, Rank::Four, Suit::Spades),
+        card(2, Rank::Six, Suit::Spades),
+        card(3, Rank::Eight, Suit::Spades),
+        wild,
+    ];
+    let (_, r) = play_with(deck, 5, vec![], &[0, 1, 2, 3, 4]);
+    assert_eq!(r.hand_type, HandType::Flush);
+    assert_eq!(r.final_chips as i64, 64);
+}
+
+/// Midas Mask gilding face cards mid-pass likewise cannot change what is being scored.
+#[test]
+fn test_midas_mask_does_not_change_the_scored_hand() {
+    let deck = vec![
+        card(0, Rank::King, Suit::Spades),
+        card(1, Rank::King, Suit::Hearts),
+    ];
+    let (gs, r) = play_with(deck, 2, vec![joker(0, JokerKind::MidasMask)], &[0, 1]);
+    assert_eq!(r.hand_type, HandType::Pair);
+    assert_eq!(gs.deck[0].enhancement, Enhancement::Gold);
+    assert_eq!(gs.deck[1].enhancement, Enhancement::Gold);
+}

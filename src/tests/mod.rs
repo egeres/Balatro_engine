@@ -38,7 +38,7 @@ mod vouchers;
 
 use crate::card::{CardInstance, HandLevelData, JokerInstance};
 use crate::game::{GameState, GameStateKind};
-use crate::scoring::{score_hand, RoundTargets};
+use crate::scoring::{score_hand, RoundTargets, ScoreInputs};
 use crate::types::*;
 use std::collections::HashMap;
 
@@ -72,39 +72,55 @@ pub fn default_hand_levels() -> HashMap<HandType, HandLevelData> {
     m
 }
 
+/// Counts of the enhancements in play, as `score_hand` expects them.
+fn deck_enhancement_counts(
+    played: &[CardInstance],
+    hand: &[CardInstance],
+) -> (usize, usize, usize) {
+    let all = || played.iter().chain(hand.iter());
+    (
+        all().filter(|c| c.enhancement == Enhancement::Steel).count(),
+        all().filter(|c| c.is_stone()).count(),
+        all().filter(|c| c.enhancement != Enhancement::None).count(),
+    )
+}
+
+/// Build inputs with the counts derived from the cards, the way a real round would.
+pub fn inputs<'a>(
+    played: &'a [CardInstance],
+    hand: &'a [CardInstance],
+    jokers: &'a [JokerInstance],
+    levels: &'a HashMap<HandType, HandLevelData>,
+) -> ScoreInputs<'a> {
+    let (steel, stone, enhanced) = deck_enhancement_counts(played, hand);
+    let mut i = ScoreInputs::new(played, hand, jokers, levels);
+    i.hands_remaining = 3;
+    i.discards_remaining = 3;
+    i.deck_cards_remaining = 40;
+    i.steel_count_in_deck = steel;
+    i.stone_count_in_deck = stone;
+    i.enhanced_count_in_deck = enhanced;
+    i
+}
+
 /// Score with sensible defaults for unused parameters.
 pub fn score(
     played: &[CardInstance],
     hand: &[CardInstance],
     jokers: &[JokerInstance],
 ) -> crate::scoring::ScoreResult {
-    score_hand(
-        played,
-        hand,
-        jokers,
-        &default_hand_levels(),
-        3,    // hands_remaining
-        3,    // discards_remaining
-        0,    // money
-        40,   // deck_remaining
-        52,   // total_deck
-        52,   // starting_deck_size
-        None, // boss_blind
-        5,    // joker_slot_count
-        0,    // tarot_cards_used
-        played.iter().chain(hand.iter())
-            .filter(|c| c.enhancement == Enhancement::Steel)
-            .count(),
-        played.iter().chain(hand.iter())
-            .filter(|c| c.is_stone())
-            .count(),
-        played.iter().chain(hand.iter())
-            .filter(|c| c.enhancement != Enhancement::None)
-            .count(),
-    
-        RoundTargets::default(),
-        false,
-    )
+    let levels = default_hand_levels();
+    score_hand(inputs(played, hand, jokers, &levels))
+}
+
+/// Score against explicit hand levels.
+pub fn score_levels(
+    played: &[CardInstance],
+    hand: &[CardInstance],
+    jokers: &[JokerInstance],
+    levels: &HashMap<HandType, HandLevelData>,
+) -> crate::scoring::ScoreResult {
+    score_hand(inputs(played, hand, jokers, levels))
 }
 
 /// Score with the round-wide joker targets (The Idol, Ancient Joker) set explicitly.
@@ -114,30 +130,14 @@ pub fn score_with_targets(
     jokers: &[JokerInstance],
     targets: RoundTargets,
 ) -> crate::scoring::ScoreResult {
-    score_hand(
-        played,
-        hand,
-        jokers,
-        &default_hand_levels(),
-        3, 3, 0, 40, 52, 52,
-        None,
-        5,
-        0,
-        played.iter().chain(hand.iter())
-            .filter(|c| c.enhancement == Enhancement::Steel)
-            .count(),
-        played.iter().chain(hand.iter())
-            .filter(|c| c.is_stone())
-            .count(),
-        played.iter().chain(hand.iter())
-            .filter(|c| c.enhancement != Enhancement::None)
-            .count(),
-        targets,
-        false,
-    )
+    let levels = default_hand_levels();
+    let mut i = inputs(played, hand, jokers, &levels);
+    i.round_targets = targets;
+    score_hand(i)
 }
 
 /// Score with full parameter control.
+#[allow(clippy::too_many_arguments)]
 pub fn score_full(
     played: &[CardInstance],
     hand: &[CardInstance],
@@ -150,33 +150,16 @@ pub fn score_full(
     joker_slot_count: usize,
     tarot_cards_used: u32,
 ) -> crate::scoring::ScoreResult {
-    score_hand(
-        played,
-        hand,
-        jokers,
-        &default_hand_levels(),
-        hands_remaining,
-        discards_remaining,
-        money,
-        deck_remaining,
-        total_deck,
-        52, // starting_deck_size: these tests all assume a standard 52-card deck
-        None,
-        joker_slot_count,
-        tarot_cards_used,
-        played.iter().chain(hand.iter())
-            .filter(|c| c.enhancement == Enhancement::Steel)
-            .count(),
-        played.iter().chain(hand.iter())
-            .filter(|c| c.is_stone())
-            .count(),
-        played.iter().chain(hand.iter())
-            .filter(|c| c.enhancement != Enhancement::None)
-            .count(),
-    
-        RoundTargets::default(),
-        false,
-    )
+    let levels = default_hand_levels();
+    let mut i = inputs(played, hand, jokers, &levels);
+    i.hands_remaining = hands_remaining;
+    i.discards_remaining = discards_remaining;
+    i.money = money;
+    i.deck_cards_remaining = deck_remaining;
+    i.total_deck_size = total_deck;
+    i.joker_slot_count = joker_slot_count;
+    i.tarot_cards_used = tarot_cards_used;
+    score_hand(i)
 }
 
 pub fn make_game() -> GameState {

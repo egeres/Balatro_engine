@@ -492,26 +492,38 @@ impl GameState {
             None
         };
 
-        let result = score_hand(
+        let mut inputs = crate::scoring::ScoreInputs::new(
             &played_cards,
             &hand_cards,
             &self.jokers,
             &self.hand_levels,
-            self.hands_remaining - 1,
-            self.discards_remaining,
-            self.money,
-            self.draw_pile.len(),
-            self.deck.len(),
-            self.starting_deck_size,
-            self.boss_blind,
-            self.joker_slots as usize,
-            self.tarot_cards_used,
-            steel_count_in_deck,
-            stone_count_in_deck,
-            enhanced_count_in_deck,
-            self.round_targets,
-            boss_ability_triggered,
         );
+        inputs.hands_remaining = self.hands_remaining - 1;
+        inputs.discards_remaining = self.discards_remaining;
+        inputs.money = self.money;
+        inputs.deck_cards_remaining = self.draw_pile.len();
+        inputs.total_deck_size = self.deck.len();
+        inputs.starting_deck_size = self.starting_deck_size;
+        inputs.boss_blind = self.boss_blind;
+        inputs.boss_ability_triggered = boss_ability_triggered;
+        inputs.joker_slot_count = self.joker_slots as usize;
+        inputs.tarot_cards_used = self.tarot_cards_used;
+        inputs.steel_count_in_deck = steel_count_in_deck;
+        inputs.stone_count_in_deck = stone_count_in_deck;
+        inputs.enhanced_count_in_deck = enhanced_count_in_deck;
+        inputs.round_targets = self.round_targets;
+        // The hand was locked in before the `before` pass ran, so a joker that mutated the cards
+        // (Vampire eating a Wild Card's enhancement) cannot change what is being scored.
+        inputs.eval = Some(&pre_eval);
+
+        let result = score_hand(inputs);
+
+        // Hiker's permanent chip bonuses, applied to the real deck cards.
+        for (card_id, gain) in &result.perma_chip_bonuses {
+            if let Some(deck_card) = self.deck.iter_mut().find(|c| c.id == *card_id) {
+                deck_card.extra_chips += *gain;
+            }
+        }
 
         // CrimsonHeart: re-enable the temporarily disabled joker
         if let Some(disabled_id) = crimson_disabled_joker_id {
@@ -854,31 +866,6 @@ impl GameState {
                             }
                         }
                         self.destroy_deck_card(card_id);
-                    }
-                }
-                JokerKind::Hiker => {
-                    // +5 permanent Chips per scoring card, once per trigger (card.lua:3067 runs
-                    // under `context.individual`, which repeats with retriggers).
-                    //
-                    // Balatro writes perma_bonus mid-scoring, so on a retriggered card the later
-                    // triggers already score the boosted value. Here the bonus lands after the
-                    // hand instead, which only differs when the card is retriggered.
-                    for &sci in &result.scoring_card_indices {
-                        let card = &played[sci];
-                        if card.debuffed {
-                            continue;
-                        }
-                        let triggers = 1 + crate::scoring::count_retriggers(
-                            sci,
-                            card,
-                            &self.jokers,
-                            &result.scoring_card_indices,
-                            self.hands_remaining,
-                        );
-                        let card_id = card.id;
-                        if let Some(deck_card) = self.deck.iter_mut().find(|c| c.id == card_id) {
-                            deck_card.extra_chips += 5 * triggers as i64;
-                        }
                     }
                 }
                                                 _ => {}

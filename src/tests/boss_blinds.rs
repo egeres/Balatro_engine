@@ -68,12 +68,29 @@ fn boss_select(boss: BossBlind) -> GameState {
 
 /// Call `score_hand` with a specific boss blind, no jokers, and default Level-1 hands.
 fn score_with_boss(played: &[CardInstance], boss: BossBlind) -> crate::scoring::ScoreResult {
-    score_hand(played, &[], &[], &default_hand_levels(), 3, 3, 0, 40, 52, 52, Some(boss), 5, 0, 0, 0, 0, RoundTargets::default(), false)
+    {
+        let levels = default_hand_levels();
+        let jokers = [];
+        let mut si = ScoreInputs::new(played, &[], &jokers, &levels);
+        si.hands_remaining = 3;
+        si.discards_remaining = 3;
+        si.deck_cards_remaining = 40;
+        si.boss_blind = Some(boss);
+        score_hand(si)
+    }
 }
 
 /// Call `score_hand` with no boss blind — the baseline to compare against.
 fn score_baseline(played: &[CardInstance]) -> crate::scoring::ScoreResult {
-    score_hand(played, &[], &[], &default_hand_levels(), 3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0, RoundTargets::default(), false)
+    {
+        let levels = default_hand_levels();
+        let jokers = [];
+        let mut si = ScoreInputs::new(played, &[], &jokers, &levels);
+        si.hands_remaining = 3;
+        si.discards_remaining = 3;
+        si.deck_cards_remaining = 40;
+        score_hand(si)
+    }
 }
 
 /// Five mixed low Spades that form a Flush (2,3,4,5,7 — no straight).
@@ -1140,13 +1157,15 @@ fn test_crimson_heart_disables_joker_during_scoring() {
     ];
 
     // Without CrimsonHeart: AbstractJoker adds +3 mult per joker = 5 total → 26×5 = 130
-    let result_no_boss = score_hand(
-        &played, &[], &[joker(10, JokerKind::AbstractJoker)],
-        &default_hand_levels(), 3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0,
-    
-        RoundTargets::default(),
-        false,
-    );
+    let result_no_boss = {
+        let levels = default_hand_levels();
+        let jokers = [joker(10, JokerKind::AbstractJoker)];
+        let mut si = ScoreInputs::new(&played, &[], &jokers, &levels);
+        si.hands_remaining = 3;
+        si.discards_remaining = 3;
+        si.deck_cards_remaining = 40;
+        score_hand(si)
+    };
     assert_eq!(result_no_boss.final_score as i64, 130);
 
     // With CrimsonHeart via GameState: AbstractJoker is disabled during play_hand

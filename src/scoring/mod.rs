@@ -1,5 +1,5 @@
 use crate::card::{CardInstance, HandLevelData, JokerInstance};
-use crate::hand_eval::evaluate_hand;
+use crate::hand_eval::{evaluate_hand, HandEvalResult};
 use crate::types::*;
 use std::collections::HashMap;
 
@@ -15,6 +15,9 @@ pub struct ScoreResult {
     pub final_mult: f64,
     pub final_score: f64,
     pub dollars_earned: i32,
+    /// Permanent chip bonuses Hiker wrote onto scoring cards, as `(card id, chips)`.
+    /// The caller persists these onto the deck.
+    pub perma_chip_bonuses: Vec<(u64, i64)>,
     /// Events that happened during scoring (for history / debugging)
     pub events: Vec<ScoreEvent>,
 }
@@ -110,39 +113,124 @@ fn push_effect_events(events: &mut Vec<ScoreEvent>, effect: &JokerEffect, source
     }
 }
 
+/// Everything `score_hand` needs. Built with [`ScoreInputs::new`] and then adjusted field by
+/// field, so adding a new input does not churn every call site.
+pub struct ScoreInputs<'a> {
+    pub played_cards: &'a [CardInstance],
+    pub hand_cards: &'a [CardInstance],
+    pub jokers: &'a [JokerInstance],
+    pub hand_levels: &'a HashMap<HandType, HandLevelData>,
+
+    /// Hands left *after* this one — Acrobat and Dusk key off it being 0.
+    pub hands_remaining: u32,
+    pub discards_remaining: u32,
+    pub money: i32,
+    pub deck_cards_remaining: usize,
+    pub total_deck_size: usize,
+    pub starting_deck_size: usize,
+    pub boss_blind: Option<BossBlind>,
+    pub boss_ability_triggered: bool,
+    pub joker_slot_count: usize,
+    pub tarot_cards_used: u32,
+    pub steel_count_in_deck: usize,
+    pub stone_count_in_deck: usize,
+    pub enhanced_count_in_deck: usize,
+    pub round_targets: RoundTargets,
+
+    /// The hand type and scoring cards, decided *before* any joker touched the cards.
+    ///
+    /// Balatro calls `get_poker_hand_info` at the top of `evaluate_play` (state_events.lua:572),
+    /// so the hand is locked in before the `before` phase runs. That matters when a joker mutates
+    /// the played cards: Vampire eating a Wild Card's enhancement must not retroactively break a
+    /// flush. Leave it `None` to evaluate from `played_cards`.
+    pub eval: Option<&'a HandEvalResult>,
+}
+
+impl<'a> ScoreInputs<'a> {
+    pub fn new(
+        played_cards: &'a [CardInstance],
+        hand_cards: &'a [CardInstance],
+        jokers: &'a [JokerInstance],
+        hand_levels: &'a HashMap<HandType, HandLevelData>,
+    ) -> Self {
+        Self {
+            played_cards,
+            hand_cards,
+            jokers,
+            hand_levels,
+            hands_remaining: 0,
+            discards_remaining: 0,
+            money: 0,
+            deck_cards_remaining: 0,
+            total_deck_size: 52,
+            starting_deck_size: 52,
+            boss_blind: None,
+            boss_ability_triggered: false,
+            joker_slot_count: 5,
+            tarot_cards_used: 0,
+            steel_count_in_deck: 0,
+            stone_count_in_deck: 0,
+            enhanced_count_in_deck: 0,
+            round_targets: RoundTargets::default(),
+            eval: None,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Main scoring entry-point
 // ---------------------------------------------------------------------------
 
-pub fn score_hand(
-    played_cards: &[CardInstance],
-    hand_cards: &[CardInstance],
-    jokers: &[JokerInstance],
-    hand_levels: &HashMap<HandType, HandLevelData>,
-    hands_remaining: u32,
-    discards_remaining: u32,
-    money: i32,
-    deck_remaining: usize,
-    total_deck: usize,
-    starting_deck_size: usize,
-    boss_blind: Option<BossBlind>,
-    joker_slot_count: usize,
-    tarot_cards_used: u32,
-    steel_count_in_deck: usize,
-    stone_count_in_deck: usize,
-    enhanced_count_in_deck: usize,
-    round_targets: RoundTargets,
-    boss_ability_triggered: bool,
-) -> ScoreResult {
-    let has_four_fingers = jokers.iter().any(|j| j.kind == JokerKind::FourFingers && j.active);
-    let has_shortcut    = jokers.iter().any(|j| j.kind == JokerKind::Shortcut     && j.active);
-    let has_smeared     = jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active);
-    let has_splash      = jokers.iter().any(|j| j.kind == JokerKind::Splash       && j.active);
-    let has_pareidolia  = jokers.iter().any(|j| j.kind == JokerKind::Pareidolia   && j.active);
+pub fn score_hand(inputs: ScoreInputs) -> ScoreResult {
+    let ScoreInputs {
+        played_cards,
+        hand_cards,
+        jokers,
+        hand_levels,
+        hands_remaining,
+        discards_remaining,
+        money,
+        deck_cards_remaining,
+        total_deck_size,
+        starting_deck_size,
+        boss_blind,
+        boss_ability_triggered,
+        joker_slot_count,
+        tarot_cards_used,
+        steel_count_in_deck,
+        stone_count_in_deck,
+        enhanced_count_in_deck,
+        round_targets,
+        eval,
+    } = inputs;
 
-    let eval = evaluate_hand(played_cards, has_four_fingers, has_shortcut, has_smeared, has_splash);
+    let has_pareidolia = jokers.iter().any(|j| j.kind == JokerKind::Pareidolia && j.active);
+
+    // Use the caller's locked-in hand where it gave one; otherwise work it out here.
+    let owned_eval;
+    let eval: &HandEvalResult = match eval {
+        Some(e) => e,
+        None => {
+            let has = |k: JokerKind| jokers.iter().any(|j| j.kind == k && j.active);
+            owned_eval = evaluate_hand(
+                played_cards,
+                has(JokerKind::FourFingers),
+                has(JokerKind::Shortcut),
+                has(JokerKind::SmearedJoker),
+                has(JokerKind::Splash),
+            );
+            &owned_eval
+        }
+    };
     let hand_type = eval.hand_type;
     let scoring_indices = eval.scoring_indices.clone();
+
+    // Hiker writes a permanent bonus onto the cards it scores, and a retriggered card sees that
+    // bonus on its later triggers (card.lua:3067). Work on a local copy so the growth is visible
+    // mid-hand, and report the totals back so the caller can persist them onto the deck.
+    let mut played: Vec<CardInstance> = played_cards.to_vec();
+    let hiker_count = count_effective_jokers(jokers, JokerKind::Hiker) as i64;
+    let mut perma_chip_bonuses: Vec<(u64, i64)> = Vec::new();
 
     let level_data = hand_levels
         .get(&hand_type)
@@ -165,14 +253,10 @@ pub fn score_hand(
         events.push(ScoreEvent { source: "The Flint".to_string(), kind: ScoreEventKind::XMult, value: 0.5 });
     }
 
-    // Pre-collect active jokers once; reused across the card phases below.
-    let active_jokers: Vec<&JokerInstance> = jokers.iter().filter(|j| j.active).collect();
-
     // ── PHASE 1: score each card in the scoring hand ──────────────────────
     for &card_idx in &scoring_indices {
-        let card = &played_cards[card_idx];
-
-        if card.debuffed {
+        if played[card_idx].debuffed {
+            let card = &played[card_idx];
             events.push(ScoreEvent {
                 source: format!("{:?} of {:?}", card.rank, card.suit),
                 kind: ScoreEventKind::Chips,
@@ -181,9 +265,13 @@ pub fn score_hand(
             continue;
         }
 
-        let retriggers = count_retriggers(card_idx, card, jokers, &scoring_indices, hands_remaining);
+        let retriggers = count_retriggers(
+            card_idx, &played[card_idx], jokers, &scoring_indices, hands_remaining,
+        );
 
         for _trigger in 0..=retriggers {
+            let card = played[card_idx].clone();
+
             let card_chips = card.base_chip_value() + card.chip_bonus();
             if card_chips != 0 {
                 chips += card_chips as f64;
@@ -235,7 +323,7 @@ pub fn score_hand(
             // Per-card joker effects
             for (j_idx, joker) in jokers.iter().enumerate().filter(|(_, j)| j.active) {
                 let effect = calc_joker_individual(
-                    joker, j_idx, jokers, card_idx, card, &scoring_indices, played_cards,
+                    joker, j_idx, jokers, card_idx, &card, &scoring_indices, &played,
                     has_pareidolia, round_targets,
                 );
                 chips += effect.chips as f64;
@@ -243,6 +331,23 @@ pub fn score_hand(
                 mult  *= effect.x_mult;
                 dollars_earned += effect.dollars;
                 push_effect_events(&mut events, &effect, joker.kind.display_name());
+            }
+
+            // Hiker bumps the card's permanent chips *after* it scored this trigger, so the
+            // next trigger of the same card scores the boosted value.
+            if hiker_count > 0 {
+                let gain = 5 * hiker_count;
+                played[card_idx].extra_chips += gain;
+                let id = played[card_idx].id;
+                match perma_chip_bonuses.iter_mut().find(|(cid, _)| *cid == id) {
+                    Some((_, total)) => *total += gain,
+                    None => perma_chip_bonuses.push((id, gain)),
+                }
+                events.push(ScoreEvent {
+                    source: JokerKind::Hiker.display_name().to_string(),
+                    kind: ScoreEventKind::Chips,
+                    value: 0.0,
+                });
             }
         }
     }
@@ -291,15 +396,15 @@ pub fn score_hand(
     let ctx = ScoringContext {
         hand_type,
         scoring_cards: &scoring_indices,
-        played_cards,
+        played_cards: &played,
         hand_cards,
         jokers,
         hand_levels,
         hands_remaining,
         discards_remaining,
         money,
-        deck_cards_remaining: deck_remaining,
-        total_deck_size: total_deck,
+        deck_cards_remaining,
+        total_deck_size,
         starting_deck_size,
         boss_blind,
         boss_ability_triggered,
@@ -342,6 +447,7 @@ pub fn score_hand(
         final_mult:  mult,
         final_score,
         dollars_earned,
+        perma_chip_bonuses,
         events,
     }
 }
@@ -349,5 +455,5 @@ pub fn score_hand(
 pub(crate) mod joker_effects;
 pub(crate) use joker_effects::{
     JokerEffect, calc_joker_individual, calc_joker_hand_card, calc_joker_main,
-    count_hand_retriggers, count_retriggers,
+    count_effective_jokers, count_hand_retriggers, count_retriggers,
 };

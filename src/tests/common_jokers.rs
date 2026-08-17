@@ -625,27 +625,15 @@ fn test_mystic_summit_fires_only_at_zero_discards() {
     assert_eq!(r.final_score as i64, 16);
 
     // With 0 discards remaining → fires
-    let r2 = score_hand(
-        &played,
-        &played,
-        &[joker(0, JokerKind::MysticSummit)],
-        &default_hand_levels(),
-        3,
-        0,
-        0,
-        40,
-        52,
-        52,
-        None,
-        5,
-        0,
-        0,
-        0,
-        0,
-    
-        RoundTargets::default(),
-        false,
-    );
+    let r2 = {
+        let levels = default_hand_levels();
+        let jokers = [joker(0, JokerKind::MysticSummit)];
+        let mut si = ScoreInputs::new(&played, &played, &jokers, &levels);
+        si.hands_remaining = 3;
+        si.discards_remaining = 0;
+        si.deck_cards_remaining = 40;
+        score_hand(si)
+    };
     // chips=16, mult=1+15=16 → 256
     assert_eq!(r2.final_score as i64, 256);
 }
@@ -659,27 +647,14 @@ fn test_supernova_adds_mult_equal_to_times_played() {
 
     let mut levels = default_hand_levels();
     levels.get_mut(&HandType::HighCard).unwrap().played = 5;
-    let r2 = score_hand(
-        &played,
-        &played,
-        &[joker(0, JokerKind::Supernova)],
-        &levels,
-        3,
-        3,
-        0,
-        40,
-        52,
-        52,
-        None,
-        5,
-        0,
-        0,
-        0,
-        0,
-    
-        RoundTargets::default(),
-        false,
-    );
+    let r2 = {
+        let jokers = [joker(0, JokerKind::Supernova)];
+        let mut si = ScoreInputs::new(&played, &played, &jokers, &levels);
+        si.hands_remaining = 3;
+        si.discards_remaining = 3;
+        si.deck_cards_remaining = 40;
+        score_hand(si)
+    };
     // chips=16, mult=1+5=6 → 96
     assert_eq!(r2.final_score as i64, 96);
 }
@@ -903,7 +878,14 @@ fn test_card_sharp_fires_when_hand_type_already_played_this_round() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
     let mut levels = default_hand_levels();
     levels.get_mut(&HandType::HighCard).unwrap().played_this_round = 1;
-    let r = score_hand(&played, &played, &[joker(0, JokerKind::CardSharp)], &levels, 3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0, RoundTargets::default(), false);
+    let r = {
+        let jokers = [joker(0, JokerKind::CardSharp)];
+        let mut si = ScoreInputs::new(&played, &played, &jokers, &levels);
+        si.hands_remaining = 3;
+        si.discards_remaining = 3;
+        si.deck_cards_remaining = 40;
+        score_hand(si)
+    };
     // HC: 16 chips, mult=1*3=3 → 48 (X3 because HighCard already played this round)
     assert_eq!(r.final_score as i64, 48);
 }
@@ -1021,20 +1003,17 @@ fn test_erosion_uses_starting_deck_size_not_52() {
     assert_eq!(gs.starting_deck_size, 40, "Abandoned Deck starts at 40 cards");
 
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
-    let r = score_hand(
-        &played,
-        &played,
-        &[joker(0, JokerKind::Erosion)],
-        &default_hand_levels(),
-        3, 3, 0,
-        30,                      // deck_remaining
-        gs.deck.len(),           // total_deck = 40
-        gs.starting_deck_size,   // starting_deck_size = 40
-        None, 5, 0, 0, 0, 0,
-    
-        RoundTargets::default(),
-        false,
-    );
+    let r = {
+        let levels = default_hand_levels();
+        let jokers = [joker(0, JokerKind::Erosion)];
+        let mut si = ScoreInputs::new(&played, &played, &jokers, &levels);
+        si.hands_remaining = 3;
+        si.discards_remaining = 3;
+        si.deck_cards_remaining = 30;
+        si.total_deck_size = gs.deck.len();
+        si.starting_deck_size = gs.starting_deck_size;
+        score_hand(si)
+    };
     // No cards removed → no Erosion mult. HC: (5+11) * 1 = 16
     assert_eq!(r.final_score as i64, 16);
 }

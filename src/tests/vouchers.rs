@@ -244,13 +244,14 @@ fn test_observatory_increases_flush_score() {
     let mut gs_no_obs = make_game();
     gs_no_obs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter));
     gs_no_obs.use_consumable(0, vec![]).unwrap();
-    let result_no_obs = score_hand(
-        &played, &[], &[], &gs_no_obs.hand_levels,
-        3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0,
-    
-        RoundTargets::default(),
-        false,
-    );
+    let result_no_obs = {
+        let jokers = [];
+        let mut si = ScoreInputs::new(&played, &[], &jokers, &gs_no_obs.hand_levels);
+        si.hands_remaining = 3;
+        si.discards_remaining = 3;
+        si.deck_cards_remaining = 40;
+        score_hand(si)
+    };
     assert_eq!(result_no_obs.final_score as i64, 426,
         "Without Observatory: L2 Flush score should be 426");
 
@@ -258,13 +259,14 @@ fn test_observatory_increases_flush_score() {
     let mut gs = apply_voucher_to_game(VoucherKind::Observatory);
     gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter));
     gs.use_consumable(0, vec![]).unwrap();
-    let result = score_hand(
-        &played, &[], &[], &gs.hand_levels,
-        3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0,
-    
-        RoundTargets::default(),
-        false,
-    );
+    let result = {
+        let jokers = [];
+        let mut si = ScoreInputs::new(&played, &[], &jokers, &gs.hand_levels);
+        si.hands_remaining = 3;
+        si.discards_remaining = 3;
+        si.deck_cards_remaining = 40;
+        score_hand(si)
+    };
     assert_eq!(result.final_score as i64, 639,
         "Observatory should give X1.5 on Flush: expected 639, got {}",
         result.final_score as i64

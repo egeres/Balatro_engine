@@ -104,6 +104,26 @@ fn covered_suits(
     present
 }
 
+/// How many active jokers behave as `kind`, counting Blueprint / Brainstorm copies of it.
+pub(crate) fn count_effective_jokers(jokers: &[JokerInstance], kind: JokerKind) -> usize {
+    jokers
+        .iter()
+        .enumerate()
+        .filter(|(_, j)| j.active)
+        .filter(|(idx, j)| {
+            let effective = if is_copy_joker(j.kind) {
+                match copy_target(jokers, *idx) {
+                    Some(t) => jokers[t].kind,
+                    None => return false,
+                }
+            } else {
+                j.kind
+            };
+            effective == kind
+        })
+        .count()
+}
+
 // ---------------------------------------------------------------------------
 // Retrigger counting
 // ---------------------------------------------------------------------------
@@ -289,7 +309,7 @@ pub(crate) fn calc_joker_individual(
             }
         }
         // Hiker adds no chips directly. It writes perma_bonus onto the card (card.lua:3067),
-        // which the engine applies after the hand in post_play_joker_updates.
+        // which score_hand applies between triggers and reports back to the caller.
         JokerKind::Arrowhead => {
             if is_scoring && card.effective_suits().contains(&Suit::Spades) {
                 effect.chips += 50;
