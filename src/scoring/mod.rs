@@ -252,7 +252,7 @@ pub fn score_hand(
             .iter()
             .enumerate()
             .filter(|(_, j)| j.active)
-            .map(|(j_idx, joker)| (j_idx, calc_joker_hand_card(joker, j_idx, jokers, card)))
+            .map(|(j_idx, joker)| (j_idx, calc_joker_hand_card(joker, j_idx, jokers, card, hand_cards)))
             .filter(|(_, e)| e.mult != 0 || e.x_mult != 1.0 || e.dollars != 0)
             .collect();
 
@@ -274,7 +274,7 @@ pub fn score_hand(
                 });
             }
             for (j_idx, _) in &joker_effects {
-                let effect = calc_joker_hand_card(&jokers[*j_idx], *j_idx, jokers, card);
+                let effect = calc_joker_hand_card(&jokers[*j_idx], *j_idx, jokers, card, hand_cards);
                 mult += effect.mult as f64;
                 mult *= effect.x_mult;
                 dollars_earned += effect.dollars;

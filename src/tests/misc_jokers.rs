@@ -1795,3 +1795,79 @@ fn test_blueprint_with_nothing_to_its_right_does_nothing() {
     );
     assert_eq!(r.final_mult as i64, 5);
 }
+
+/// Ties go to the rightmost card: Balatro scans with `temp_ID >= base.id` (card.lua:3323).
+#[test]
+fn test_raised_fist_breaks_rank_ties_towards_the_rightmost_card() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let hand = vec![
+        card(1, Rank::Five, Suit::Clubs),
+        card(2, Rank::Five, Suit::Hearts),
+        card(3, Rank::King, Suit::Hearts),
+    ];
+    let r = score(&played, &hand, &[joker(0, JokerKind::RaisedFist)]);
+    // Only one of the two Fives fires: mult 1 + 2*5 = 11
+    assert_eq!(r.final_mult as i64, 11);
+}
+
+/// Raised Fist uses the *nominal* value, so a Jack is worth 10 while the Ace is the highest rank.
+#[test]
+fn test_raised_fist_ranks_ace_highest_and_uses_nominal_value() {
+    let played = vec![card(0, Rank::Two, Suit::Spades)];
+    let hand = vec![
+        card(1, Rank::Ace, Suit::Clubs),
+        card(2, Rank::Jack, Suit::Hearts),
+    ];
+    let r = score(&played, &hand, &[joker(0, JokerKind::RaisedFist)]);
+    // Jack is the lowest rank (11 < 14); its nominal is 10 → +20 mult
+    assert_eq!(r.final_mult as i64, 21);
+}
+
+/// Stone cards are skipped when picking the lowest card (card.lua:3323).
+#[test]
+fn test_raised_fist_ignores_stone_cards() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let mut stone = card(1, Rank::Two, Suit::Clubs);
+    stone.enhancement = Enhancement::Stone;
+    let hand = vec![stone, card(2, Rank::Nine, Suit::Hearts)];
+    let r = score(&played, &hand, &[joker(0, JokerKind::RaisedFist)]);
+    // The Nine is the lowest non-stone card → +18 mult
+    assert_eq!(r.final_mult as i64, 19);
+}
+
+/// Permanent chip bonuses (Hiker) must not inflate Raised Fist — it reads base.nominal.
+#[test]
+fn test_raised_fist_ignores_permanent_chip_bonuses() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let mut boosted = card(1, Rank::Three, Suit::Clubs);
+    boosted.extra_chips = 40;
+    let r = score(&played, &[boosted], &[joker(0, JokerKind::RaisedFist)]);
+    // Still 2 x 3 = 6, not 2 x 43
+    assert_eq!(r.final_mult as i64, 7);
+}
+
+/// Raised Fist is a held-in-hand effect, so Mime retriggers it.
+#[test]
+fn test_mime_retriggers_raised_fist() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let hand = vec![card(1, Rank::Four, Suit::Clubs)];
+    let r = score(
+        &played,
+        &hand,
+        &[joker(0, JokerKind::RaisedFist), joker(1, JokerKind::Mime)],
+    );
+    // 1 + 8 + 8 = 17
+    assert_eq!(r.final_mult as i64, 17);
+}
+
+/// If the lowest held card is debuffed, Raised Fist yields nothing.
+#[test]
+fn test_raised_fist_yields_nothing_when_the_lowest_card_is_debuffed() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let mut low = card(1, Rank::Two, Suit::Clubs);
+    low.debuffed = true;
+    let hand = vec![low, card(2, Rank::Nine, Suit::Hearts)];
+    let r = score(&played, &hand, &[joker(0, JokerKind::RaisedFist)]);
+    // The Two is still chosen, but being debuffed it pays nothing — the Nine does not stand in.
+    assert_eq!(r.final_mult as i64, 1);
+}

@@ -306,10 +306,11 @@ pub(crate) fn calc_joker_hand_card(
     joker_idx: usize,
     all_jokers: &[JokerInstance],
     card: &CardInstance,
+    hand_cards: &[CardInstance],
 ) -> JokerEffect {
     if is_copy_joker(joker.kind) {
         return match copy_target(all_jokers, joker_idx) {
-            Some(t) => calc_joker_hand_card(&all_jokers[t], t, all_jokers, card),
+            Some(t) => calc_joker_hand_card(&all_jokers[t], t, all_jokers, card, hand_cards),
             None => JokerEffect::new(),
         };
     }
@@ -326,9 +327,33 @@ pub(crate) fn calc_joker_hand_card(
                 effect.mult += 13;
             }
         }
+        JokerKind::RaisedFist => {
+            // Doubles the *nominal* value of the lowest-ranked card held in hand
+            // (card.lua:3320). Balatro scans with `temp_ID >= base.id`, so ties go to the
+            // rightmost card, and Stone cards are skipped outright.
+            if let Some(lowest) = lowest_held_card(hand_cards) {
+                if lowest.id == card.id && !card.debuffed {
+                    effect.mult += 2 * card.rank.base_chips();
+                }
+            }
+        }
         _ => {}
     }
     effect
+}
+
+/// The card Raised Fist keys off: lowest rank held in hand, ties to the rightmost, Stone cards
+/// excluded. Debuffed cards still take part in the selection — Balatro then yields no Mult,
+/// which falls out of the held-card phase skipping debuffed cards.
+fn lowest_held_card(hand_cards: &[CardInstance]) -> Option<&CardInstance> {
+    let mut chosen: Option<&CardInstance> = None;
+    for c in hand_cards.iter().filter(|c| !c.is_stone()) {
+        match chosen {
+            Some(cur) if cur.rank.numeric_value() < c.rank.numeric_value() => {}
+            _ => chosen = Some(c),
+        }
+    }
+    chosen
 }
 
 // ---------------------------------------------------------------------------
@@ -536,11 +561,6 @@ pub(crate) fn calc_joker_main(
         JokerKind::Throwback => {
             let skips = joker.get_counter_i64("skips");
             if skips > 0 { effect.x_mult = 1.0 + 0.25 * skips as f64; }
-        }
-        JokerKind::RaisedFist => {
-            if let Some(min) = hand.iter().map(|c| c.base_chip_value()).filter(|&v| v > 0).min() {
-                effect.mult += min * 2;
-            }
         }
         JokerKind::GoldenTicket => {
             let gold = scoring_cards.iter()
