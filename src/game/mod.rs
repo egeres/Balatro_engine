@@ -406,6 +406,23 @@ impl GameState {
         }
     }
 
+    /// The lowest balance the player is allowed to reach (`G.GAME.bankrupt_at`, game.lua:1922).
+    /// Normally $0; each Credit Card lowers it by $20 (card.lua:594).
+    pub fn bankrupt_at(&self) -> i32 {
+        let credit_cards = self
+            .jokers
+            .iter()
+            .filter(|j| j.kind == JokerKind::CreditCard && j.active)
+            .count();
+        -20 * credit_cards as i32
+    }
+
+    /// Whether a purchase of `cost` is allowed. Balatro's shop buttons test
+    /// `cost > G.GAME.dollars - G.GAME.bankrupt_at` (button_callbacks.lua:56).
+    pub fn can_afford(&self, cost: i32) -> bool {
+        cost <= self.money - self.bankrupt_at()
+    }
+
     /// Returns `true` if the current Boss blind's ability is disabled.
     ///
     /// Chicot disables it passively while held (`card.lua:596`), whereas Luchador only disables it

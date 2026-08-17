@@ -1948,3 +1948,57 @@ fn test_seeing_double_needs_a_non_club() {
     let r = score(&played, &[], &[joker(0, JokerKind::SeeingDouble)]);
     assert_eq!(r.final_mult as i64, 2);
 }
+
+// =========================================================
+// Credit Card: lets the balance go $20 into the red
+// =========================================================
+
+#[test]
+fn test_without_credit_card_the_floor_is_zero() {
+    let mut gs = make_game();
+    gs.money = 3;
+    assert_eq!(gs.bankrupt_at(), 0);
+    assert!(gs.can_afford(3));
+    assert!(!gs.can_afford(4));
+}
+
+#[test]
+fn test_credit_card_allows_twenty_dollars_of_debt() {
+    let mut gs = make_game();
+    gs.money = 3;
+    gs.jokers.push(joker(0, JokerKind::CreditCard));
+    assert_eq!(gs.bankrupt_at(), -20);
+    assert!(gs.can_afford(23));
+    assert!(!gs.can_afford(24));
+}
+
+#[test]
+fn test_credit_cards_stack() {
+    let mut gs = make_game();
+    gs.money = 0;
+    gs.jokers.push(joker(0, JokerKind::CreditCard));
+    gs.jokers.push(joker(1, JokerKind::CreditCard));
+    assert_eq!(gs.bankrupt_at(), -40);
+    assert!(gs.can_afford(40));
+}
+
+#[test]
+fn test_credit_card_lets_a_purchase_go_through_into_debt() {
+    let mut gs = make_game();
+    gs.state = GameStateKind::Shop;
+    gs.generate_shop();
+    gs.jokers.push(joker(99, JokerKind::CreditCard));
+
+    // Find something we cannot afford at $0 and buy it anyway.
+    gs.money = 0;
+    let idx = gs
+        .shop_offers
+        .iter()
+        .position(|o| matches!(o.kind, crate::card::ShopItem::Joker(_)) && !o.sold)
+        .expect("shop should stock a joker");
+    let price = gs.shop_offers[idx].price;
+    assert!(price > 0);
+    gs.buy_joker(idx).unwrap();
+    assert!(gs.money < 0, "buying on credit should push the balance negative");
+    assert!(gs.money >= gs.bankrupt_at());
+}

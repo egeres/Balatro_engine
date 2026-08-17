@@ -253,8 +253,8 @@ impl GameState {
 
         // Calculate price with voucher discounts
         let price = self.calculate_shop_price(offer.price);
-        if self.money < price as i32 {
-            return Err(BalatroError::NotEnoughMoney(price, self.money as u32));
+        if !self.can_afford(price as i32) {
+            return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
         }
         if self.jokers.len() >= self.joker_slots as usize {
             return Err(BalatroError::JokerSlotsFull);
@@ -362,8 +362,8 @@ impl GameState {
         } else {
             base_price
         };
-        if self.money < price as i32 {
-            return Err(BalatroError::NotEnoughMoney(price, self.money as u32));
+        if !self.can_afford(price as i32) {
+            return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
         }
 
         self.money -= price as i32;
@@ -391,8 +391,8 @@ impl GameState {
         };
 
         let price = self.calculate_shop_price(offer.price);
-        if self.money < price as i32 {
-            return Err(BalatroError::NotEnoughMoney(price, self.money as u32));
+        if !self.can_afford(price as i32) {
+            return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
         }
 
         self.money -= price as i32;
@@ -415,8 +415,8 @@ impl GameState {
         };
 
         let price = self.calculate_shop_price(10);
-        if self.money < price as i32 {
-            return Err(BalatroError::NotEnoughMoney(price, self.money as u32));
+        if !self.can_afford(price as i32) {
+            return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
         }
 
         self.money -= price as i32;
@@ -533,8 +533,8 @@ impl GameState {
             self.reroll_cost
         };
 
-        if self.money < actual_cost as i32 {
-            return Err(BalatroError::NotEnoughMoney(actual_cost, self.money as u32));
+        if !self.can_afford(actual_cost as i32) {
+            return Err(BalatroError::NotEnoughMoney(actual_cost, self.money.max(0) as u32));
         }
 
         self.money -= actual_cost as i32;
