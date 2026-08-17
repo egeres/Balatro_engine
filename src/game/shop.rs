@@ -65,43 +65,59 @@ impl GameState {
         }
     }
 
-    pub(crate) fn generate_random_joker(&mut self) -> Option<JokerInstance> {
-        // Simple random joker selection
-        let all_jokers = vec![
-            JokerKind::Joker,
-            JokerKind::GreedyJoker,
-            JokerKind::LustyJoker,
-            JokerKind::WrathfulJoker,
-            JokerKind::GluttonousJoker,
-            JokerKind::JollyJoker,
-            JokerKind::ZanyJoker,
-            JokerKind::MadJoker,
-            JokerKind::CrazyJoker,
-            JokerKind::DrollJoker,
-            JokerKind::Banner,
-            JokerKind::MysticSummit,
-            JokerKind::EvenSteven,
-            JokerKind::OddTodd,
-            JokerKind::Scholar,
-            JokerKind::Supernova,
-            JokerKind::Runner,
-            JokerKind::BlueJoker,
-            JokerKind::Constellation,
-            JokerKind::Fibonacci,
-            JokerKind::AbstractJoker,
-            JokerKind::HalfJoker,
-            JokerKind::WalkieTalkie,
-            JokerKind::SmileyFace,
-            JokerKind::Bull,
-            JokerKind::GoldenJoker,
-            JokerKind::SteelJoker,
-            JokerKind::GreenJoker,
-            JokerKind::Castle,
-            JokerKind::Hologram,
-        ];
+    /// Whether `kind` can currently appear in a shop / pack / random-joker roll.
+    ///
+    /// Mirrors the pool gates in game.lua: legendaries are Soul-only, `enhancement_gate` jokers
+    /// need the matching enhancement somewhere in the deck, and Gros Michel / Cavendish swap
+    /// places once Gros Michel has gone extinct (`no_pool_flag` / `yes_pool_flag`).
+    pub(crate) fn joker_in_pool(&self, kind: JokerKind) -> bool {
+        if kind.rarity() == 4 {
+            return false;
+        }
+        let deck_has = |e: Enhancement| self.deck.iter().any(|c| c.enhancement == e);
+        match kind {
+            JokerKind::SteelJoker => deck_has(Enhancement::Steel),
+            JokerKind::StoneJoker => deck_has(Enhancement::Stone),
+            JokerKind::GoldenTicket => deck_has(Enhancement::Gold),
+            JokerKind::LuckyCat => deck_has(Enhancement::Lucky),
+            JokerKind::GlassJoker => deck_has(Enhancement::Glass),
+            JokerKind::GrosMichel => !self.gros_michel_extinct,
+            JokerKind::Cavendish => self.gros_michel_extinct,
+            _ => true,
+        }
+    }
 
-        let idx = self.rng.range_usize(0, all_jokers.len() - 1);
-        let kind = all_jokers[idx];
+    pub(crate) fn generate_random_joker(&mut self) -> Option<JokerInstance> {
+        // Rarity is rolled first, then a joker is drawn uniformly from that tier:
+        // 70% Common / 25% Uncommon / 5% Rare. Legendaries only come from The Soul.
+        let roll = self.rng.next_f64();
+        let rarity: u8 = if roll < 0.70 {
+            1
+        } else if roll < 0.95 {
+            2
+        } else {
+            3
+        };
+
+        let mut pool: Vec<JokerKind> = JokerKind::ALL
+            .iter()
+            .copied()
+            .filter(|k| k.rarity() == rarity && self.joker_in_pool(*k))
+            .collect();
+        // Fall back to the whole pool if the rolled tier is empty (every Rare gated out, say).
+        if pool.is_empty() {
+            pool = JokerKind::ALL
+                .iter()
+                .copied()
+                .filter(|k| self.joker_in_pool(*k))
+                .collect();
+        }
+        if pool.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.range_usize(0, pool.len() - 1);
+        let kind = pool[idx];
         let id = self.next_id();
 
         // Random edition

@@ -1099,6 +1099,8 @@ impl GameState {
         for pos in gm_positions.iter().rev() {
             if self.rng.next_bool_prob((1.0 / 6.0) * win_oops_mult) {
                 self.jokers.remove(*pos);
+                // Extinction is permanent: Gros Michel leaves the pool, Cavendish joins it.
+                self.gros_michel_extinct = true;
             }
         }
 

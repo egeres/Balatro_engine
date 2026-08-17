@@ -356,3 +356,71 @@ fn test_round_targets_are_rerolled_each_round() {
     }
     assert!(changed, "round targets should be re-rolled between rounds");
 }
+
+// =========================================================
+// Shop joker pool
+// =========================================================
+
+/// Draw a lot of jokers and report which kinds and rarities came out.
+fn sample_pool(gs: &mut GameState, n: usize) -> Vec<JokerKind> {
+    (0..n)
+        .filter_map(|_| gs.generate_random_joker().map(|j| j.kind))
+        .collect()
+}
+
+#[test]
+fn test_pool_is_not_limited_to_a_handful_of_jokers() {
+    let mut gs = make_game();
+    let sample = sample_pool(&mut gs, 4000);
+    let distinct: std::collections::HashSet<_> = sample.iter().copied().collect();
+    assert!(
+        distinct.len() > 90,
+        "expected most of the roster to be reachable, saw {}",
+        distinct.len()
+    );
+}
+
+#[test]
+fn test_pool_never_yields_legendaries() {
+    let mut gs = make_game();
+    let sample = sample_pool(&mut gs, 2000);
+    assert!(
+        sample.iter().all(|k| k.rarity() != 4),
+        "legendary jokers come from The Soul only"
+    );
+}
+
+#[test]
+fn test_pool_is_rarity_weighted() {
+    let mut gs = make_game();
+    let sample = sample_pool(&mut gs, 4000);
+    let frac = |r: u8| sample.iter().filter(|k| k.rarity() == r).count() as f64 / sample.len() as f64;
+    // 70 / 25 / 5, with slack for sampling noise.
+    assert!((frac(1) - 0.70).abs() < 0.05, "common {}", frac(1));
+    assert!((frac(2) - 0.25).abs() < 0.05, "uncommon {}", frac(2));
+    assert!((frac(3) - 0.05).abs() < 0.03, "rare {}", frac(3));
+}
+
+#[test]
+fn test_enhancement_gated_jokers_stay_out_until_the_deck_qualifies() {
+    let mut gs = make_game();
+    // A fresh deck has no enhancements at all.
+    assert!(!gs.joker_in_pool(JokerKind::SteelJoker));
+    assert!(!gs.joker_in_pool(JokerKind::GlassJoker));
+    assert!(!gs.joker_in_pool(JokerKind::GoldenTicket));
+
+    gs.deck[0].enhancement = Enhancement::Steel;
+    assert!(gs.joker_in_pool(JokerKind::SteelJoker));
+    assert!(!gs.joker_in_pool(JokerKind::GlassJoker));
+}
+
+#[test]
+fn test_gros_michel_and_cavendish_swap_places_on_extinction() {
+    let mut gs = make_game();
+    assert!(gs.joker_in_pool(JokerKind::GrosMichel));
+    assert!(!gs.joker_in_pool(JokerKind::Cavendish));
+
+    gs.gros_michel_extinct = true;
+    assert!(!gs.joker_in_pool(JokerKind::GrosMichel));
+    assert!(gs.joker_in_pool(JokerKind::Cavendish));
+}

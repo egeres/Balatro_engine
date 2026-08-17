@@ -88,6 +88,10 @@ pub struct GameState {
     /// copies of a joker and re-rolled at the start of every round.
     pub round_targets: RoundTargets,
 
+    /// Set once a Gros Michel has been destroyed. Gros Michel then leaves the pool and Cavendish
+    /// enters it (`no_pool_flag` / `yes_pool_flag` in game.lua).
+    pub gros_michel_extinct: bool,
+
     /// ThePillar: IDs of cards played in earlier rounds of the current Ante.
     /// Cleared when a new Ante begins. Used to debuff those cards during the Boss blind.
     pub played_card_ids_this_ante: Vec<u64>,
@@ -192,6 +196,7 @@ impl GameState {
             verdant_leaf_joker_sold: false,
             boss_blind_manually_disabled: false,
             round_targets: RoundTargets::default(),
+            gros_michel_extinct: false,
             played_card_ids_this_ante: Vec::new(),
         };
 
