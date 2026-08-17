@@ -13,7 +13,7 @@
 ///   2.  Face-card debuffs — ThePlant, TheMark (identical effect):
 ///         J/Q/K cards are debuffed; 2–10 and Ace are unaffected.
 ///
-///   3.  Debuff suppression — Luchador, Chicot jokers:
+///   3.  Debuff suppression — Chicot (passive) and Luchador (on sell):
 ///         When either is active the blind cannot debuff any card.
 ///
 ///   4.  Boss-only debuffs — debuffs only fire when `current_blind == Boss`.
@@ -234,18 +234,18 @@ fn test_the_mark_debuffs_exactly_12_cards() {
 }
 
 // =========================================================
-// 3. Debuff suppression — Luchador and Chicot
+// 3. Debuff suppression — Chicot (passive) and Luchador (on sell)
 // =========================================================
 
-/// Luchador blocks TheClub from debuffing any card.
+/// Chicot blocks TheClub from debuffing any card.
 #[test]
-fn test_luchador_disables_club_debuffs() {
+fn test_chicot_disables_club_debuffs() {
     let mut gs = boss_select(BossBlind::TheClub);
-    gs.jokers.push(joker(99, JokerKind::Luchador));
+    gs.jokers.push(joker(99, JokerKind::Chicot));
     gs.select_blind().unwrap();
     assert!(
         gs.deck.iter().all(|c| !c.debuffed),
-        "Luchador should suppress all TheClub debuffs"
+        "Chicot should suppress all TheClub debuffs"
     );
 }
 
@@ -261,15 +261,15 @@ fn test_chicot_disables_goad_debuffs() {
     );
 }
 
-/// Luchador blocks ThePlant from debuffing face cards.
+/// Chicot blocks ThePlant from debuffing face cards.
 #[test]
-fn test_luchador_disables_plant_debuffs() {
+fn test_chicot_disables_plant_debuffs() {
     let mut gs = boss_select(BossBlind::ThePlant);
-    gs.jokers.push(joker(99, JokerKind::Luchador));
+    gs.jokers.push(joker(99, JokerKind::Chicot));
     gs.select_blind().unwrap();
     assert!(
         gs.deck.iter().all(|c| !c.debuffed),
-        "Luchador should suppress all ThePlant debuffs"
+        "Chicot should suppress all ThePlant debuffs"
     );
 }
 
@@ -285,11 +285,84 @@ fn test_chicot_disables_head_debuffs() {
     );
 }
 
+/// Merely holding Luchador does NOT disable the blind — unlike Chicot it only fires on sell.
+#[test]
+fn test_holding_luchador_does_not_disable_blind() {
+    let mut gs = boss_select(BossBlind::TheClub);
+    gs.jokers.push(joker(99, JokerKind::Luchador));
+    gs.select_blind().unwrap();
+    assert!(
+        gs.deck.iter().any(|c| c.debuffed),
+        "Holding Luchador must not suppress TheClub debuffs"
+    );
+}
+
+/// Selling Luchador during a Boss blind disables it and lifts the debuffs already applied.
+#[test]
+fn test_selling_luchador_disables_blind_and_lifts_debuffs() {
+    let mut gs = boss_select(BossBlind::TheClub);
+    gs.jokers.push(joker(99, JokerKind::Luchador));
+    gs.select_blind().unwrap();
+    assert!(gs.deck.iter().any(|c| c.debuffed));
+
+    let luchador_idx = gs
+        .jokers
+        .iter()
+        .position(|j| j.kind == JokerKind::Luchador)
+        .unwrap();
+    gs.sell_joker(luchador_idx).unwrap();
+
+    assert!(
+        gs.deck.iter().all(|c| !c.debuffed),
+        "Selling Luchador must lift TheClub debuffs"
+    );
+    assert!(gs.boss_blind_manually_disabled);
+}
+
+/// The disable is latched for the round, then cleared when the next round begins.
+#[test]
+fn test_luchador_disable_clears_on_next_round() {
+    let mut gs = boss_select(BossBlind::TheClub);
+    gs.jokers.push(joker(99, JokerKind::Luchador));
+    gs.select_blind().unwrap();
+    let idx = gs
+        .jokers
+        .iter()
+        .position(|j| j.kind == JokerKind::Luchador)
+        .unwrap();
+    gs.sell_joker(idx).unwrap();
+    assert!(gs.boss_blind_manually_disabled);
+
+    gs.state = crate::game::GameStateKind::BlindSelect;
+    gs.select_blind().unwrap();
+    assert!(
+        !gs.boss_blind_manually_disabled,
+        "the Luchador disable must not carry into a new round"
+    );
+    assert!(
+        gs.deck.iter().any(|c| c.debuffed),
+        "TheClub debuffs should be back once the disable is cleared"
+    );
+}
+
+/// Selling Luchador outside a Boss blind does nothing.
+#[test]
+fn test_selling_luchador_outside_boss_blind_is_inert() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(99, JokerKind::Luchador));
+    gs.select_blind().unwrap();
+    gs.sell_joker(0).unwrap();
+    assert!(
+        !gs.boss_blind_manually_disabled,
+        "Luchador only disables an active Boss blind"
+    );
+}
+
 /// Without a disabling joker, debuffs still apply normally.
 #[test]
 fn test_without_disabling_joker_debuffs_apply() {
     let mut gs = boss_select(BossBlind::TheWindow);
-    // No Luchador or Chicot
+    // No Chicot or sold Luchador
     gs.select_blind().unwrap();
     let diamond_count = gs.deck.iter().filter(|c| c.suit == Suit::Diamonds).count();
     let debuffed_count = gs.deck.iter().filter(|c| c.debuffed).count();
@@ -955,16 +1028,16 @@ fn test_amber_acorn_preserves_joker_count() {
     assert!(kinds.contains(&JokerKind::Blueprint));
 }
 
-/// Luchador suppresses AmberAcorn's shuffle: joker order is preserved.
+/// Chicot suppresses AmberAcorn's shuffle: joker order is preserved.
 #[test]
-fn test_amber_acorn_with_luchador_does_not_shuffle() {
+fn test_amber_acorn_with_chicot_does_not_shuffle() {
     let mut gs = boss_select(BossBlind::AmberAcorn);
-    gs.jokers.push(joker(100, JokerKind::Luchador));
+    gs.jokers.push(joker(100, JokerKind::Chicot));
     gs.jokers.push(joker(101, JokerKind::Joker));
     gs.jokers.push(joker(102, JokerKind::AbstractJoker));
     gs.select_blind().unwrap();
-    // Luchador disables the boss effect; order must be unchanged
-    assert_eq!(gs.jokers[0].kind, JokerKind::Luchador);
+    // Chicot disables the boss effect; order must be unchanged
+    assert_eq!(gs.jokers[0].kind, JokerKind::Chicot);
     assert_eq!(gs.jokers[1].kind, JokerKind::Joker);
     assert_eq!(gs.jokers[2].kind, JokerKind::AbstractJoker);
 }
@@ -1025,16 +1098,16 @@ fn test_verdant_leaf_second_joker_sell_keeps_cards_undebuffed() {
     assert!(gs.deck.iter().all(|c| !c.debuffed));
 }
 
-/// Luchador suppresses VerdantLeaf: cards are NOT debuffed at all.
+/// Chicot suppresses VerdantLeaf: cards are NOT debuffed at all.
 #[test]
-fn test_verdant_leaf_with_luchador_no_debuff() {
+fn test_verdant_leaf_with_chicot_no_debuff() {
     let mut gs = boss_select(BossBlind::VerdantLeaf);
-    gs.jokers.push(joker(100, JokerKind::Luchador));
+    gs.jokers.push(joker(100, JokerKind::Chicot));
     gs.jokers.push(joker(101, JokerKind::Joker));
     gs.select_blind().unwrap();
     assert!(
         gs.deck.iter().all(|c| !c.debuffed),
-        "Luchador must suppress VerdantLeaf card debuffs"
+        "Chicot must suppress VerdantLeaf card debuffs"
     );
 }
 
@@ -1114,18 +1187,18 @@ fn test_crimson_heart_joker_reenabled_after_hand() {
     );
 }
 
-/// Luchador suppresses CrimsonHeart: no joker is disabled, score includes joker bonuses.
+/// Chicot suppresses CrimsonHeart: no joker is disabled, score includes joker bonuses.
 #[test]
-fn test_crimson_heart_with_luchador_joker_not_disabled() {
+fn test_crimson_heart_with_chicot_joker_not_disabled() {
     let played = vec![
         card(1, Rank::Eight, Suit::Spades),
         card(2, Rank::Eight, Suit::Hearts),
     ];
-    // AbstractJoker gives +3 mult/joker. With Luchador blocking CrimsonHeart,
+    // AbstractJoker gives +3 mult/joker. With Chicot blocking CrimsonHeart,
     // AbstractJoker should contribute normally: 26 chips × (2+3+3) mult = 26×8 = 208
-    // (2 jokers in total: AbstractJoker+Luchador → +6 mult)
+    // (2 jokers in total: AbstractJoker+Chicot → +6 mult)
     let mut gs = boss_select(BossBlind::CrimsonHeart);
-    gs.jokers.push(joker(10, JokerKind::Luchador));
+    gs.jokers.push(joker(10, JokerKind::Chicot));
     gs.jokers.push(joker(11, JokerKind::AbstractJoker));
     gs.select_blind().unwrap();
     gs.score_goal = f64::MAX;
@@ -1137,9 +1210,9 @@ fn test_crimson_heart_with_luchador_joker_not_disabled() {
     gs.select_card(0).unwrap();
     gs.select_card(1).unwrap();
     let result = gs.play_hand().unwrap();
-    // Luchador disables CrimsonHeart; both jokers active → 26 × (2+3+3) = 26×8 = 208
+    // Chicot disables CrimsonHeart; both jokers active → 26 × (2+3+3) = 26×8 = 208
     assert_eq!(result.final_score as i64, 208,
-        "Luchador should suppress CrimsonHeart (expected 208, got {})", result.final_score as i64
+        "Chicot should suppress CrimsonHeart (expected 208, got {})", result.final_score as i64
     );
 }
 
@@ -1223,19 +1296,19 @@ fn test_cerulean_bell_reselects_new_card_after_draw() {
     let _ = first_forced_id; // suppress unused warning
 }
 
-/// Luchador suppresses CeruleanBell: no card is auto-selected.
+/// Chicot suppresses CeruleanBell: no card is auto-selected.
 #[test]
-fn test_cerulean_bell_with_luchador_no_forced_selection() {
+fn test_cerulean_bell_with_chicot_no_forced_selection() {
     let mut gs = boss_select(BossBlind::CeruleanBell);
-    gs.jokers.push(joker(100, JokerKind::Luchador));
+    gs.jokers.push(joker(100, JokerKind::Chicot));
     gs.select_blind().unwrap();
     assert_eq!(
         gs.selected_indices.len(), 0,
-        "Luchador must suppress CeruleanBell auto-selection"
+        "Chicot must suppress CeruleanBell auto-selection"
     );
     assert!(
         gs.cerulean_forced_card_id.is_none(),
-        "Luchador must prevent CeruleanBell from setting a forced card ID"
+        "Chicot must prevent CeruleanBell from setting a forced card ID"
     );
 }
 
@@ -1260,15 +1333,15 @@ fn test_the_water_no_effect_on_small_blind() {
     assert!(gs.discards_remaining > 0, "TheWater must not affect Small blind discards");
 }
 
-/// Luchador suppresses TheWater: discards are normal.
+/// Chicot suppresses TheWater: discards are normal.
 #[test]
-fn test_the_water_with_luchador_normal_discards() {
+fn test_the_water_with_chicot_normal_discards() {
     let mut gs = boss_select(BossBlind::TheWater);
-    gs.jokers.push(joker(100, JokerKind::Luchador));
+    gs.jokers.push(joker(100, JokerKind::Chicot));
     let normal = gs.effective_max_discards();
     gs.select_blind().unwrap();
     assert_eq!(gs.discards_remaining, normal,
-        "Luchador must suppress TheWater (expected {} discards)", normal);
+        "Chicot must suppress TheWater (expected {} discards)", normal);
 }
 
 // =========================================================
@@ -1299,15 +1372,15 @@ fn test_the_manacle_no_effect_on_small_blind() {
         "TheManacle must not reduce hand size on Small blind");
 }
 
-/// Luchador suppresses TheManacle: full hand drawn.
+/// Chicot suppresses TheManacle: full hand drawn.
 #[test]
-fn test_the_manacle_with_luchador_normal_hand_size() {
+fn test_the_manacle_with_chicot_normal_hand_size() {
     let mut gs = boss_select(BossBlind::TheManacle);
-    gs.jokers.push(joker(100, JokerKind::Luchador));
+    gs.jokers.push(joker(100, JokerKind::Chicot));
     let normal_size = gs.hand_size;
     gs.select_blind().unwrap();
     assert_eq!(gs.hand.len() as u32, normal_size,
-        "Luchador must suppress TheManacle");
+        "Chicot must suppress TheManacle");
 }
 
 // =========================================================
@@ -1353,11 +1426,11 @@ fn test_the_hook_discards_accumulate_each_hand() {
     );
 }
 
-/// Luchador suppresses TheHook: only played cards are discarded.
+/// Chicot suppresses TheHook: only played cards are discarded.
 #[test]
-fn test_the_hook_with_luchador_no_extra_discard() {
+fn test_the_hook_with_chicot_no_extra_discard() {
     let mut gs = boss_select(BossBlind::TheHook);
-    gs.jokers.push(joker(100, JokerKind::Luchador));
+    gs.jokers.push(joker(100, JokerKind::Chicot));
     gs.select_blind().unwrap();
     gs.score_goal = f64::MAX;
     gs.select_card(0).unwrap();
@@ -1365,7 +1438,7 @@ fn test_the_hook_with_luchador_no_extra_discard() {
     // Only 1 card was discarded (the played card), not 3
     assert_eq!(
         gs.discard_pile.len(), 1,
-        "Luchador must suppress TheHook extra discards"
+        "Chicot must suppress TheHook extra discards"
     );
 }
 
@@ -1419,11 +1492,11 @@ fn test_the_serpent_draws_3_after_discard() {
         "TheSerpent: hand should grow by 3 after discard, got {}", gs.hand.len());
 }
 
-/// Luchador suppresses TheSerpent: normal hand refill after play.
+/// Chicot suppresses TheSerpent: normal hand refill after play.
 #[test]
-fn test_the_serpent_with_luchador_normal_draw() {
+fn test_the_serpent_with_chicot_normal_draw() {
     let mut gs = boss_select(BossBlind::TheSerpent);
-    gs.jokers.push(joker(100, JokerKind::Luchador));
+    gs.jokers.push(joker(100, JokerKind::Chicot));
     gs.select_blind().unwrap();
     gs.score_goal = f64::MAX;
     let hand_size = gs.hand_size as usize;
@@ -1431,7 +1504,7 @@ fn test_the_serpent_with_luchador_normal_draw() {
     gs.play_hand().unwrap();
     // Normal draw should fill back to hand_size
     assert_eq!(gs.hand.len(), hand_size,
-        "Luchador must suppress TheSerpent: hand should be {} cards", hand_size);
+        "Chicot must suppress TheSerpent: hand should be {} cards", hand_size);
 }
 
 /// TheSerpent has no effect on Small or Big blind.
@@ -1484,11 +1557,11 @@ fn test_the_eye_blocks_repeated_hand_type() {
     );
 }
 
-/// Luchador suppresses TheEye: repeated hand types are allowed.
+/// Chicot suppresses TheEye: repeated hand types are allowed.
 #[test]
-fn test_the_eye_with_luchador_allows_repeats() {
+fn test_the_eye_with_chicot_allows_repeats() {
     let mut gs = boss_select(BossBlind::TheEye);
-    gs.jokers.push(joker(100, JokerKind::Luchador));
+    gs.jokers.push(joker(100, JokerKind::Chicot));
     let c1 = card(1, Rank::Ace,  Suit::Spades);
     let c2 = card(2, Rank::King, Suit::Hearts);
     let c3 = card(3, Rank::Queen, Suit::Clubs);
@@ -1497,7 +1570,7 @@ fn test_the_eye_with_luchador_allows_repeats() {
     gs.select_card(0).unwrap();
     gs.play_hand().unwrap();
     gs.select_card(0).unwrap();
-    assert!(gs.play_hand().is_ok(), "Luchador must suppress TheEye");
+    assert!(gs.play_hand().is_ok(), "Chicot must suppress TheEye");
 }
 
 /// TheEye has no restriction on Small or Big blind.
@@ -1570,11 +1643,11 @@ fn test_the_mouth_allows_same_hand_type_again() {
     assert!(gs.play_hand().is_ok(), "TheMouth: same hand type again must succeed");
 }
 
-/// Luchador suppresses TheMouth: different hand types are allowed.
+/// Chicot suppresses TheMouth: different hand types are allowed.
 #[test]
-fn test_the_mouth_with_luchador_allows_different_types() {
+fn test_the_mouth_with_chicot_allows_different_types() {
     let mut gs = boss_select(BossBlind::TheMouth);
-    gs.jokers.push(joker(100, JokerKind::Luchador));
+    gs.jokers.push(joker(100, JokerKind::Chicot));
     let c1 = card(1, Rank::Ace,   Suit::Spades);
     let c2 = card(2, Rank::Ace,   Suit::Hearts);
     let c3 = card(3, Rank::Queen, Suit::Clubs);
@@ -1584,7 +1657,7 @@ fn test_the_mouth_with_luchador_allows_different_types() {
     gs.play_hand().unwrap(); // HighCard
     gs.select_card(0).unwrap();
     gs.select_card(1).unwrap();
-    assert!(gs.play_hand().is_ok(), "Luchador must suppress TheMouth");
+    assert!(gs.play_hand().is_ok(), "Chicot must suppress TheMouth");
 }
 
 // =========================================================
@@ -1631,12 +1704,12 @@ fn test_the_arm_does_not_go_below_level_1() {
     assert_eq!(pair_level, 1, "TheArm: level must not go below 1, got {}", pair_level);
 }
 
-/// Luchador suppresses TheArm: hand level unchanged.
+/// Chicot suppresses TheArm: hand level unchanged.
 #[test]
-fn test_the_arm_with_luchador_level_unchanged() {
+fn test_the_arm_with_chicot_level_unchanged() {
     use crate::card::HandLevelData;
     let mut gs = boss_select(BossBlind::TheArm);
-    gs.jokers.push(joker(100, JokerKind::Luchador));
+    gs.jokers.push(joker(100, JokerKind::Chicot));
     gs.hand_levels.insert(HandType::Pair, {
         let mut d = HandLevelData::new(true);
         d.level = 3;
@@ -1650,7 +1723,7 @@ fn test_the_arm_with_luchador_level_unchanged() {
     gs.select_card(1).unwrap();
     gs.play_hand().unwrap();
     let pair_level = gs.hand_levels[&HandType::Pair].level;
-    assert_eq!(pair_level, 3, "Luchador must suppress TheArm (level should stay 3)");
+    assert_eq!(pair_level, 3, "Chicot must suppress TheArm (level should stay 3)");
 }
 
 // =========================================================
@@ -1767,20 +1840,20 @@ fn test_the_ox_does_not_wipe_money_on_non_most_played_hand() {
     assert!(gs.money > 0, "TheOx: playing non-most-played hand must not wipe money");
 }
 
-/// TheOx is disabled by Luchador/Chicot.
+/// TheOx is disabled by Chicot/Chicot.
 #[test]
-fn test_the_ox_disabled_by_luchador() {
+fn test_the_ox_disabled_by_chicot() {
     let mut gs = make_game();
     gs.boss_blind = Some(BossBlind::TheOx);
     gs.current_blind = crate::game::BlindKind::Boss;
     if let Some(h) = gs.hand_levels.get_mut(&HandType::HighCard) { h.played = 5; }
     gs.money = 10;
-    gs.jokers.push(joker(1, JokerKind::Luchador));
+    gs.jokers.push(joker(1, JokerKind::Chicot));
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
     gs.score_goal = 1.0;
     gs.select_card(0).unwrap();
     gs.play_hand().unwrap();
-    assert!(gs.money > 0, "TheOx: Luchador must disable TheOx effect");
+    assert!(gs.money > 0, "TheOx: Chicot must disable TheOx effect");
 }
 
 // =========================================================
@@ -1825,13 +1898,13 @@ fn test_the_fish_initial_hand_not_face_down() {
     );
 }
 
-/// TheFish is disabled by Luchador.
+/// TheFish is disabled by Chicot.
 #[test]
-fn test_the_fish_disabled_by_luchador() {
+fn test_the_fish_disabled_by_chicot() {
     let mut gs = make_game();
     gs.boss_blind = Some(BossBlind::TheFish);
     gs.current_blind = crate::game::BlindKind::Boss;
-    gs.jokers.push(joker(1, JokerKind::Luchador));
+    gs.jokers.push(joker(1, JokerKind::Chicot));
     let c0 = card(0, Rank::Ace,  Suit::Spades);
     let c1 = card(1, Rank::King, Suit::Spades);
     setup_round(&mut gs, vec![c0, c1], 1);
@@ -1840,7 +1913,7 @@ fn test_the_fish_disabled_by_luchador() {
     gs.play_hand().unwrap();
     assert!(
         gs.hand.iter().all(|&i| !gs.deck[i].face_down),
-        "TheFish: Luchador must disable face-down draws"
+        "TheFish: Chicot must disable face-down draws"
     );
 }
 

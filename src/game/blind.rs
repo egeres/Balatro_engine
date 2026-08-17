@@ -103,6 +103,7 @@ impl GameState {
         // Reset showdown blind state
         self.verdant_leaf_joker_sold = false;
         self.cerulean_forced_card_id = None;
+        self.boss_blind_manually_disabled = false;
 
         // Reset per-round hand played counters
         for data in self.hand_levels.values_mut() {

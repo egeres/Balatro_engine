@@ -76,6 +76,11 @@ pub struct GameState {
     /// VerdantLeaf: set to true once the first joker is sold this blind.
     pub verdant_leaf_joker_sold: bool,
 
+    /// Set when Luchador is sold during an active Boss blind. Unlike Chicot (which disables
+    /// passively while held), Luchador only disables the blind at the moment it is sold, so the
+    /// effect has to be latched for the rest of the round. Cleared when a new round begins.
+    pub boss_blind_manually_disabled: bool,
+
     /// ThePillar: IDs of cards played in earlier rounds of the current Ante.
     /// Cleared when a new Ante begins. Used to debuff those cards during the Boss blind.
     pub played_card_ids_this_ante: Vec<u64>,
@@ -177,6 +182,7 @@ impl GameState {
             last_consumable_used: None,
             cerulean_forced_card_id: None,
             verdant_leaf_joker_sold: false,
+            boss_blind_manually_disabled: false,
             played_card_ids_this_ante: Vec::new(),
         };
 
@@ -390,11 +396,17 @@ impl GameState {
         }
     }
 
-    /// Returns `true` if Luchador or Chicot is active (disables all boss blind effects).
+    /// Returns `true` if the current Boss blind's ability is disabled.
+    ///
+    /// Chicot disables it passively while held (`card.lua:596`), whereas Luchador only disables it
+    /// when sold (`card.lua:2355`, `context.selling_self`) — that case latches
+    /// `boss_blind_manually_disabled` instead.
     pub(crate) fn boss_blind_disabled(&self) -> bool {
-        self.jokers.iter().any(|j| {
-            (j.kind == JokerKind::Luchador || j.kind == JokerKind::Chicot) && j.active
-        })
+        self.boss_blind_manually_disabled
+            || self
+                .jokers
+                .iter()
+                .any(|j| j.kind == JokerKind::Chicot && j.active)
     }
 
     pub(crate) fn notify_face_card_destroyed(&mut self, card: &CardInstance) {

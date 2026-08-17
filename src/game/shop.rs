@@ -291,6 +291,18 @@ impl GameState {
             }
         }
 
+        // Luchador: selling it disables the current Boss blind's ability for the rest of the round
+        if self.jokers[joker_index].kind == JokerKind::Luchador
+            && matches!(self.current_blind, BlindKind::Boss)
+            && !self.boss_blind_disabled()
+        {
+            self.boss_blind_manually_disabled = true;
+            // Debuffs were applied when the round began; lift them now that the blind is off.
+            for card in self.deck.iter_mut() {
+                card.debuffed = false;
+            }
+        }
+
         // InvisibleJoker: when sold after 2+ rounds, duplicate a random other joker
         let is_invisible = self.jokers[joker_index].kind == JokerKind::InvisibleJoker;
         let invisible_rounds = self.jokers[joker_index].get_counter_i64("rounds");
