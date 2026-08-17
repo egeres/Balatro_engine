@@ -68,6 +68,11 @@ class BuyPlayingCard:
 
 
 @dataclass(frozen=True)
+class OpenFreePack:
+    """Open the free booster pack granted by a Charm/Meteor/Standard/Buffoon/Ethereal Tag."""
+
+
+@dataclass(frozen=True)
 class RerollBossBlind:
     """Re-roll the upcoming Boss blind for $10 (needs Director's Cut or Retcon)."""
 
@@ -152,6 +157,7 @@ Action = (
     | BuyJoker
     | BuyPlayingCard
     | RerollBossBlind
+    | OpenFreePack
     | SellJoker
     | BuyConsumable
     | BuyPack

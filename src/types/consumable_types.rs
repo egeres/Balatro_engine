@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
-use super::HandType;
+use super::{Edition, HandType};
 
 #[pyclass(eq, eq_int)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -278,9 +278,147 @@ pub enum TagKind {
     Economy,
 }
 
+/// When a tag's effect fires.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagTrigger {
+    /// Pays out the moment the blind is skipped.
+    Immediate,
+    /// Waits for the next shop.
+    Shop,
+    /// Waits for the next blind-select screen (free booster packs, Boss reroll).
+    BlindSelect,
+    /// Waits for the start of the next round.
+    RoundStart,
+    /// Waits until the next Boss blind is defeated.
+    BossDefeated,
+    /// Copies the next tag acquired.
+    CopyNextTag,
+}
+
 #[pymethods]
 impl TagKind {
     fn __repr__(&self) -> String {
         format!("{:?}", self)
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            TagKind::Uncommon => "Uncommon Tag",
+            TagKind::Rare => "Rare Tag",
+            TagKind::Negative => "Negative Tag",
+            TagKind::Foil => "Foil Tag",
+            TagKind::Holographic => "Holographic Tag",
+            TagKind::Polychrome => "Polychrome Tag",
+            TagKind::Investment => "Investment Tag",
+            TagKind::Voucher => "Voucher Tag",
+            TagKind::Boss => "Boss Tag",
+            TagKind::Standard => "Standard Tag",
+            TagKind::Charm => "Charm Tag",
+            TagKind::Meteor => "Meteor Tag",
+            TagKind::Buffoon => "Buffoon Tag",
+            TagKind::Handy => "Handy Tag",
+            TagKind::Garbage => "Garbage Tag",
+            TagKind::Ethereal => "Ethereal Tag",
+            TagKind::Coupon => "Coupon Tag",
+            TagKind::DoubleFun => "Double Tag",
+            TagKind::Juggle => "Juggle Tag",
+            TagKind::D6 => "D6 Tag",
+            TagKind::TopUp => "Top-up Tag",
+            TagKind::Skip => "Skip Tag",
+            TagKind::Orbital => "Orbital Tag",
+            TagKind::Economy => "Economy Tag",
+        }
+    }
+
+    /// Earliest ante this tag can be offered at (`min_ante` in game.lua:225-248).
+    pub fn min_ante(&self) -> u32 {
+        match self {
+            TagKind::Negative
+            | TagKind::Standard
+            | TagKind::Meteor
+            | TagKind::Buffoon
+            | TagKind::Handy
+            | TagKind::Garbage
+            | TagKind::Ethereal
+            | TagKind::TopUp
+            | TagKind::Orbital => 2,
+            _ => 1,
+        }
+    }
+}
+
+impl TagKind {
+    pub const ALL: [TagKind; 24] = [
+        TagKind::Uncommon, TagKind::Rare, TagKind::Negative, TagKind::Foil,
+        TagKind::Holographic, TagKind::Polychrome, TagKind::Investment, TagKind::Voucher,
+        TagKind::Boss, TagKind::Standard, TagKind::Charm, TagKind::Meteor,
+        TagKind::Buffoon, TagKind::Handy, TagKind::Garbage, TagKind::Ethereal,
+        TagKind::Coupon, TagKind::DoubleFun, TagKind::Juggle, TagKind::D6,
+        TagKind::TopUp, TagKind::Skip, TagKind::Orbital, TagKind::Economy,
+    ];
+
+    /// When this tag's effect fires (the `config.type` field in game.lua:225-248).
+    pub fn trigger(&self) -> TagTrigger {
+        match self {
+            TagKind::Skip
+            | TagKind::Handy
+            | TagKind::Garbage
+            | TagKind::Economy
+            | TagKind::Orbital
+            | TagKind::TopUp => TagTrigger::Immediate,
+
+            TagKind::Uncommon
+            | TagKind::Rare
+            | TagKind::Negative
+            | TagKind::Foil
+            | TagKind::Holographic
+            | TagKind::Polychrome
+            | TagKind::Coupon
+            | TagKind::D6
+            | TagKind::Voucher => TagTrigger::Shop,
+
+            TagKind::Boss
+            | TagKind::Standard
+            | TagKind::Charm
+            | TagKind::Meteor
+            | TagKind::Buffoon
+            | TagKind::Ethereal => TagTrigger::BlindSelect,
+
+            TagKind::Juggle => TagTrigger::RoundStart,
+            TagKind::Investment => TagTrigger::BossDefeated,
+            TagKind::DoubleFun => TagTrigger::CopyNextTag,
+        }
+    }
+
+    /// The free booster pack this tag opens at the next blind select, if any (tag.lua:206-260).
+    pub fn free_pack(&self) -> Option<PackKind> {
+        match self {
+            TagKind::Charm => Some(PackKind::ArcanaPackMega),
+            TagKind::Meteor => Some(PackKind::CelestialPackMega),
+            TagKind::Standard => Some(PackKind::StandardPackMega),
+            TagKind::Buffoon => Some(PackKind::BuffoonPackMega),
+            TagKind::Ethereal => Some(PackKind::SpectralPack),
+            _ => None,
+        }
+    }
+
+    /// The edition this tag forces onto the next shop joker, if any.
+    pub fn forced_edition(&self) -> Option<Edition> {
+        match self {
+            TagKind::Foil => Some(Edition::Foil),
+            TagKind::Holographic => Some(Edition::Holographic),
+            TagKind::Polychrome => Some(Edition::Polychrome),
+            TagKind::Negative => Some(Edition::Negative),
+            _ => None,
+        }
+    }
+
+    /// The rarity this tag forces onto the next shop joker, if any.
+    pub fn forced_rarity(&self) -> Option<u8> {
+        match self {
+            TagKind::Uncommon => Some(2),
+            TagKind::Rare => Some(3),
+            _ => None,
+        }
     }
 }

@@ -140,6 +140,99 @@ impl GameState {
         POOL[self.rng.range_usize(0, POOL.len() - 1)]
     }
 
+    /// Consume the tags that act on a shop (tag.lua:344, :382, :393, :447).
+    ///
+    /// Uncommon/Rare force the rarity of one stocked joker, the edition tags stamp an edition on
+    /// one and make it free, Coupon makes everything already on the shelf free, D6 zeroes the
+    /// reroll price, and Voucher adds a second voucher slot.
+    fn apply_shop_tags(&mut self) {
+        let pending: Vec<TagKind> = self
+            .tags
+            .iter()
+            .copied()
+            .filter(|t| t.trigger() == TagTrigger::Shop)
+            .collect();
+        if pending.is_empty() {
+            return;
+        }
+        self.tags.retain(|t| t.trigger() != TagTrigger::Shop);
+
+        for tag in pending {
+            match tag {
+                TagKind::Coupon => {
+                    self.shop_is_free = true;
+                    for offer in self.shop_offers.iter_mut() {
+                        offer.price = 0;
+                    }
+                }
+                TagKind::D6 => {
+                    self.shop_rerolls_free = true;
+                    self.reroll_cost = 0;
+                }
+                TagKind::Voucher => {
+                    // A second voucher on offer this shop.
+                    let v = self.random_voucher();
+                    self.shop_offers.push(ShopOffer {
+                        kind: ShopItem::Voucher(v),
+                        price: 10,
+                        sold: false,
+                    });
+                }
+                _ => {
+                    if let Some(rarity) = tag.forced_rarity() {
+                        self.force_shop_joker(Some(rarity), None);
+                    } else if let Some(edition) = tag.forced_edition() {
+                        self.force_shop_joker(None, Some(edition));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Replace one stocked joker (or add one) so it matches the rarity / edition a tag promised.
+    /// Edition tags also hand the joker over for free.
+    fn force_shop_joker(&mut self, rarity: Option<u8>, edition: Option<Edition>) {
+        let target = rarity.unwrap_or(1);
+        let pool: Vec<JokerKind> = JokerKind::ALL
+            .iter()
+            .copied()
+            .filter(|k| self.joker_in_pool(*k) && (rarity.is_none() || k.rarity() == target))
+            .collect();
+
+        let slot = self
+            .shop_offers
+            .iter()
+            .position(|o| matches!(o.kind, ShopItem::Joker(_)) && !o.sold);
+
+        if let Some(edition) = edition {
+            // Stamp the edition on a joker already for sale if there is one.
+            if let Some(idx) = slot {
+                if let ShopItem::Joker(j) = &mut self.shop_offers[idx].kind {
+                    j.edition = edition;
+                }
+                self.shop_offers[idx].price = 0;
+                return;
+            }
+        }
+        if pool.is_empty() {
+            return;
+        }
+        let kind = pool[self.rng.range_usize(0, pool.len() - 1)];
+        let id = self.next_id();
+        let mut joker = JokerInstance::new(id, kind, edition.unwrap_or(Edition::None));
+        joker.edition = edition.unwrap_or(Edition::None);
+        let price = if edition.is_some() { 0 } else { kind.base_cost() };
+
+        match slot {
+            Some(idx) => {
+                self.shop_offers[idx] = ShopOffer { kind: ShopItem::Joker(joker), price, sold: false };
+            }
+            None => {
+                self.shop_offers.push(ShopOffer { kind: ShopItem::Joker(joker), price, sold: false });
+            }
+        }
+    }
+
     pub(crate) fn generate_shop(&mut self) {
         // Card slots: base 2, +1 per Overstock voucher (game.lua:1885).
         let card_slots = 2
@@ -177,6 +270,7 @@ impl GameState {
 
         self.shop_voucher = Some(self.random_voucher());
         self.reroll_cost = self.base_reroll_cost;
+        self.apply_shop_tags();
 
         // ChaosTheClown: +1 free reroll per shop visit
         let chaos_count = self.jokers.iter().filter(|j| j.kind == JokerKind::ChaosTheClown && j.active).count();
@@ -724,7 +818,9 @@ impl GameState {
             return Err(BalatroError::NotInShop);
         }
 
-        let actual_cost = if self.free_rerolls > 0 {
+        let actual_cost = if self.shop_rerolls_free {
+            0
+        } else if self.free_rerolls > 0 {
             self.free_rerolls -= 1;
             0
         } else {
@@ -835,6 +931,10 @@ impl GameState {
                 self.money -= 1;
             }
         }
+
+        // Coupon and D6 only cover the shop they were spent on.
+        self.shop_is_free = false;
+        self.shop_rerolls_free = false;
 
         // Advance to next blind
         self.advance_blind();

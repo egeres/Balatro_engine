@@ -561,6 +561,7 @@ impl GameState {
 
         self.score_accumulated += final_score;
         self.hands_remaining -= 1;
+        self.hands_played_this_run += 1;
 
         // Post-scoring joker updates
         self.post_play_joker_updates(&result, &played_cards, &hand_cards);
@@ -1075,6 +1076,18 @@ impl GameState {
     }
 
     fn win_round(&mut self) {
+        // Garbage Tag pays out per discard left unused across the run.
+        self.unused_discards_this_run += self.discards_remaining;
+
+        // Investment Tag: $25 once the Boss blind is beaten (tag.lua:117).
+        if matches!(self.current_blind, BlindKind::Boss) {
+            let investments = self.tags.iter().filter(|t| **t == TagKind::Investment).count();
+            if investments > 0 {
+                self.tags.retain(|t| *t != TagKind::Investment);
+                self.money += 25 * investments as i32;
+            }
+        }
+
         let blind_dollars = self.blind_reward_dollars();
         self.money += blind_dollars;
 
@@ -1238,7 +1251,7 @@ impl GameState {
 
         // Anaglyph deck: gain a Double Tag (DoubleFun) after defeating each Boss Blind
         if matches!(self.current_blind, BlindKind::Boss) && self.deck_type == DeckType::Anaglyph {
-            self.tags.push(TagKind::DoubleFun);
+            self.gain_tag(TagKind::DoubleFun);
         }
 
         // Check if ante 8 boss beaten = game won
@@ -1298,6 +1311,7 @@ impl GameState {
                 self.round = 3;
             }
             BlindKind::Boss => {
+                self.juggle_hand_size = 0;
                 self.ante += 1;
                 self.round = 1;
                 self.current_blind = BlindKind::Small;

@@ -28,6 +28,7 @@ mod spectral_cards;
 mod selling;
 mod stakes;
 mod stickers;
+mod tags;
 mod tarot_cards;
 mod vouchers;
 

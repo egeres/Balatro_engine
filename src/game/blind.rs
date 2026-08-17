@@ -53,6 +53,7 @@ impl GameState {
         if !matches!(self.state, GameStateKind::BlindSelect) {
             return Err(BalatroError::NotInBlindSelect);
         }
+        self.apply_blind_select_tags();
         self.begin_round();
         Ok(())
     }
@@ -68,6 +69,11 @@ impl GameState {
 
         // Record skip for tags / Throwback / RedCard jokers
         self.skipped_blinds.push((self.ante, self.round));
+        self.skips_this_run += 1;
+
+        // Skipping a blind is the only source of tags.
+        let tag = self.random_tag();
+        self.gain_tag(tag);
         for j in self.jokers.iter_mut() {
             match j.kind {
                 JokerKind::Throwback => {
@@ -84,6 +90,125 @@ impl GameState {
 
         // Advance to next blind
         self.advance_blind();
+        Ok(())
+    }
+
+
+    /// A random tag eligible at the current ante (`min_ante`, game.lua:225).
+    pub(crate) fn random_tag(&mut self) -> TagKind {
+        let pool: Vec<TagKind> = TagKind::ALL
+            .iter()
+            .copied()
+            .filter(|t| t.min_ante() <= self.ante)
+            .collect();
+        pool[self.rng.range_usize(0, pool.len() - 1)]
+    }
+
+    /// Acquire a tag: immediate ones pay out at once, the rest queue up for their trigger.
+    ///
+    /// A pending Double Tag copies whatever comes next (tag.lua:319) — but never another
+    /// Double Tag, and it is consumed doing so.
+    pub(crate) fn gain_tag(&mut self, tag: TagKind) {
+        let doubled = tag != TagKind::DoubleFun
+            && self
+                .tags
+                .iter()
+                .position(|t| *t == TagKind::DoubleFun)
+                .map(|pos| {
+                    self.tags.remove(pos);
+                })
+                .is_some();
+
+        let copies = if doubled { 2 } else { 1 };
+        for _ in 0..copies {
+            if tag.trigger() == TagTrigger::Immediate {
+                self.apply_immediate_tag(tag);
+            } else {
+                self.tags.push(tag);
+            }
+        }
+    }
+
+    /// Tags that pay out the instant the blind is skipped (tag.lua:131).
+    fn apply_immediate_tag(&mut self, tag: TagKind) {
+        match tag {
+            TagKind::Skip => {
+                // $5 per blind skipped this run, counting this one.
+                self.money += 5 * self.skips_this_run as i32;
+            }
+            TagKind::Handy => {
+                self.money += self.hands_played_this_run as i32;
+            }
+            TagKind::Garbage => {
+                self.money += self.unused_discards_this_run as i32;
+            }
+            TagKind::Economy => {
+                // Doubles your money, capped at a $40 gain.
+                self.money += self.money.max(0).min(40);
+            }
+            TagKind::Orbital => {
+                // +3 levels to a random hand type.
+                let hand_types: Vec<HandType> = self.hand_levels.keys().copied().collect();
+                let pick = hand_types[self.rng.range_usize(0, hand_types.len() - 1)];
+                if let Some(level) = self.hand_levels.get_mut(&pick) {
+                    level.level += 3;
+                }
+            }
+            TagKind::TopUp => {
+                // Up to 2 Common jokers, slots permitting.
+                for _ in 0..2 {
+                    if self.jokers.len() >= self.joker_slots as usize {
+                        break;
+                    }
+                    let pool: Vec<JokerKind> = JokerKind::ALL
+                        .iter()
+                        .copied()
+                        .filter(|k| k.rarity() == 1 && self.joker_in_pool(*k))
+                        .collect();
+                    if pool.is_empty() {
+                        break;
+                    }
+                    let kind = pool[self.rng.range_usize(0, pool.len() - 1)];
+                    let id = self.next_id();
+                    self.jokers.push(JokerInstance::new(id, kind, Edition::None));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Consume the tags waiting on the blind-select screen: Boss Tag re-rolls the Boss, the
+    /// pack tags queue a free booster.
+    pub(crate) fn apply_blind_select_tags(&mut self) {
+        let pending: Vec<TagKind> = self
+            .tags
+            .iter()
+            .copied()
+            .filter(|t| t.trigger() == TagTrigger::BlindSelect)
+            .collect();
+        if pending.is_empty() {
+            return;
+        }
+        self.tags.retain(|t| t.trigger() != TagTrigger::BlindSelect);
+
+        for tag in pending {
+            if tag == TagKind::Boss {
+                self.boss_blind = self.pick_boss_blind();
+            } else if let Some(pack) = tag.free_pack() {
+                // Only one pack can be open at a time; the rest are dropped, as in Balatro
+                // where they queue behind the current choice.
+                self.pending_free_pack = Some(pack);
+            }
+        }
+    }
+
+    /// Open the free booster pack a tag granted, if one is waiting.
+    pub fn open_pending_free_pack(&mut self) -> Result<(), BalatroError> {
+        let Some(pack) = self.pending_free_pack.take() else {
+            return Err(BalatroError::NotInPack);
+        };
+        self.current_pack = Some(self.generate_pack_contents(pack));
+        self.state = GameStateKind::BoosterPack;
         Ok(())
     }
 
@@ -105,6 +230,11 @@ impl GameState {
         for data in self.hand_levels.values_mut() {
             data.played_this_round = 0;
         }
+
+        // Juggle Tag: +3 hand size for this round only.
+        let juggles = self.tags.iter().filter(|t| **t == TagKind::Juggle).count();
+        self.tags.retain(|t| *t != TagKind::Juggle);
+        self.juggle_hand_size = 3 * juggles as u32;
 
         self.reroll_round_targets();
 
@@ -226,7 +356,7 @@ impl GameState {
     }
 
     pub fn effective_hand_size(&self) -> u32 {
-        let mut size = self.hand_size;
+        let mut size = self.hand_size + self.juggle_hand_size;
         // TheManacle: -1 hand size during Boss blind
         if let Some(BossBlind::TheManacle) = self.boss_blind {
             if matches!(self.current_blind, BlindKind::Boss) {

@@ -96,6 +96,22 @@ pub struct GameState {
     /// (`G.GAME.ecto_minus`, card.lua:1495).
     pub ectoplasm_uses: u32,
 
+    /// Tags collected by skipping blinds, waiting for their trigger point.
+    /// `tags` holds the ones still pending; consumed tags are removed.
+    pub hands_played_this_run: u32,
+    /// Discards left unused at the end of each round, summed over the run (Garbage Tag).
+    pub unused_discards_this_run: u32,
+    /// How many blinds have been skipped this run (Skip Tag pays $5 per skip).
+    pub skips_this_run: u32,
+    /// Set by Coupon Tag: everything already stocked in the next shop is free.
+    pub shop_is_free: bool,
+    /// Set by D6 Tag: rerolls in the next shop start at $0.
+    pub shop_rerolls_free: bool,
+    /// Pending free booster pack from a Charm/Meteor/Standard/Buffoon/Ethereal Tag.
+    pub pending_free_pack: Option<PackKind>,
+    /// Extra hand size granted by Juggle Tag, for the current round only.
+    pub juggle_hand_size: u32,
+
     /// Relative weights for what a shop card slot turns into (game.lua:1901-1905).
     /// Vouchers rewrite these: Tarot Merchant/Tycoon set `tarot_rate`, Magic Trick/Illusion set
     /// `playing_card_rate`, and the Ghost Deck raises `spectral_rate`.
@@ -227,6 +243,13 @@ impl GameState {
             gros_michel_extinct: false,
             ectoplasm_uses: 0,
             bosses_used: HashMap::new(),
+            hands_played_this_run: 0,
+            unused_discards_this_run: 0,
+            skips_this_run: 0,
+            shop_is_free: false,
+            shop_rerolls_free: false,
+            pending_free_pack: None,
+            juggle_hand_size: 0,
             joker_rate: 20.0,
             tarot_rate: 4.0,
             planet_rate: 4.0,

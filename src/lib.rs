@@ -108,7 +108,12 @@ fn gamestate_to_json(gs: &GameState) -> Value {
         "current_blind": format!("{:?}", gs.current_blind),
         "boss_blind": gs.boss_blind.map(|b| format!("{:?}", b)),
         "vouchers": gs.vouchers.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>(),
-        "tags": gs.tags.iter().map(|t| format!("{:?}", t)).collect::<Vec<_>>(),
+        "tags": gs.tags.iter().map(|t| serde_json::json!({
+            "kind": format!("{:?}", t),
+            "name": t.display_name(),
+            "trigger": format!("{:?}", t.trigger()),
+        })).collect::<Vec<_>>(),
+        "pending_free_pack": gs.pending_free_pack.map(|p| format!("{:?}", p)),
     })
 }
 
@@ -308,7 +313,12 @@ fn run_info_json(gs: &GameState) -> Value {
         "state": format!("{:?}", gs.state),
         "jokers": gs.jokers.iter().map(|j| format!("{:?}", j.kind)).collect::<Vec<_>>(),
         "vouchers": gs.vouchers.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>(),
-        "tags": gs.tags.iter().map(|t| format!("{:?}", t)).collect::<Vec<_>>(),
+        "tags": gs.tags.iter().map(|t| serde_json::json!({
+            "kind": format!("{:?}", t),
+            "name": t.display_name(),
+            "trigger": format!("{:?}", t.trigger()),
+        })).collect::<Vec<_>>(),
+        "pending_free_pack": gs.pending_free_pack.map(|p| format!("{:?}", p)),
         "history_len": gs.history.len(),
         "boss_blind": gs.boss_blind.map(|b| b.display_name()),
     })
@@ -590,6 +600,10 @@ impl BalatroEngine {
 
     fn buy_playing_card(&mut self, index: usize) -> PyResult<()> {
         self.gs.buy_playing_card(index).map_err(balatro_err_to_py)
+    }
+
+    fn open_pending_free_pack(&mut self) -> PyResult<()> {
+        self.gs.open_pending_free_pack().map_err(balatro_err_to_py)
     }
 
     fn reroll_boss_blind(&mut self) -> PyResult<()> {

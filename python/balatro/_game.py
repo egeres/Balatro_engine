@@ -10,6 +10,7 @@ from ._actions import (
     BuyJoker,
     BuyPlayingCard,
     RerollBossBlind,
+    OpenFreePack,
     BuyPack,
     BuyVoucher,
     DeselectAll,
@@ -172,6 +173,8 @@ class Game:
             return e.buy_playing_card(action.index)
         if isinstance(action, RerollBossBlind):
             return e.reroll_boss_blind()
+        if isinstance(action, OpenFreePack):
+            return e.open_pending_free_pack()
         if isinstance(action, BuyPack):
             return e.buy_pack(action.index)
         if isinstance(action, BuyVoucher):
