@@ -327,13 +327,13 @@ fn run_stickers_perishable_rental_eternal() {
         "GreenJoker should still be active after first win"
     );
 
-    // leave_shop deducts $1 for the rental Joker.
+    // leave_shop charges the rental rate for the rental Joker.
     let money_before_leave1 = gs.money;
     gs.leave_shop().unwrap();
     assert_eq!(
         gs.money,
-        money_before_leave1 - 1,
-        "rental Joker should deduct $1 on leave_shop"
+        money_before_leave1 - 3,
+        "rental Joker should deduct $3 on leave_shop"
     );
 
     // ── Round 2 (Big blind) ──────────────────────────────────────
@@ -371,8 +371,8 @@ fn run_stickers_perishable_rental_eternal() {
     gs.leave_shop().unwrap();
     assert_eq!(
         gs.money,
-        money_before_leave2 - 1,
-        "rental Joker should deduct $1 on second leave_shop"
+        money_before_leave2 - 3,
+        "rental Joker should deduct $3 on second leave_shop"
     );
 
     // All three jokers remain — none were destroyed.

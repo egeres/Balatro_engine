@@ -157,7 +157,7 @@ impl GameState {
             TagKind::TopUp => {
                 // Up to 2 Common jokers, slots permitting.
                 for _ in 0..2 {
-                    if self.jokers.len() >= self.joker_slots as usize {
+                    if self.jokers.len() >= self.effective_joker_slots() {
                         break;
                     }
                     let pool: Vec<JokerKind> = JokerKind::ALL
@@ -398,11 +398,10 @@ impl GameState {
             self.hand.push(card_idx);
         }
 
-        // TheFish: all newly drawn cards after the first hand are face-down
-        // TheWheel: each newly drawn card has a 1-in-7 chance of being face-down
+        // Blinds that draw cards face down (`Blind:stay_flipped`, blind.lua:604).
         if matches!(self.current_blind, BlindKind::Boss) {
             if !self.boss_blind_disabled() {
-                let newly_drawn = start_hand_len..self.hand.len();
+                let newly_drawn: Vec<usize> = (start_hand_len..self.hand.len()).collect();
                 match self.boss_blind {
                     Some(BossBlind::TheFish) => {
                         // All cards face-down after the initial draw.
@@ -419,6 +418,27 @@ impl GameState {
                         for hand_idx in newly_drawn {
                             if self.rng.range_usize(0, 6) == 0 {
                                 let card_idx = self.hand[hand_idx];
+                                self.deck[card_idx].face_down = true;
+                            }
+                        }
+                    }
+                    Some(BossBlind::TheHouse) => {
+                        // Only the opening hand of the round is hidden — nothing has been played
+                        // or discarded yet (blind.lua:611).
+                        if self.hands_remaining == self.effective_max_hands()
+                            && self.discards_remaining == self.effective_max_discards()
+                        {
+                            for hand_idx in newly_drawn {
+                                let card_idx = self.hand[hand_idx];
+                                self.deck[card_idx].face_down = true;
+                            }
+                        }
+                    }
+                    Some(BossBlind::TheMark) => {
+                        // Face cards are hidden, not disabled (blind.lua:614).
+                        for hand_idx in newly_drawn {
+                            let card_idx = self.hand[hand_idx];
+                            if self.deck[card_idx].rank.is_face() {
                                 self.deck[card_idx].face_down = true;
                             }
                         }
@@ -492,7 +512,7 @@ impl GameState {
                     }
                 }
             }
-            BossBlind::ThePlant | BossBlind::TheMark => {
+            BossBlind::ThePlant => {
                 for card in self.deck.iter_mut() {
                     if card.rank.is_face() {
                         card.debuffed = true;
@@ -601,7 +621,7 @@ impl GameState {
                 JokerKind::RiffRaff => {
                     // Add 2 common jokers (rarity 1) at the start of each round
                     for _ in 0..2 {
-                        if self.jokers.len() < self.joker_slots as usize {
+                        if self.jokers.len() < self.effective_joker_slots() {
                             if let Some(new_joker) = self.generate_random_joker() {
                                 // Only add if it's a common joker
                                 if new_joker.kind.rarity() == 1 {

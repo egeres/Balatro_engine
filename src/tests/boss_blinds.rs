@@ -213,13 +213,28 @@ fn test_the_plant_leaves_non_face_cards_undebuffed() {
     );
 }
 
+/// The Mark hides face cards rather than disabling them (blind.lua:614) - they still score.
 #[test]
-fn test_the_mark_debuffs_all_face_cards() {
+fn test_the_mark_draws_face_cards_face_down() {
+    let mut gs = boss_select(BossBlind::TheMark);
+    gs.select_blind().unwrap();
+    let drawn_faces: Vec<_> = gs
+        .hand
+        .iter()
+        .map(|&di| &gs.deck[di])
+        .filter(|c| c.rank.is_face())
+        .collect();
+    assert!(drawn_faces.iter().all(|c| c.face_down), "face cards in hand should be hidden");
+    assert!(drawn_faces.iter().all(|c| !c.debuffed), "but they still score");
+}
+
+#[test]
+fn test_the_mark_leaves_non_face_cards_face_up() {
     let mut gs = boss_select(BossBlind::TheMark);
     gs.select_blind().unwrap();
     assert!(
-        gs.deck.iter().filter(|c| c.rank.is_face()).all(|c| c.debuffed),
-        "TheMark: every J/Q/K should be debuffed"
+        gs.hand.iter().map(|&di| &gs.deck[di]).filter(|c| !c.rank.is_face()).all(|c| !c.face_down),
+        "only face cards are hidden"
     );
 }
 
@@ -243,11 +258,46 @@ fn test_the_plant_debuffs_exactly_12_cards() {
 }
 
 #[test]
-fn test_the_mark_debuffs_exactly_12_cards() {
+fn test_the_mark_debuffs_nothing() {
     let mut gs = boss_select(BossBlind::TheMark);
     gs.select_blind().unwrap();
-    let count = gs.deck.iter().filter(|c| c.debuffed).count();
-    assert_eq!(count, 12, "TheMark should debuff exactly 12 face cards (J/Q/K × 4 suits)");
+    assert_eq!(gs.deck.iter().filter(|c| c.debuffed).count(), 0);
+}
+
+// =========================================================
+// The House: the opening hand of the round is dealt face down
+// =========================================================
+
+#[test]
+fn test_the_house_hides_the_opening_hand() {
+    let mut gs = boss_select(BossBlind::TheHouse);
+    gs.select_blind().unwrap();
+    assert!(
+        gs.hand.iter().all(|&di| gs.deck[di].face_down),
+        "the whole first hand should be hidden"
+    );
+    assert!(gs.deck.iter().all(|c| !c.debuffed), "The House debuffs nothing");
+}
+
+#[test]
+fn test_the_house_deals_later_hands_face_up() {
+    let mut gs = boss_select(BossBlind::TheHouse);
+    gs.select_blind().unwrap();
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    let replacements: Vec<_> = gs.hand.iter().map(|&di| &gs.deck[di]).collect();
+    assert!(
+        replacements.iter().any(|c| !c.face_down),
+        "cards drawn after the first hand are visible"
+    );
+}
+
+#[test]
+fn test_the_house_is_suppressed_by_chicot() {
+    let mut gs = boss_select(BossBlind::TheHouse);
+    gs.jokers.push(joker(99, JokerKind::Chicot));
+    gs.select_blind().unwrap();
+    assert!(gs.hand.iter().all(|&di| !gs.deck[di].face_down));
 }
 
 // =========================================================

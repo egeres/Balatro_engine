@@ -222,3 +222,58 @@ fn test_tarot_card_picked_from_pack_not_counted_until_used() {
     assert_eq!(gs.tarot_cards_used, initial_count,
         "tarot_cards_used should not increment when picking from pack, only when using");
 }
+
+// =========================================================
+// Standard pack contents
+// =========================================================
+
+/// card.lua:1759 — 40% of the cards are Enhanced, ~20% carry a seal, and editions are polled at
+/// a fixed rate of 2. A pack of blank cards is not worth $4.
+#[test]
+fn test_standard_packs_produce_enhanced_and_sealed_cards() {
+    let mut gs = make_game();
+    let mut total = 0;
+    let mut enhanced = 0;
+    let mut sealed = 0;
+    let mut editioned = 0;
+
+    for _ in 0..400 {
+        let pack = gs.generate_pack_contents(PackKind::StandardPackMega);
+        for c in &pack.cards {
+            if let crate::card::PackCard::PlayingCard(card) = c {
+                total += 1;
+                if card.enhancement != Enhancement::None {
+                    enhanced += 1;
+                }
+                if card.seal != Seal::None {
+                    sealed += 1;
+                }
+                if card.edition != Edition::None {
+                    editioned += 1;
+                }
+            }
+        }
+    }
+
+    let frac = |n: usize| n as f64 / total as f64;
+    assert!((frac(enhanced) - 0.40).abs() < 0.08, "enhanced {}", frac(enhanced));
+    assert!((frac(sealed) - 0.20).abs() < 0.06, "sealed {}", frac(sealed));
+    assert!(editioned > 0, "editions should show up at rate 2");
+}
+
+#[test]
+fn test_standard_pack_seals_span_all_four_kinds() {
+    let mut gs = make_game();
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..400 {
+        let pack = gs.generate_pack_contents(PackKind::StandardPackMega);
+        for c in &pack.cards {
+            if let crate::card::PackCard::PlayingCard(card) = c {
+                if card.seal != Seal::None {
+                    seen.insert(card.seal);
+                }
+            }
+        }
+    }
+    assert_eq!(seen.len(), 4, "saw {:?}", seen);
+}

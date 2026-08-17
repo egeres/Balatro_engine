@@ -273,6 +273,17 @@ impl JokerInstance {
         }
     }
 
+    /// Whether this instance's Eternal sticker is legal for its kind. Only used by tests and
+    /// tooling — the shop already refuses to apply an incompatible sticker.
+    pub fn eternal_compat_ok(&self) -> bool {
+        !self.eternal || self.kind.eternal_compat()
+    }
+
+    /// As above, for Perishable.
+    pub fn perishable_compat_ok(&self) -> bool {
+        !self.perishable || self.kind.perishable_compat()
+    }
+
     pub fn sell_value(&self) -> u32 {
         // Balatro uses floor(buy_cost / 2), minimum $1
         let base = (self.kind.base_cost() / 2).max(1);

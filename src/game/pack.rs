@@ -11,13 +11,7 @@ impl GameState {
             .iter()
             .filter(|(_, h)| h.visible && h.played > 0)
             .max_by_key(|(ht, h)| (h.played, std::cmp::Reverse(ht.display_name())))?;
-        [
-            PlanetCard::Mercury, PlanetCard::Venus, PlanetCard::Earth, PlanetCard::Mars,
-            PlanetCard::Jupiter, PlanetCard::Saturn, PlanetCard::Uranus, PlanetCard::Neptune,
-            PlanetCard::Pluto, PlanetCard::PlanetX, PlanetCard::Ceres, PlanetCard::Eris,
-        ]
-        .into_iter()
-        .find(|p| p.hand_type() == hand_type)
+        planet_for_hand(hand_type)
     }
 
     pub(crate) fn generate_pack_contents(&mut self, kind: PackKind) -> PackContents {
@@ -91,13 +85,39 @@ impl GameState {
                     Rank::Seven, Rank::Eight, Rank::Nine, Rank::Ten,
                     Rank::Jack, Rank::Queen, Rank::King, Rank::Ace,
                 ];
+                // card.lua:1759: 40% of the cards are Enhanced, editions are polled at a fixed
+                // rate of 2, and 20% carry a seal (then uniform across the four).
                 for _ in 0..cards_shown {
                     let suit_idx = self.rng.range_usize(0, 3);
                     let rank_idx = self.rng.range_usize(0, 12);
                     let id = self.next_id();
                     let mut card = CardInstance::new(id, ranks[rank_idx], suits[suit_idx]);
-                    // Hone / Glow Up scale the edition chances via edition_rate.
-                    card.edition = self.poll_edition(false);
+
+                    if self.rng.next_f64() > 0.6 {
+                        let enhancements = [
+                            Enhancement::Bonus, Enhancement::Mult, Enhancement::Wild,
+                            Enhancement::Glass, Enhancement::Steel, Enhancement::Stone,
+                            Enhancement::Gold, Enhancement::Lucky,
+                        ];
+                        card.enhancement =
+                            enhancements[self.rng.range_usize(0, enhancements.len() - 1)];
+                    }
+
+                    card.edition = self.poll_edition_at_rate(2.0, false);
+
+                    if self.rng.next_f64() > 0.8 {
+                        let seal_roll = self.rng.next_f64();
+                        card.seal = if seal_roll > 0.75 {
+                            Seal::Red
+                        } else if seal_roll > 0.5 {
+                            Seal::Blue
+                        } else if seal_roll > 0.25 {
+                            Seal::Gold
+                        } else {
+                            Seal::Purple
+                        };
+                    }
+
                     cards.push(PackCard::PlayingCard(card));
                 }
             }
@@ -144,7 +164,7 @@ impl GameState {
                 }
             }
             PackCard::Joker(j) => {
-                if self.jokers.len() < self.joker_slots as usize {
+                if self.jokers.len() < self.effective_joker_slots() {
                     self.jokers.push(j.clone());
                 } else {
                     return Err(BalatroError::JokerSlotsFull);

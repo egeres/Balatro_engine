@@ -81,7 +81,7 @@ fn test_perishable_joker_still_active_after_4_rounds() {
 }
 
 #[test]
-fn test_rental_joker_costs_1_dollar_per_shop_visit() {
+fn test_rental_joker_costs_the_rental_rate_per_round() {
     let mut gs = make_game();
     gs.state = GameStateKind::Shop;
     gs.money = 20;
@@ -91,7 +91,39 @@ fn test_rental_joker_costs_1_dollar_per_shop_visit() {
     gs.jokers.push(rental);
 
     gs.leave_shop().unwrap();
-    assert_eq!(gs.money, 19, "Rental joker should cost $1 on leave_shop");
+    // rental_rate = 3 (game.lua:1915)
+    assert_eq!(gs.money, 17);
+}
+
+#[test]
+fn test_rental_rate_stacks_per_rental_joker() {
+    let mut gs = make_game();
+    gs.state = GameStateKind::Shop;
+    gs.money = 20;
+    for i in 0..2 {
+        let mut rental = joker(i, JokerKind::Joker);
+        rental.rental = true;
+        gs.jokers.push(rental);
+    }
+    gs.leave_shop().unwrap();
+    assert_eq!(gs.money, 14);
+}
+
+/// A rental is cheap to acquire and expensive to keep (card.lua:381).
+#[test]
+fn test_rental_jokers_are_priced_at_one_dollar_in_the_shop() {
+    let mut gs = GameState::new(DeckType::Blue, Stake::Gold, Some("RENTPRICE".to_string()));
+    gs.state = GameStateKind::Shop;
+    for _ in 0..40 {
+        gs.generate_shop();
+        for offer in &gs.shop_offers {
+            if let crate::card::ShopItem::Joker(j) = &offer.kind {
+                if j.rental {
+                    assert_eq!(offer.price, 1, "a rental joker costs $1 to buy");
+                }
+            }
+        }
+    }
 }
 
 #[test]
@@ -208,4 +240,123 @@ fn test_purple_seal_creates_tarot_card_on_discard() {
         matches!(c, crate::card::ConsumableCard::Tarot(_))
     }).count();
     assert!(tarot_count >= 1, "Purple seal should have created a Tarot card on discard");
+}
+
+/// The Blue Seal makes the Planet for the hand you most recently played, not a random one
+/// (card.lua:1046).
+#[test]
+fn test_blue_seal_creates_the_planet_for_the_last_hand_played() {
+    let mut gs = make_game();
+    let mut blue_card = card(0, Rank::Ace, Suit::Spades);
+    blue_card.seal = Seal::Blue;
+    setup_round(
+        &mut gs,
+        vec![
+            blue_card,
+            card(1, Rank::Two, Suit::Hearts),
+            card(2, Rank::Two, Suit::Clubs),
+        ],
+        3,
+    );
+    gs.score_goal = 1.0;
+    gs.consumables.clear();
+
+    // Play a Pair; the Blue Ace stays in hand.
+    gs.select_card(1).unwrap();
+    gs.select_card(2).unwrap();
+    gs.play_hand().unwrap();
+
+    assert_eq!(gs.last_hand_played, Some(HandType::Pair));
+    assert_eq!(
+        gs.consumables,
+        vec![crate::card::ConsumableCard::Planet(PlanetCard::Mercury)],
+        "Pair -> Mercury"
+    );
+}
+
+#[test]
+fn test_blue_seal_follows_a_different_hand_type() {
+    let mut gs = make_game();
+    let mut blue_card = card(0, Rank::Ace, Suit::Spades);
+    blue_card.seal = Seal::Blue;
+    setup_round(&mut gs, vec![blue_card, card(1, Rank::Two, Suit::Hearts)], 2);
+    gs.score_goal = 1.0;
+    gs.consumables.clear();
+
+    // A lone Two is a High Card.
+    gs.select_card(1).unwrap();
+    gs.play_hand().unwrap();
+    assert_eq!(
+        gs.consumables,
+        vec![crate::card::ConsumableCard::Planet(PlanetCard::Pluto)],
+        "High Card -> Pluto"
+    );
+}
+
+// =========================================================
+// Sticker compatibility
+// =========================================================
+
+/// Jokers that consume themselves cannot be Eternal, and the scaling jokers cannot be
+/// Perishable (`eternal_compat` / `perishable_compat`, game.lua).
+#[test]
+fn test_sticker_compatibility_flags_match_the_source() {
+    assert!(!JokerKind::IceCream.eternal_compat());
+    assert!(!JokerKind::Popcorn.eternal_compat());
+    assert!(!JokerKind::MrBones.eternal_compat());
+    assert!(JokerKind::Joker.eternal_compat());
+
+    assert!(!JokerKind::CeremonialDagger.perishable_compat());
+    assert!(!JokerKind::Vampire.perishable_compat());
+    assert!(!JokerKind::WeeJoker.perishable_compat());
+    assert!(JokerKind::Joker.perishable_compat());
+}
+
+#[test]
+fn test_incompatible_jokers_never_get_their_forbidden_sticker() {
+    let mut gs = GameState::new(DeckType::Blue, Stake::Gold, Some("STICKERS".to_string()));
+    for _ in 0..3000 {
+        if let Some(j) = gs.generate_random_joker() {
+            if j.eternal {
+                assert!(j.eternal_compat_ok(), "{:?} must not be Eternal", j.kind);
+            }
+            if j.perishable {
+                assert!(j.perishable_compat_ok(), "{:?} must not be Perishable", j.kind);
+            }
+        }
+    }
+}
+
+// =========================================================
+// Negative jokers carry their own slot
+// =========================================================
+
+#[test]
+fn test_negative_joker_grants_a_slot_however_it_arrives() {
+    let mut gs = make_game();
+    let base = gs.effective_joker_slots();
+
+    let mut neg = joker(0, JokerKind::Joker);
+    neg.edition = Edition::Negative;
+    gs.jokers.push(neg);
+    assert_eq!(gs.effective_joker_slots(), base + 1);
+
+    // And it goes away with the joker.
+    gs.jokers.clear();
+    assert_eq!(gs.effective_joker_slots(), base);
+}
+
+#[test]
+fn test_ectoplasm_negative_also_grants_a_slot() {
+    let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    gs.jokers.push(joker(0, JokerKind::Joker));
+    let base = gs.effective_joker_slots();
+
+    gs.consumables
+        .push(crate::card::ConsumableCard::Spectral(SpectralCard::Ectoplasm));
+    gs.use_consumable(0, vec![]).unwrap();
+
+    assert_eq!(gs.jokers[0].edition, Edition::Negative);
+    assert_eq!(gs.effective_joker_slots(), base + 1);
 }

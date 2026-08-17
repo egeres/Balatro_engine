@@ -84,6 +84,10 @@ pub struct GameState {
     /// effect has to be latched for the rest of the round. Cleared when a new round begins.
     pub boss_blind_manually_disabled: bool,
 
+    /// The hand type most recently played this run. Blue Seal creates the Planet for it
+    /// (`G.GAME.last_hand_played`, card.lua:1046).
+    pub last_hand_played: Option<HandType>,
+
     /// Randomised targets for The Idol / Ancient Joker / Castle / Mail-In Rebate. Shared by all
     /// copies of a joker and re-rolled at the start of every round.
     pub round_targets: RoundTargets,
@@ -239,6 +243,7 @@ impl GameState {
             cerulean_forced_card_id: None,
             verdant_leaf_joker_sold: false,
             boss_blind_manually_disabled: false,
+            last_hand_played: None,
             round_targets: RoundTargets::default(),
             gros_michel_extinct: false,
             ectoplasm_uses: 0,
@@ -497,6 +502,18 @@ impl GameState {
     /// `cost > G.GAME.dollars - G.GAME.bankrupt_at` (button_callbacks.lua:56).
     pub fn can_afford(&self, cost: i32) -> bool {
         cost <= self.money - self.bankrupt_at()
+    }
+
+    /// Joker capacity, counting the extra slot each Negative joker brings with it
+    /// (card.lua:687). Deriving it means the slot arrives and leaves with the joker no matter
+    /// how it was acquired — bought, pulled from a Buffoon pack, or turned Negative by Ectoplasm.
+    pub fn effective_joker_slots(&self) -> usize {
+        let negatives = self
+            .jokers
+            .iter()
+            .filter(|j| j.edition == Edition::Negative)
+            .count();
+        self.joker_slots as usize + negatives
     }
 
     /// The ante that ends the run. Hieroglyph and Petroglyph each knock one off

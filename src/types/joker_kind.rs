@@ -469,6 +469,51 @@ impl JokerKind {
         }
     }
 
+    /// Whether this joker can be given the Eternal sticker (`eternal_compat` in game.lua).
+    /// The jokers that consume themselves cannot — an Eternal one could never finish.
+    pub fn eternal_compat(&self) -> bool {
+        !matches!(
+            self,
+            JokerKind::GrosMichel
+                | JokerKind::IceCream
+                | JokerKind::Cavendish
+                | JokerKind::Luchador
+                | JokerKind::TurtleBean
+                | JokerKind::DietCola
+                | JokerKind::Popcorn
+                | JokerKind::Ramen
+                | JokerKind::Seltzer
+                | JokerKind::MrBones
+                | JokerKind::InvisibleJoker
+        )
+    }
+
+    /// Whether this joker can be given the Perishable sticker (`perishable_compat` in game.lua).
+    /// The scaling jokers are exempt: being disabled after five rounds would waste the scaling.
+    pub fn perishable_compat(&self) -> bool {
+        !matches!(
+            self,
+            JokerKind::CeremonialDagger
+                | JokerKind::RideTheBus
+                | JokerKind::Runner
+                | JokerKind::Constellation
+                | JokerKind::GreenJoker
+                | JokerKind::RedCard
+                | JokerKind::Madness
+                | JokerKind::SquareJoker
+                | JokerKind::Vampire
+                | JokerKind::Hologram
+                | JokerKind::Rocket
+                | JokerKind::Obelisk
+                | JokerKind::LuckyCat
+                | JokerKind::FlashCard
+                | JokerKind::SpareTrousers
+                | JokerKind::Castle
+                | JokerKind::GlassJoker
+                | JokerKind::WeeJoker
+        )
+    }
+
     /// Whether Blueprint / Brainstorm can copy this joker (`blueprint_compat` in game.lua).
     /// The incompatible ones are mostly passive rule-changers and once-per-round economy jokers
     /// whose effects have no meaning when duplicated.

@@ -113,6 +113,12 @@ impl GameState {
     /// Hone doubles the Foil/Holo/Poly chances, Glow Up quadruples them.
     pub(crate) fn poll_edition(&mut self, allow_negative: bool) -> Edition {
         let rate = self.edition_rate;
+        self.poll_edition_at_rate(rate, allow_negative)
+    }
+
+    /// Poll an edition at an explicit rate. Standard packs use a fixed 2 rather than the run's
+    /// `edition_rate` (card.lua:1761).
+    pub(crate) fn poll_edition_at_rate(&mut self, rate: f64, allow_negative: bool) -> Edition {
         let roll = self.rng.next_f64();
         if allow_negative && roll > 1.0 - 0.003 {
             Edition::Negative
@@ -246,7 +252,7 @@ impl GameState {
         for _ in 0..card_slots {
             if let Some(item) = self.roll_shop_slot() {
                 let price = match &item {
-                    ShopItem::Joker(j) => j.kind.base_cost(),
+                    ShopItem::Joker(j) => self.joker_shop_price(j),
                     ShopItem::Consumable(c) => c.base_cost(),
                     ShopItem::PlayingCard(_) => 1,
                     ShopItem::Pack(p) => p.base_cost(),
@@ -400,10 +406,18 @@ impl GameState {
         // Stake-based stickers (each 30% chance at the relevant stake threshold).
         // Eternal (Black+) and Perishable (Orange+) are mutually exclusive; Eternal wins if both
         // would trigger. Rental (Gold+) is independent and can combine with either.
+        // A joker only takes a sticker its definition allows (`eternal_compat` /
+        // `perishable_compat`, card.lua:517).
         let stake_level = self.stake as u8;
-        if stake_level >= Stake::Black as u8 && self.rng.next_bool_prob(0.30) {
+        if stake_level >= Stake::Black as u8
+            && kind.eternal_compat()
+            && self.rng.next_bool_prob(0.30)
+        {
             joker.eternal = true;
-        } else if stake_level >= Stake::Orange as u8 && self.rng.next_bool_prob(0.30) {
+        } else if stake_level >= Stake::Orange as u8
+            && kind.perishable_compat()
+            && self.rng.next_bool_prob(0.30)
+        {
             joker.perishable = true;
         }
         if stake_level >= Stake::Gold as u8 && self.rng.next_bool_prob(0.30) {
@@ -533,16 +547,14 @@ impl GameState {
         if !self.can_afford(price as i32) {
             return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
         }
-        if self.jokers.len() >= self.joker_slots as usize {
+        if self.jokers.len() >= self.effective_joker_slots() {
             return Err(BalatroError::JokerSlotsFull);
         }
 
         self.money -= price as i32;
         if let ShopItem::Joker(j) = &self.shop_offers[shop_index].kind.clone() {
-            // Negative edition gives +1 joker slot
-            if j.edition == Edition::Negative {
-                self.joker_slots += 1;
-            }
+            // A Negative joker brings its own slot; effective_joker_slots() derives that from
+            // the board, so nothing needs adding here.
             self.jokers.push(j.clone());
         }
         self.shop_offers[shop_index].sold = true;
@@ -586,7 +598,7 @@ impl GameState {
 
         self.jokers.remove(joker_index);
 
-        if is_invisible && invisible_rounds >= 2 && self.jokers.len() < self.joker_slots as usize {
+        if is_invisible && invisible_rounds >= 2 && self.jokers.len() < self.effective_joker_slots() {
             let candidates: Vec<usize> = (0..self.jokers.len())
                 .filter(|&j| self.jokers[j].active && self.jokers[j].kind != JokerKind::InvisibleJoker)
                 .collect();
@@ -802,15 +814,52 @@ impl GameState {
         }
     }
 
+    /// `Card:set_cost` (card.lua:368): editions add a flat surcharge, then the discount applies,
+    /// with a +0.5 nudge before the floor.
     fn calculate_shop_price(&self, base_price: u32) -> u32 {
-        let mut price = base_price;
-        if self.has_voucher(VoucherKind::ClearanceSale) {
-            price = (price as f64 * 0.75) as u32;
+        self.calculate_shop_price_with_edition(base_price, Edition::None, false)
+    }
+
+    fn calculate_shop_price_with_edition(
+        &self,
+        base_price: u32,
+        edition: Edition,
+        rental: bool,
+    ) -> u32 {
+        // A rental costs a flat $1 whatever it is (card.lua:381).
+        if rental {
+            return 1;
         }
-        if self.has_voucher(VoucherKind::Liquidation) {
-            price = (price as f64 * 0.5) as u32;
-        }
-        price.max(1)
+        let extra = match edition {
+            Edition::Foil => 2.0,
+            Edition::Holographic => 3.0,
+            Edition::Polychrome => 5.0,
+            Edition::Negative => 5.0,
+            Edition::None => 0.0,
+        };
+        let discount_percent = if self.has_voucher(VoucherKind::Liquidation) {
+            50.0
+        } else if self.has_voucher(VoucherKind::ClearanceSale) {
+            25.0
+        } else {
+            0.0
+        };
+        let cost = ((base_price as f64 + extra + 0.5) * (100.0 - discount_percent) / 100.0).floor();
+        (cost.max(1.0)) as u32
+    }
+
+    /// Test hook for the pricing rule.
+    pub fn debug_joker_price(&self, joker: &JokerInstance) -> u32 {
+        self.joker_shop_price(joker)
+    }
+
+    /// The shop price of a joker, including its edition surcharge and rental discount.
+    fn joker_shop_price(&self, joker: &JokerInstance) -> u32 {
+        self.calculate_shop_price_with_edition(
+            joker.kind.base_cost(),
+            joker.edition,
+            joker.rental,
+        )
     }
 
     pub fn reroll_shop(&mut self) -> Result<(), BalatroError> {
@@ -925,12 +974,9 @@ impl GameState {
             self.consumables.push(copy);
         }
 
-        // Rental jokers cost money
-        for j in self.jokers.iter() {
-            if j.rental {
-                self.money -= 1;
-            }
-        }
+        // Rental jokers charge their rate every round (`rental_rate = 3`, game.lua:1915).
+        let rentals = self.jokers.iter().filter(|j| j.rental).count();
+        self.money -= 3 * rentals as i32;
 
         // Coupon and D6 only cover the shop they were spent on.
         self.shop_is_free = false;

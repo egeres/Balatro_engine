@@ -506,7 +506,7 @@ impl GameState {
         inputs.starting_deck_size = self.starting_deck_size;
         inputs.boss_blind = self.boss_blind;
         inputs.boss_ability_triggered = boss_ability_triggered;
-        inputs.joker_slot_count = self.joker_slots as usize;
+        inputs.joker_slot_count = self.effective_joker_slots();
         inputs.tarot_cards_used = self.tarot_cards_used;
         inputs.steel_count_in_deck = steel_count_in_deck;
         inputs.stone_count_in_deck = stone_count_in_deck;
@@ -531,6 +531,8 @@ impl GameState {
                 j.active = true;
             }
         }
+
+        self.last_hand_played = Some(result.hand_type);
 
         // Update hand level stats
         if let Some(level) = self.hand_levels.get_mut(&result.hand_type) {
@@ -1197,12 +1199,19 @@ impl GameState {
             }
         }
 
-        // Blue seal: create planet for cards in hand at round end
-        let hand_copy: Vec<usize> = self.hand.clone();
-        for &card_idx in &hand_copy {
-            if self.deck[card_idx].seal == Seal::Blue {
-                if self.consumables.len() < self.consumable_slots as usize {
-                    let planet = self.random_planet();
+        // Blue Seal: each sealed card held at round end creates the Planet for the hand you
+        // played most recently (card.lua:1046), not a random one.
+        if let Some(last_hand) = self.last_hand_played {
+            if let Some(planet) = planet_for_hand(last_hand) {
+                let sealed = self
+                    .hand
+                    .iter()
+                    .filter(|&&di| self.deck[di].seal == Seal::Blue && !self.deck[di].debuffed)
+                    .count();
+                for _ in 0..sealed {
+                    if self.consumables.len() >= self.consumable_slots as usize {
+                        break;
+                    }
                     self.consumables.push(ConsumableCard::Planet(planet));
                 }
             }

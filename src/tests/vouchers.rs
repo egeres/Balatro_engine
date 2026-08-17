@@ -534,3 +534,44 @@ fn test_celestial_packs_are_random_without_telescope() {
     }
     assert!(firsts.len() > 1);
 }
+
+// =========================================================
+// Shop pricing: edition surcharges and rounding
+// =========================================================
+
+/// card.lua:369 adds a flat surcharge per edition before the discount is applied.
+#[test]
+fn test_editions_raise_the_shop_price() {
+    let gs = make_game();
+    let price_of = |edition: Edition| {
+        let mut j = joker(0, JokerKind::Blueprint); // base cost 10
+        j.edition = edition;
+        gs.debug_joker_price(&j)
+    };
+
+    assert_eq!(price_of(Edition::None), 10);
+    assert_eq!(price_of(Edition::Foil), 12);
+    assert_eq!(price_of(Edition::Holographic), 13);
+    assert_eq!(price_of(Edition::Polychrome), 15);
+    assert_eq!(price_of(Edition::Negative), 15);
+}
+
+/// A rental is $1 to acquire whatever it is (card.lua:381).
+#[test]
+fn test_rental_overrides_the_shop_price() {
+    let gs = make_game();
+    let mut j = joker(0, JokerKind::Blueprint);
+    j.edition = Edition::Polychrome;
+    j.rental = true;
+    assert_eq!(gs.debug_joker_price(&j), 1);
+}
+
+#[test]
+fn test_discounts_apply_after_the_edition_surcharge() {
+    let mut gs = make_game();
+    gs.vouchers.push(VoucherKind::ClearanceSale);
+    let mut poly = joker(0, JokerKind::Blueprint);
+    poly.edition = Edition::Polychrome;
+    // (10 + 5 + 0.5) * 0.75 = 11.625 -> 11
+    assert_eq!(gs.debug_joker_price(&poly), 11);
+}

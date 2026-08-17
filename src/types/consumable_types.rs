@@ -422,3 +422,14 @@ impl TagKind {
         }
     }
 }
+
+/// The Planet card that levels `hand_type`, if one exists.
+pub fn planet_for_hand(hand_type: HandType) -> Option<PlanetCard> {
+    [
+        PlanetCard::Mercury, PlanetCard::Venus, PlanetCard::Earth, PlanetCard::Mars,
+        PlanetCard::Jupiter, PlanetCard::Saturn, PlanetCard::Uranus, PlanetCard::Neptune,
+        PlanetCard::Pluto, PlanetCard::PlanetX, PlanetCard::Ceres, PlanetCard::Eris,
+    ]
+    .into_iter()
+    .find(|p| p.hand_type() == hand_type)
+}

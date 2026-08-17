@@ -273,7 +273,7 @@ impl GameState {
             }
             TarotCard::Judgement => {
                 // Create random joker
-                if self.jokers.len() < self.joker_slots as usize {
+                if self.jokers.len() < self.effective_joker_slots() {
                     if let Some(j) = self.generate_random_joker() {
                         self.jokers.push(j);
                     }
@@ -528,7 +528,7 @@ impl GameState {
             }
             SpectralCard::Wraith => {
                 // Creates a random Rare Joker; sets money to $0
-                if self.jokers.len() < self.joker_slots as usize {
+                if self.jokers.len() < self.effective_joker_slots() {
                     // Pick a random Rare joker
                     let rare_jokers = vec![
                         JokerKind::Dna, JokerKind::Vagabond, JokerKind::Baron,
@@ -586,7 +586,7 @@ impl GameState {
             }
             SpectralCard::TheSoul => {
                 // Creates a Legendary Joker (requires open Joker slot)
-                if self.jokers.len() < self.joker_slots as usize {
+                if self.jokers.len() < self.effective_joker_slots() {
                     let legendaries = vec![
                         JokerKind::Canio, JokerKind::Triboulet, JokerKind::Yorick,
                         JokerKind::Chicot, JokerKind::Perkeo,

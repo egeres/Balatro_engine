@@ -124,18 +124,38 @@ fn round_info_json(gs: &GameState) -> Value {
         .enumerate()
         .map(|(hand_idx, &deck_idx)| {
             let c = &gs.deck[deck_idx];
-            serde_json::json!({
-                "hand_index": hand_idx,
-                "id": c.id,
-                "rank": format!("{:?}", c.rank),
-                "suit": format!("{:?}", c.suit),
-                "enhancement": format!("{:?}", c.enhancement),
-                "edition": format!("{:?}", c.edition),
-                "seal": format!("{:?}", c.seal),
-                "debuffed": c.debuffed,
-                "extra_chips": c.extra_chips,
-                "selected": gs.selected_indices.contains(&hand_idx),
-            })
+            // The Fish, The Wheel, The House and The Mark deal cards face down. Their whole
+            // effect is hidden information, so a face-down card reports no identity — it can
+            // still be selected and played by hand_index.
+            if c.face_down {
+                serde_json::json!({
+                    "hand_index": hand_idx,
+                    "id": c.id,
+                    "face_down": true,
+                    "rank": Value::Null,
+                    "suit": Value::Null,
+                    "enhancement": Value::Null,
+                    "edition": Value::Null,
+                    "seal": Value::Null,
+                    "debuffed": c.debuffed,
+                    "extra_chips": Value::Null,
+                    "selected": gs.selected_indices.contains(&hand_idx),
+                })
+            } else {
+                serde_json::json!({
+                    "hand_index": hand_idx,
+                    "id": c.id,
+                    "face_down": false,
+                    "rank": format!("{:?}", c.rank),
+                    "suit": format!("{:?}", c.suit),
+                    "enhancement": format!("{:?}", c.enhancement),
+                    "edition": format!("{:?}", c.edition),
+                    "seal": format!("{:?}", c.seal),
+                    "debuffed": c.debuffed,
+                    "extra_chips": c.extra_chips,
+                    "selected": gs.selected_indices.contains(&hand_idx),
+                })
+            }
         })
         .collect();
 
