@@ -2023,3 +2023,82 @@ fn test_matador_pays_nothing_when_the_blind_is_disabled() {
         0
     );
 }
+
+// =========================================================
+// Boss selection: min-ante gating, showdown antes, least-used cycling
+// =========================================================
+
+fn boss_at_ante(ante: u32, seed: &str) -> BossBlind {
+    let mut gs = GameState::new(DeckType::Red, Stake::White, Some(seed.to_string()));
+    gs.ante = ante;
+    gs.pick_boss_blind().unwrap()
+}
+
+#[test]
+fn test_bosses_respect_their_minimum_ante() {
+    for seed in 0..60 {
+        let b = boss_at_ante(1, &format!("MIN{}", seed));
+        assert!(
+            b.min_ante() <= 1,
+            "{:?} has min ante {} but appeared at ante 1",
+            b,
+            b.min_ante()
+        );
+    }
+}
+
+#[test]
+fn test_showdown_bosses_only_appear_on_multiples_of_the_win_ante() {
+    for ante in [1u32, 2, 3, 5, 7, 9, 10, 15] {
+        for seed in 0..12 {
+            let b = boss_at_ante(ante, &format!("SD{}_{}", ante, seed));
+            assert!(!b.is_showdown(), "showdown {:?} appeared at ante {}", b, ante);
+        }
+    }
+    for ante in [8u32, 16, 24] {
+        for seed in 0..12 {
+            let b = boss_at_ante(ante, &format!("SD{}_{}", ante, seed));
+            assert!(b.is_showdown(), "ante {} should be a showdown, got {:?}", ante, b);
+        }
+    }
+}
+
+#[test]
+fn test_high_ante_unlocks_the_late_bosses() {
+    let mut seen = std::collections::HashSet::new();
+    for seed in 0..400 {
+        seen.insert(boss_at_ante(7, &format!("HI{}", seed)));
+    }
+    assert!(seen.contains(&BossBlind::TheOx), "The Ox (min 6) should be reachable at ante 7");
+    assert!(seen.contains(&BossBlind::TheSerpent), "The Serpent (min 5) should be reachable");
+}
+
+/// Balatro draws from the least-used eligible bosses, so a run cycles rather than repeating.
+#[test]
+fn test_boss_selection_cycles_before_repeating() {
+    let mut gs = GameState::new(DeckType::Red, Stake::White, Some("CYCLE".to_string()));
+    gs.bosses_used.clear();
+    gs.ante = 1;
+    let eligible = BossBlind::ALL.iter().filter(|b| !b.is_showdown() && b.min_ante() <= 1).count();
+
+    let mut picks = Vec::new();
+    for _ in 0..eligible {
+        picks.push(gs.pick_boss_blind().unwrap());
+    }
+    let distinct: std::collections::HashSet<_> = picks.iter().copied().collect();
+    assert_eq!(
+        distinct.len(),
+        eligible,
+        "the whole ante-1 pool should be used once before any repeat"
+    );
+}
+
+#[test]
+fn test_hieroglyph_shortens_the_run() {
+    let mut gs = GameState::new(DeckType::Red, Stake::White, Some("ANTE".to_string()));
+    assert_eq!(gs.win_ante(), 8);
+    gs.vouchers.push(VoucherKind::Hieroglyph);
+    assert_eq!(gs.win_ante(), 7);
+    gs.vouchers.push(VoucherKind::Petroglyph);
+    assert_eq!(gs.win_ante(), 6);
+}

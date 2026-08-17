@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn test_green_deck_no_interest_on_win() {
-    // Green deck: win_round gives +$1/remaining hand +$1/remaining discard, no interest.
+    // Green deck: win_round gives $2/remaining hand + $1/remaining discard, no interest.
     let mut gs = GameState::new(DeckType::Green, Stake::White, Some("GREEN1".to_string()));
     setup_round(
         &mut gs,
@@ -20,7 +20,7 @@ fn test_green_deck_no_interest_on_win() {
     gs.select_card(0).unwrap();
     gs.play_hand().unwrap();
 
-    let expected_hands_bonus = (hands_left - 1) as i32;
+    let expected_hands_bonus = 2 * (hands_left - 1) as i32;
     let expected_discards_bonus = discards_left as i32;
     let blind_reward = 3i32;
 
@@ -114,4 +114,68 @@ fn test_zodiac_deck_starts_with_three_vouchers() {
     assert!(gs.vouchers.contains(&VoucherKind::TarotMerchant));
     assert!(gs.vouchers.contains(&VoucherKind::PlanetMerchant));
     assert!(gs.vouchers.contains(&VoucherKind::Overstock));
+}
+
+// =========================================================
+// Blind scaling: stake tier and Plasma's ante_scaling
+// =========================================================
+
+fn ante1_small_goal(deck: DeckType, stake: Stake) -> f64 {
+    let gs = GameState::new(deck, stake, Some("SCALING".to_string()));
+    gs.get_blind_chip_goal()
+}
+
+#[test]
+fn test_blind_sizes_scale_with_stake() {
+    // misc_functions.lua:919 — three tables, selected by stake (game.lua:2053, :2056).
+    let white = GameState::new(DeckType::Red, Stake::White, Some("S".to_string()));
+    let green = GameState::new(DeckType::Red, Stake::Green, Some("S".to_string()));
+    let purple = GameState::new(DeckType::Red, Stake::Purple, Some("S".to_string()));
+
+    let goal = |gs: &GameState, ante: u32| {
+        crate::game::get_base_blind_amount_scaled(ante, crate::game::blind_scaling_tier(gs.stake))
+    };
+    assert_eq!(goal(&white, 2), 800);
+    assert_eq!(goal(&green, 2), 900);
+    assert_eq!(goal(&purple, 2), 1000);
+    assert_eq!(goal(&white, 8), 50000);
+    assert_eq!(goal(&green, 8), 100000);
+    assert_eq!(goal(&purple, 8), 200000);
+}
+
+#[test]
+fn test_black_stake_uses_the_green_scaling_tier() {
+    // Tiers are >=, so Black/Blue sit on tier 2 and Orange/Gold on tier 3.
+    assert_eq!(crate::game::blind_scaling_tier(Stake::Black), 2);
+    assert_eq!(crate::game::blind_scaling_tier(Stake::Blue), 2);
+    assert_eq!(crate::game::blind_scaling_tier(Stake::Orange), 3);
+    assert_eq!(crate::game::blind_scaling_tier(Stake::Gold), 3);
+}
+
+#[test]
+fn test_plasma_deck_doubles_the_blind_requirement() {
+    let plain = ante1_small_goal(DeckType::Red, Stake::White);
+    let plasma = ante1_small_goal(DeckType::Plasma, Stake::White);
+    assert_eq!(plasma, plain * 2.0);
+}
+
+// =========================================================
+// Deck starting state
+// =========================================================
+
+#[test]
+fn test_nebula_deck_trades_a_consumable_slot_for_telescope() {
+    let plain = GameState::new(DeckType::Red, Stake::White, Some("N".to_string()));
+    let nebula = GameState::new(DeckType::Nebula, Stake::White, Some("N".to_string()));
+    assert!(nebula.vouchers.contains(&VoucherKind::Telescope));
+    assert_eq!(nebula.consumable_slots, plain.consumable_slots - 1);
+}
+
+#[test]
+fn test_ghost_deck_starts_with_a_hex() {
+    let gs = GameState::new(DeckType::Ghost, Stake::White, Some("G".to_string()));
+    assert_eq!(
+        gs.consumables,
+        vec![crate::card::ConsumableCard::Spectral(SpectralCard::Hex)]
+    );
 }

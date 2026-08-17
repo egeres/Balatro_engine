@@ -92,6 +92,14 @@ pub struct GameState {
     /// enters it (`no_pool_flag` / `yes_pool_flag` in game.lua).
     pub gros_michel_extinct: bool,
 
+    /// How many Ectoplasms have been used. Its hand-size cost escalates by 1 each time
+    /// (`G.GAME.ecto_minus`, card.lua:1495).
+    pub ectoplasm_uses: u32,
+
+    /// How many times each Boss blind has been used this run. Balatro draws from the
+    /// least-used eligible bosses so a run cycles the roster (common_events.lua:2363).
+    pub bosses_used: HashMap<BossBlind, u32>,
+
     /// ThePillar: IDs of cards played in earlier rounds of the current Ante.
     /// Cleared when a new Ante begins. Used to debuff those cards during the Boss blind.
     pub played_card_ids_this_ante: Vec<u64>,
@@ -197,6 +205,8 @@ impl GameState {
             boss_blind_manually_disabled: false,
             round_targets: RoundTargets::default(),
             gros_michel_extinct: false,
+            ectoplasm_uses: 0,
+            bosses_used: HashMap::new(),
             played_card_ids_this_ante: Vec::new(),
         };
 
@@ -276,8 +286,14 @@ impl GameState {
                 self.consumables.push(ConsumableCard::Tarot(TarotCard::TheFool));
             }
             DeckType::Nebula => {
-                // Start with Telescope voucher
+                // Telescope voucher, at the cost of a consumable slot (game.lua:634)
                 self.vouchers.push(VoucherKind::Telescope);
+                self.consumable_slots = self.consumable_slots.saturating_sub(1);
+            }
+            DeckType::Ghost => {
+                // Spectral cards appear in the shop, and the run starts with a Hex
+                // (`spectral_rate = 2, consumables = {'c_hex'}`, game.lua:635)
+                self.consumables.push(ConsumableCard::Spectral(SpectralCard::Hex));
             }
             DeckType::Zodiac => {
                 // Start with Tarot Merchant, Planet Merchant, Overstock vouchers
@@ -349,7 +365,10 @@ impl GameState {
     }
 
     pub fn get_blind_chip_goal(&self) -> f64 {
-        let base = get_base_blind_amount(self.ante);
+        let base = get_base_blind_amount_scaled(self.ante, blind_scaling_tier(self.stake));
+        // Plasma Deck doubles every blind requirement (`ante_scaling = 2`, game.lua:641;
+        // applied in UI_definitions.lua:1548).
+        let ante_scaling = if self.deck_type == DeckType::Plasma { 2.0 } else { 1.0 };
         let mult = match self.current_blind {
             BlindKind::Small => 1.0,
             BlindKind::Big => 1.5,
@@ -361,7 +380,7 @@ impl GameState {
                 }
             }
         };
-        (base as f64) * mult
+        (base as f64) * mult * ante_scaling
     }
 }
 
@@ -426,6 +445,19 @@ impl GameState {
     /// `cost > G.GAME.dollars - G.GAME.bankrupt_at` (button_callbacks.lua:56).
     pub fn can_afford(&self, cost: i32) -> bool {
         cost <= self.money - self.bankrupt_at()
+    }
+
+    /// The ante that ends the run. Hieroglyph and Petroglyph each knock one off
+    /// (`G.GAME.win_ante`, base 8).
+    pub fn win_ante(&self) -> u32 {
+        let mut ante = 8;
+        if self.has_voucher(VoucherKind::Hieroglyph) {
+            ante -= 1;
+        }
+        if self.has_voucher(VoucherKind::Petroglyph) {
+            ante -= 1;
+        }
+        ante
     }
 
     /// Returns `true` if the current Boss blind's ability is disabled.
@@ -514,17 +546,38 @@ pub(crate) fn upgraded_voucher(base: VoucherKind) -> VoucherKind {
     }
 }
 
+/// Blind scaling tier, driven by stake (`game.lua:2053`, `:2056`). Green and above use a steeper
+/// curve, Purple and above steeper still.
+pub fn blind_scaling_tier(stake: Stake) -> u8 {
+    if stake as u8 >= Stake::Purple as u8 {
+        3
+    } else if stake as u8 >= Stake::Green as u8 {
+        2
+    } else {
+        1
+    }
+}
+
 pub fn get_base_blind_amount(ante: u32) -> u64 {
-    let amounts: [u64; 8] = [300, 800, 2000, 5000, 11000, 20000, 35000, 50000];
+    get_base_blind_amount_scaled(ante, 1)
+}
+
+/// `misc_functions.lua:919` — one table per scaling tier, with a shared formula past ante 8.
+pub fn get_base_blind_amount_scaled(ante: u32, scaling: u8) -> u64 {
+    let amounts: [u64; 8] = match scaling {
+        2 => [300, 900, 2600, 8000, 20000, 36000, 60000, 100000],
+        3 => [300, 1000, 3200, 9000, 25000, 60000, 110000, 200000],
+        _ => [300, 800, 2000, 5000, 11000, 20000, 35000, 50000],
+    };
     if ante == 0 {
         return 100;
     }
     if ante <= 8 {
         return amounts[(ante - 1) as usize];
     }
-    // Scale exponentially for ante > 8
+    // Scale exponentially for ante > 8, anchored on the tier's ante-8 value
     let k = 0.75_f64;
-    let a = 50000_f64;
+    let a = amounts[7] as f64;
     let b = 1.6_f64;
     let c = (ante - 8) as f64;
     let d = 1.0 + 0.2 * c;

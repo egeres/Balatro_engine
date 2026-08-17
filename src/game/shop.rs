@@ -527,13 +527,14 @@ impl GameState {
                 // Price discounts on planets — handled in calculate_shop_price
             }
             VoucherKind::SeedMoney => {
-                self.max_interest += 10;
+                // Sets the cap outright rather than adding to it (game.lua:602).
+                self.max_interest = self.max_interest.max(50);
             }
             VoucherKind::MoneyTree => {
-                self.max_interest += 10;
+                self.max_interest = self.max_interest.max(100);
             }
             VoucherKind::Blank => {
-                self.joker_slots += 1;
+                // "Does nothing?" (en-us.lua:2988). It exists only to unlock Antimatter.
             }
             VoucherKind::Antimatter => {
                 self.joker_slots += 1;

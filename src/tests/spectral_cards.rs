@@ -366,3 +366,124 @@ fn test_spectral_card_is_consumed_after_use() {
     gs.use_consumable(0, vec![]).unwrap();
     assert_eq!(gs.consumables.len(), 0, "Spectral should be removed after use");
 }
+
+// =========================================================
+// Editionless targeting and Ectoplasm's escalating cost
+// =========================================================
+
+fn game_with_jokers(jokers: Vec<JokerInstance>) -> GameState {
+    let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    gs.jokers = jokers;
+    gs
+}
+
+fn use_spectral(gs: &mut GameState, s: SpectralCard, targets: Vec<usize>) {
+    gs.consumables.push(crate::card::ConsumableCard::Spectral(s));
+    let idx = gs.consumables.len() - 1;
+    gs.use_consumable(idx, targets).unwrap();
+}
+
+/// Hex/Ectoplasm/Wheel of Fortune all draw from jokers that have no edition (card.lua:4218).
+#[test]
+fn test_ectoplasm_only_targets_editionless_jokers() {
+    let mut poly = joker(0, JokerKind::Joker);
+    poly.edition = Edition::Polychrome;
+    let mut gs = game_with_jokers(vec![poly, joker(1, JokerKind::Fibonacci)]);
+
+    use_spectral(&mut gs, SpectralCard::Ectoplasm, vec![]);
+    assert_eq!(gs.jokers[0].edition, Edition::Polychrome, "must not overwrite");
+    assert_eq!(gs.jokers[1].edition, Edition::Negative);
+}
+
+#[test]
+fn test_ectoplasm_hand_size_cost_escalates() {
+    let mut gs = game_with_jokers(vec![
+        joker(0, JokerKind::Joker),
+        joker(1, JokerKind::Fibonacci),
+        joker(2, JokerKind::Scholar),
+    ]);
+    let base = gs.hand_size;
+
+    use_spectral(&mut gs, SpectralCard::Ectoplasm, vec![]);
+    assert_eq!(gs.hand_size, base - 1);
+    use_spectral(&mut gs, SpectralCard::Ectoplasm, vec![]);
+    assert_eq!(gs.hand_size, base - 3, "second use costs 2");
+    use_spectral(&mut gs, SpectralCard::Ectoplasm, vec![]);
+    assert_eq!(gs.hand_size, base - 6, "third use costs 3");
+}
+
+#[test]
+fn test_hex_only_targets_editionless_jokers() {
+    let mut foil = joker(0, JokerKind::Joker);
+    foil.edition = Edition::Foil;
+    let mut gs = game_with_jokers(vec![foil, joker(1, JokerKind::Fibonacci)]);
+
+    use_spectral(&mut gs, SpectralCard::Hex, vec![]);
+    assert_eq!(gs.jokers.len(), 1);
+    assert_eq!(gs.jokers[0].kind, JokerKind::Fibonacci);
+    assert_eq!(gs.jokers[0].edition, Edition::Polychrome);
+}
+
+#[test]
+fn test_wheel_of_fortune_never_overwrites_an_existing_edition() {
+    for seed in 0..40 {
+        let mut poly = joker(0, JokerKind::Joker);
+        poly.edition = Edition::Polychrome;
+        let mut gs = make_game();
+        gs.rng = crate::rng::Rng::new(&format!("WHEEL{}", seed));
+        setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+        gs.jokers = vec![poly];
+
+        gs.consumables
+            .push(crate::card::ConsumableCard::Tarot(TarotCard::TheWheelOfFortune));
+        gs.use_consumable(0, vec![]).unwrap();
+        assert_eq!(gs.jokers[0].edition, Edition::Polychrome);
+    }
+}
+
+// =========================================================
+// Self-consuming jokers are destroyed, not just switched off
+// =========================================================
+
+#[test]
+fn test_ice_cream_is_removed_when_it_melts() {
+    let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    let mut ic = joker(0, JokerKind::IceCream);
+    ic.set_counter_i64("chips", 5);
+    gs.jokers = vec![ic];
+    gs.score_goal = f64::MAX;
+
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    assert!(gs.jokers.is_empty(), "Ice Cream should free its joker slot");
+}
+
+#[test]
+fn test_popcorn_is_removed_when_it_runs_out() {
+    let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    let mut pc = joker(0, JokerKind::Popcorn);
+    pc.set_counter_i64("mult", 4);
+    gs.jokers = vec![pc];
+    gs.score_goal = 1.0; // win the round so end-of-round processing runs
+
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    assert!(gs.jokers.is_empty(), "Popcorn should free its joker slot");
+}
+
+#[test]
+fn test_seltzer_is_removed_when_it_runs_out() {
+    let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    let mut sz = joker(0, JokerKind::Seltzer);
+    sz.set_counter_i64("hands", 1);
+    gs.jokers = vec![sz];
+    gs.score_goal = f64::MAX;
+
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    assert!(gs.jokers.is_empty(), "Seltzer should free its joker slot");
+}

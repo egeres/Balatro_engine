@@ -55,6 +55,22 @@ impl GameState {
         Ok(())
     }
 
+    /// A random joker with no edition — the pool The Wheel of Fortune, Ectoplasm and Hex all draw
+    /// from (`eligible_strength_jokers` / `eligible_editionless_jokers`, card.lua:4209, :4218).
+    fn random_editionless_joker(&mut self) -> Option<usize> {
+        let candidates: Vec<usize> = self
+            .jokers
+            .iter()
+            .enumerate()
+            .filter(|(_, j)| j.edition == Edition::None)
+            .map(|(i, _)| i)
+            .collect();
+        if candidates.is_empty() {
+            return None;
+        }
+        Some(candidates[self.rng.range_usize(0, candidates.len() - 1)])
+    }
+
     fn apply_planet(&mut self, planet: PlanetCard) {
         let hand_type = planet.hand_type();
         if let Some(level) = self.hand_levels.get_mut(&hand_type) {
@@ -241,16 +257,18 @@ impl GameState {
                 }
             }
             TarotCard::TheWheelOfFortune => {
-                // 1/4 chance to add random edition to random joker (1/2 with OopsAll6s)
+                // 1/4 to add a random edition to a joker that has none (card.lua:4209);
+                // 1/2 with OopsAll6s.
                 let wheel_oops = if self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active) { 2.0_f64 } else { 1.0_f64 };
-                if !self.jokers.is_empty() && self.rng.next_bool_prob((0.25 * wheel_oops).min(1.0)) {
-                    let idx = self.rng.range_usize(0, self.jokers.len() - 1);
-                    // Probabilities: 50% Foil, 35% Holographic, 15% Polychrome
-                    let ed_roll = self.rng.next_f64();
-                    let edition = if ed_roll < 0.50 { Edition::Foil }
-                        else if ed_roll < 0.85 { Edition::Holographic }
-                        else { Edition::Polychrome };
-                    self.jokers[idx].edition = edition;
+                if self.rng.next_bool_prob((0.25 * wheel_oops).min(1.0)) {
+                    if let Some(idx) = self.random_editionless_joker() {
+                        // Probabilities: 50% Foil, 35% Holographic, 15% Polychrome
+                        let ed_roll = self.rng.next_f64();
+                        let edition = if ed_roll < 0.50 { Edition::Foil }
+                            else if ed_roll < 0.85 { Edition::Holographic }
+                            else { Edition::Polychrome };
+                        self.jokers[idx].edition = edition;
+                    }
                 }
             }
             TarotCard::Judgement => {
@@ -336,12 +354,13 @@ impl GameState {
                 }
             }
             SpectralCard::Ectoplasm => {
-                // Add Negative edition to random joker, -1 hand size
-                if !self.jokers.is_empty() {
-                    let idx = self.rng.range_usize(0, self.jokers.len() - 1);
+                // Negative on a random *editionless* joker (card.lua:4218), and a hand-size cost
+                // that grows with every use: -1, then -2, then -3 (card.lua:1495).
+                if let Some(idx) = self.random_editionless_joker() {
                     self.jokers[idx].edition = Edition::Negative;
                 }
-                self.hand_size = self.hand_size.saturating_sub(1);
+                self.hand_size = self.hand_size.saturating_sub(self.ectoplasm_uses + 1);
+                self.ectoplasm_uses += 1;
             }
             SpectralCard::Aura => {
                 // Add Foil/Holo/Poly to 1 selected card
@@ -358,9 +377,9 @@ impl GameState {
                 }
             }
             SpectralCard::Hex => {
-                // Add Polychrome to random joker, destroy the rest (eternal jokers are spared)
-                if !self.jokers.is_empty() {
-                    let idx = self.rng.range_usize(0, self.jokers.len() - 1);
+                // Polychrome on a random *editionless* joker, destroying the rest
+                // (eternal jokers are spared).
+                if let Some(idx) = self.random_editionless_joker() {
                     let chosen_id = self.jokers[idx].id;
                     self.jokers[idx].edition = Edition::Polychrome;
                     self.jokers.retain(|j| j.id == chosen_id || j.eternal);

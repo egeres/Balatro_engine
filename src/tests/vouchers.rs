@@ -74,19 +74,15 @@ fn test_recyclomancy_increases_max_discards() {
 // =========================================================
 
 #[test]
-fn test_seed_money_increases_max_interest() {
-    let gs_before = make_game();
-    let base = gs_before.max_interest;
+fn test_seed_money_raises_the_interest_cap_to_50() {
     let gs = apply_voucher_to_game(VoucherKind::SeedMoney);
-    assert_eq!(gs.max_interest, base + 10);
+    assert_eq!(gs.max_interest, 50);
 }
 
 #[test]
-fn test_money_tree_increases_max_interest() {
-    let gs_before = make_game();
-    let base = gs_before.max_interest;
+fn test_money_tree_raises_the_interest_cap_to_100() {
     let gs = apply_voucher_to_game(VoucherKind::MoneyTree);
-    assert_eq!(gs.max_interest, base + 10);
+    assert_eq!(gs.max_interest, 100);
 }
 
 // =========================================================
@@ -94,11 +90,11 @@ fn test_money_tree_increases_max_interest() {
 // =========================================================
 
 #[test]
-fn test_blank_increases_joker_slots() {
+fn test_blank_does_nothing() {
     let gs_before = make_game();
     let base = gs_before.joker_slots;
     let gs = apply_voucher_to_game(VoucherKind::Blank);
-    assert_eq!(gs.joker_slots, base + 1);
+    assert_eq!(gs.joker_slots, base, "Blank is a pure unlock stepping stone");
 }
 
 #[test]

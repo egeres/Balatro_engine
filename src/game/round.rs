@@ -741,19 +741,21 @@ impl GameState {
     }
 
     fn post_play_joker_updates(&mut self, result: &ScoreResult, played: &[CardInstance], hand: &[CardInstance]) {
+        // Jokers that consume themselves. They are removed outright rather than deactivated, so
+        // they stop occupying a slot and stop counting towards Abstract Joker / Joker Stencil.
+        let mut expired_jokers: Vec<u64> = Vec::new();
         let hand_type = result.hand_type;
         let oops_mult = if self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active) { 2.0_f64 } else { 1.0_f64 };
         for i in 0..self.jokers.len() {
             let kind = self.jokers[i].kind;
             match kind {
                                 JokerKind::IceCream => {
-                    // -5 chips per hand played
+                    // -5 chips per hand played; melts away entirely at 0
                     let cur = self.jokers[i].get_counter_i64("chips");
                     let new = (cur - 5).max(0);
                     self.jokers[i].set_counter_i64("chips", new);
                     if new == 0 {
-                        // Destroy joker
-                        self.jokers[i].active = false;
+                        expired_jokers.push(self.jokers[i].id);
                     }
                 }
                                                                                                 JokerKind::Hologram => {
@@ -793,8 +795,8 @@ impl GameState {
                     let cur = self.jokers[i].get_counter_i64("hands");
                     let new_val = cur - 1;
                     self.jokers[i].set_counter_i64("hands", new_val);
-                    if new_val <= 0 && !self.jokers[i].eternal {
-                        self.jokers[i].active = false;
+                    if new_val <= 0 {
+                        expired_jokers.push(self.jokers[i].id);
                     }
                 }
                                 JokerKind::Seance => {
@@ -880,6 +882,10 @@ impl GameState {
                 }
                                                 _ => {}
             }
+        }
+
+        if !expired_jokers.is_empty() {
+            self.jokers.retain(|j| !expired_jokers.contains(&j.id));
         }
     }
 
@@ -1141,15 +1147,19 @@ impl GameState {
         }
 
         // Popcorn: -4 mult per round (not per hand); destroyed when mult reaches 0
+        let mut eaten: Vec<u64> = Vec::new();
         for i in 0..self.jokers.len() {
             if self.jokers[i].kind == JokerKind::Popcorn && self.jokers[i].active {
                 let cur = self.jokers[i].get_counter_i64("mult");
                 let new = (cur - 4).max(0);
                 self.jokers[i].set_counter_i64("mult", new);
-                if new == 0 && !self.jokers[i].eternal {
-                    self.jokers[i].active = false;
+                if new == 0 {
+                    eaten.push(self.jokers[i].id);
                 }
             }
+        }
+        if !eaten.is_empty() {
+            self.jokers.retain(|j| !eaten.contains(&j.id));
         }
 
         // InvisibleJoker: increment round counter each round (duplication happens on sell, not here)
@@ -1165,8 +1175,9 @@ impl GameState {
         let to_the_moon_count = self.jokers.iter().filter(|j| j.kind == JokerKind::ToTheMoon && j.active).count();
 
         if self.deck_type == DeckType::Green {
-            // Green deck: +$1 per remaining hand, +$1 per remaining discard; no interest
-            self.money += self.hands_remaining as i32;
+            // Green deck: $2 per remaining hand, $1 per remaining discard, and no interest
+            // (`extra_hand_bonus = 2, extra_discard_bonus = 1, no_interest = true`, game.lua:631)
+            self.money += 2 * self.hands_remaining as i32;
             self.money += self.discards_remaining as i32;
         } else {
             let interest_amount = 1 + to_the_moon_count as i32;
@@ -1231,7 +1242,7 @@ impl GameState {
         }
 
         // Check if ante 8 boss beaten = game won
-        if self.ante >= 8 && matches!(self.current_blind, BlindKind::Boss) {
+        if self.ante >= self.win_ante() && matches!(self.current_blind, BlindKind::Boss) {
             self.history.push(HistoryEvent {
                 ante: self.ante,
                 round: self.round,

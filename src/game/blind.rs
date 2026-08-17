@@ -4,49 +4,45 @@ use std::collections::HashMap;
 use super::{GameState, GameStateKind, BlindKind, BalatroError, HistoryEvent};
 
 impl GameState {
+    /// Pick the Boss blind for the current ante (`common_events.lua:2338`).
+    ///
+    /// Regular bosses are gated on their `min` ante and excluded on showdown antes; showdown
+    /// bosses appear only when `ante % win_ante == 0` (and never at ante 1). Among the eligible
+    /// ones Balatro draws from those used the fewest times so far, so a run cycles through the
+    /// roster instead of repeating.
     pub fn pick_boss_blind(&mut self) -> Option<BossBlind> {
-        let all_bosses = vec![
-            BossBlind::TheOx,
-            BossBlind::TheHook,
-            BossBlind::TheMouth,
-            BossBlind::TheFish,
-            BossBlind::TheClub,
-            BossBlind::TheManacle,
-            BossBlind::TheTooth,
-            BossBlind::TheWall,
-            BossBlind::TheHouse,
-            BossBlind::TheMark,
-            BossBlind::TheWheel,
-            BossBlind::TheArm,
-            BossBlind::ThePsychic,
-            BossBlind::TheGoad,
-            BossBlind::TheWater,
-            BossBlind::TheEye,
-            BossBlind::ThePlant,
-            BossBlind::TheNeedle,
-            BossBlind::TheHead,
-            BossBlind::TheWindow,
-            BossBlind::TheSerpent,
-            BossBlind::ThePillar,
-            BossBlind::TheFlint,
-        ];
+        let ante = self.ante.max(1);
+        let win_ante = self.win_ante();
+        let is_showdown_ante = ante % win_ante == 0 && ante >= 2;
 
-        // Special showdown bosses for ante 8+
-        let ante = self.ante;
-        if ante >= 8 {
-            let showdowns = vec![
-                BossBlind::CeruleanBell,
-                BossBlind::VerdantLeaf,
-                BossBlind::VioletVessel,
-                BossBlind::AmberAcorn,
-                BossBlind::CrimsonHeart,
-            ];
-            let idx = self.rng.range_usize(0, showdowns.len() - 1);
-            return Some(showdowns[idx]);
+        let eligible: Vec<BossBlind> = BossBlind::ALL
+            .iter()
+            .copied()
+            .filter(|b| {
+                if b.is_showdown() {
+                    is_showdown_ante
+                } else {
+                    b.min_ante() <= ante && !is_showdown_ante
+                }
+            })
+            .collect();
+        if eligible.is_empty() {
+            return None;
         }
 
-        let idx = self.rng.range_usize(0, all_bosses.len() - 1);
-        Some(all_bosses[idx])
+        let min_use = eligible
+            .iter()
+            .map(|b| self.bosses_used.get(b).copied().unwrap_or(0))
+            .min()
+            .unwrap_or(0);
+        let pool: Vec<BossBlind> = eligible
+            .into_iter()
+            .filter(|b| self.bosses_used.get(b).copied().unwrap_or(0) == min_use)
+            .collect();
+
+        let pick = pool[self.rng.range_usize(0, pool.len() - 1)];
+        *self.bosses_used.entry(pick).or_insert(0) += 1;
+        Some(pick)
     }
 
     // =========================================================

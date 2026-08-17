@@ -522,6 +522,64 @@ impl BossBlind {
         }
     }
 
+    /// Every Boss blind, so pool building cannot silently drop one.
+    pub const ALL: [BossBlind; 28] = [
+        BossBlind::TheOx, BossBlind::TheHook, BossBlind::TheMouth, BossBlind::TheFish,
+        BossBlind::TheClub, BossBlind::TheManacle, BossBlind::TheTooth, BossBlind::TheWall,
+        BossBlind::TheHouse, BossBlind::TheMark, BossBlind::CeruleanBell, BossBlind::TheWheel,
+        BossBlind::TheArm, BossBlind::ThePsychic, BossBlind::TheGoad, BossBlind::TheWater,
+        BossBlind::TheEye, BossBlind::ThePlant, BossBlind::TheNeedle, BossBlind::TheHead,
+        BossBlind::VerdantLeaf, BossBlind::VioletVessel, BossBlind::TheWindow,
+        BossBlind::TheSerpent, BossBlind::ThePillar, BossBlind::TheFlint, BossBlind::AmberAcorn,
+        BossBlind::CrimsonHeart,
+    ];
+
+    /// Earliest ante this boss can appear at (`boss = {min = N}` in game.lua:266-290).
+    /// Showdown bosses report 0 — they are gated on `ante % 8 == 0` instead.
+    pub fn min_ante(&self) -> u32 {
+        match self {
+            BossBlind::TheHook
+            | BossBlind::TheClub
+            | BossBlind::TheManacle
+            | BossBlind::ThePsychic
+            | BossBlind::TheGoad
+            | BossBlind::TheHead
+            | BossBlind::TheWindow
+            | BossBlind::ThePillar => 1,
+            BossBlind::TheMouth
+            | BossBlind::TheFish
+            | BossBlind::TheWall
+            | BossBlind::TheHouse
+            | BossBlind::TheMark
+            | BossBlind::TheWheel
+            | BossBlind::TheArm
+            | BossBlind::TheWater
+            | BossBlind::TheNeedle
+            | BossBlind::TheFlint => 2,
+            BossBlind::TheTooth | BossBlind::TheEye => 3,
+            BossBlind::ThePlant => 4,
+            BossBlind::TheSerpent => 5,
+            BossBlind::TheOx => 6,
+            BossBlind::CeruleanBell
+            | BossBlind::VerdantLeaf
+            | BossBlind::VioletVessel
+            | BossBlind::AmberAcorn
+            | BossBlind::CrimsonHeart => 0,
+        }
+    }
+
+    /// Showdown bosses appear only on the winning ante and its multiples.
+    pub fn is_showdown(&self) -> bool {
+        matches!(
+            self,
+            BossBlind::CeruleanBell
+                | BossBlind::VerdantLeaf
+                | BossBlind::VioletVessel
+                | BossBlind::AmberAcorn
+                | BossBlind::CrimsonHeart
+        )
+    }
+
     pub fn chip_multiplier(&self) -> f64 {
         match self {
             BossBlind::TheWall => 4.0,
