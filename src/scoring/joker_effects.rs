@@ -266,9 +266,20 @@ pub(crate) fn calc_joker_main(
         | JokerKind::FlashCard
         | JokerKind::CeremonialDagger
         | JokerKind::Popcorn
-        | JokerKind::Swashbuckler
         | JokerKind::RedCard => {
             effect.mult += joker.get_counter_i64("mult");
+        }
+
+        // Derived from the current board rather than a stored counter (card.lua:4240 recomputes
+        // ability.mult on every update): Mult equal to the summed sell value of every other joker.
+        JokerKind::Swashbuckler => {
+            effect.mult += ctx
+                .jokers
+                .iter()
+                .enumerate()
+                .filter(|(idx, _)| *idx != joker_idx)
+                .map(|(_, j)| j.sell_value() as i64)
+                .sum::<i64>();
         }
 
         // ── Counter-based: chips ──────────────────────────────────────────

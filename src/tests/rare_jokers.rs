@@ -57,13 +57,53 @@ fn test_popcorn_applies_counter_mult() {
 }
 
 #[test]
-fn test_swashbuckler_applies_counter_mult() {
+fn test_swashbuckler_alone_adds_no_mult() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
-    let mut j = joker(0, JokerKind::Swashbuckler);
-    j.set_counter_i64("mult", 10);
-    let r = score(&played, &played, &[j]);
-    // HC: 16*(1+10)=176
-    assert_eq!(r.final_score as i64, 176);
+    let r = score(&played, &played, &[joker(0, JokerKind::Swashbuckler)]);
+    // No other jokers → +0 mult. HC: 16 * 1 = 16
+    assert_eq!(r.final_score as i64, 16);
+}
+
+#[test]
+fn test_swashbuckler_adds_summed_sell_value_of_other_jokers() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    // Juggler costs 4 → sell 2; Drunkard costs 4 → sell 2. Neither scores anything itself.
+    let r = score(
+        &played,
+        &played,
+        &[
+            joker(0, JokerKind::Swashbuckler),
+            joker(1, JokerKind::Juggler),
+            joker(2, JokerKind::Drunkard),
+        ],
+    );
+    // HC mult 1 + 4 = 5, chips 16 → 80
+    assert_eq!(r.final_mult as i64, 5);
+    assert_eq!(r.final_score as i64, 80);
+}
+
+#[test]
+fn test_swashbuckler_tracks_the_board_live() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    // Joker costs 2 → sell value max(2/2, 1) = 1
+    let one = score(
+        &played,
+        &played,
+        &[joker(0, JokerKind::Swashbuckler), joker(1, JokerKind::Joker)],
+    );
+    let two = score(
+        &played,
+        &played,
+        &[
+            joker(0, JokerKind::Swashbuckler),
+            joker(1, JokerKind::Joker),
+            joker(2, JokerKind::Juggler), // cost 4 → sell 2
+        ],
+    );
+    // Swashbuckler's contribution grows with the board: +1 vs +1+2.
+    // (The plain Joker also adds a flat +4 mult in both cases.)
+    assert_eq!(one.final_mult as i64, 1 + 1 + 4);
+    assert_eq!(two.final_mult as i64, 1 + 3 + 4);
 }
 
 #[test]
