@@ -414,14 +414,33 @@ impl GameState {
                 .any(|j| j.kind == JokerKind::Chicot && j.active)
     }
 
-    pub(crate) fn notify_face_card_destroyed(&mut self, card: &CardInstance) {
-        if !card.rank.is_face() {
+    /// Notify jokers that a playing card has been destroyed, by any means (Glass shatter, a
+    /// spectral, a joker, The Hanged Man, …). Call this *before* `destroy_deck_card`.
+    ///
+    /// - Canio gains +1 Xmult per destroyed face card (`card.lua:2673`).
+    /// - Glass Joker gains +0.75 Xmult per destroyed Glass card. Balatro keys this off the
+    ///   `shattered` flag, which `Card:shatter()` sets for every Glass card that is removed
+    ///   (`state_events.lua:988`, `:413`), so "destroyed Glass card" is the right rule.
+    pub(crate) fn notify_card_destroyed(&mut self, card: &CardInstance) {
+        let is_face = card.rank.is_face();
+        let is_glass = card.enhancement == Enhancement::Glass;
+        if !is_face && !is_glass {
             return;
         }
         for j in self.jokers.iter_mut() {
-            if j.kind == JokerKind::Canio && j.active {
-                let cur = j.get_counter_f64("x_mult");
-                j.set_counter_f64("x_mult", cur + 1.0);
+            if !j.active {
+                continue;
+            }
+            match j.kind {
+                JokerKind::Canio if is_face => {
+                    let cur = j.get_counter_f64("x_mult");
+                    j.set_counter_f64("x_mult", cur + 1.0);
+                }
+                JokerKind::GlassJoker if is_glass => {
+                    let cur = j.get_counter_f64("x_mult");
+                    j.set_counter_f64("x_mult", cur + 0.75);
+                }
+                _ => {}
             }
         }
     }

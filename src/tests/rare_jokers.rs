@@ -243,3 +243,57 @@ fn test_canio_applies_counter_x_mult() {
     let r = score(&played, &played, &[j]);
     assert_eq!(r.final_score as i64, 32);
 }
+
+// =========================================================
+// Glass Joker: gains X0.75 per destroyed Glass card
+// =========================================================
+
+/// Destroy glass cards deterministically with The Hanged Man and check the counter grows.
+fn destroy_with_hanged_man(deck_cards: Vec<CardInstance>, targets: Vec<usize>) -> GameState {
+    let mut gs = make_game();
+    setup_round(&mut gs, deck_cards, 3);
+    gs.jokers.push(joker(0, JokerKind::GlassJoker));
+    gs.consumables
+        .push(crate::card::ConsumableCard::Tarot(TarotCard::TheHangedMan));
+    gs.use_consumable(0, targets).unwrap();
+    gs
+}
+
+fn glass(id: u64, rank: Rank, suit: Suit) -> CardInstance {
+    let mut c = card(id, rank, suit);
+    c.enhancement = Enhancement::Glass;
+    c
+}
+
+#[test]
+fn test_glass_joker_gains_x_mult_when_a_glass_card_is_destroyed() {
+    let deck = vec![
+        glass(0, Rank::Ace, Suit::Spades),
+        card(1, Rank::Two, Suit::Hearts),
+        card(2, Rank::Three, Suit::Clubs),
+    ];
+    let gs = destroy_with_hanged_man(deck, vec![0]);
+    assert_eq!(gs.jokers[0].get_counter_f64("x_mult"), 1.75);
+}
+
+#[test]
+fn test_glass_joker_stacks_per_destroyed_glass_card() {
+    let deck = vec![
+        glass(0, Rank::Ace, Suit::Spades),
+        glass(1, Rank::Two, Suit::Hearts),
+        card(2, Rank::Three, Suit::Clubs),
+    ];
+    let gs = destroy_with_hanged_man(deck, vec![0, 1]);
+    assert_eq!(gs.jokers[0].get_counter_f64("x_mult"), 2.5);
+}
+
+#[test]
+fn test_glass_joker_ignores_destroyed_non_glass_cards() {
+    let deck = vec![
+        card(0, Rank::Ace, Suit::Spades),
+        card(1, Rank::Two, Suit::Hearts),
+        card(2, Rank::Three, Suit::Clubs),
+    ];
+    let gs = destroy_with_hanged_man(deck, vec![0, 1]);
+    assert_eq!(gs.jokers[0].get_counter_f64("x_mult"), 1.0);
+}

@@ -404,14 +404,17 @@ impl GameState {
         }
         self.selected_indices.clear();
 
-        // Process glass cards: chance to destroy
-        for card in &played_cards {
-            if card.enhancement == Enhancement::Glass {
+        // Process glass cards: chance to destroy.
+        // Only *scoring*, non-debuffed glass cards can break (state_events.lua:961).
+        for &sci in &result.scoring_card_indices {
+            let card = &played_cards[sci];
+            if card.enhancement == Enhancement::Glass && !card.debuffed {
                 // 1/4 chance to break (1/2 with OopsAll6s)
                 if self.rng.next_bool_prob((0.25 * oops_mult).min(1.0)) {
+                    // Notify jokers first — Glass Joker and Canio read the card before it goes.
+                    self.notify_card_destroyed(card);
                     // Remove card from deck (destroy_deck_card remaps all index collections)
                     self.destroy_deck_card(card.id);
-                    self.notify_face_card_destroyed(card);
                     self.history.push(HistoryEvent {
                         ante: self.ante,
                         round: self.round,

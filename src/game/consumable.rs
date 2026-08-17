@@ -81,7 +81,7 @@ impl GameState {
                         let card_idx = self.hand.remove(hi);
                         let dead_card = self.deck[card_idx].clone();
                         let dead_id = dead_card.id;
-                        self.notify_face_card_destroyed(&dead_card);
+                        self.notify_card_destroyed(&dead_card);
                         self.destroy_deck_card(dead_id);
                     }
                 }
@@ -304,7 +304,7 @@ impl GameState {
                     let card_idx = self.hand.remove(idx);
                     let dead_card = self.deck[card_idx].clone();
                     let card_id = dead_card.id;
-                    self.notify_face_card_destroyed(&dead_card);
+                    self.notify_card_destroyed(&dead_card);
                     self.destroy_deck_card(card_id);
                     // Add 3 enhanced face cards
                     let faces = [Rank::Jack, Rank::Queen, Rank::King];
@@ -373,7 +373,7 @@ impl GameState {
                     // Notify Canio of any face cards being destroyed
                     for id in &to_remove_ids {
                         if let Some(card) = self.deck.iter().find(|c| c.id == *id).cloned() {
-                            self.notify_face_card_destroyed(&card);
+                            self.notify_card_destroyed(&card);
                         }
                     }
                     // Remove from hand (descending order to keep indices valid)
@@ -437,7 +437,7 @@ impl GameState {
                     let card_idx = self.hand.remove(idx);
                     let dead_card = self.deck[card_idx].clone();
                     let card_id = dead_card.id;
-                    self.notify_face_card_destroyed(&dead_card);
+                    self.notify_card_destroyed(&dead_card);
                     self.destroy_deck_card(card_id);
                     let suits = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds];
                     let enhancements = [
@@ -465,7 +465,7 @@ impl GameState {
                     let card_idx = self.hand.remove(idx);
                     let dead_card = self.deck[card_idx].clone();
                     let card_id = dead_card.id;
-                    self.notify_face_card_destroyed(&dead_card);
+                    self.notify_card_destroyed(&dead_card);
                     self.destroy_deck_card(card_id);
                     let number_ranks = [
                         Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six,
