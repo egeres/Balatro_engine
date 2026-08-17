@@ -424,3 +424,72 @@ fn test_gros_michel_and_cavendish_swap_places_on_extinction() {
     assert!(!gs.joker_in_pool(JokerKind::GrosMichel));
     assert!(gs.joker_in_pool(JokerKind::Cavendish));
 }
+
+// =========================================================
+// Showman: lifts the no-duplicates rule
+// =========================================================
+
+#[test]
+fn test_a_held_joker_is_excluded_from_the_pool() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(0, JokerKind::Fibonacci));
+    assert!(!gs.joker_in_pool(JokerKind::Fibonacci));
+    assert!(gs.joker_in_pool(JokerKind::Scholar));
+}
+
+#[test]
+fn test_showman_puts_held_jokers_back_in_the_pool() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(0, JokerKind::Fibonacci));
+    gs.jokers.push(joker(1, JokerKind::Showman));
+    assert!(gs.joker_in_pool(JokerKind::Fibonacci));
+    assert!(gs.joker_in_pool(JokerKind::Showman));
+}
+
+#[test]
+fn test_a_shop_offer_blocks_a_second_copy() {
+    let mut gs = make_game();
+    gs.state = GameStateKind::Shop;
+    gs.generate_shop();
+    let offered: Vec<JokerKind> = gs
+        .shop_offers
+        .iter()
+        .filter_map(|o| match &o.kind {
+            crate::card::ShopItem::Joker(j) => Some(j.kind),
+            _ => None,
+        })
+        .collect();
+    assert!(offered.len() >= 2);
+    for k in &offered {
+        assert!(!gs.joker_in_pool(*k), "{:?} is on the shelf and should be blocked", k);
+    }
+}
+
+#[test]
+fn test_a_shop_never_stocks_the_same_joker_twice() {
+    let mut gs = make_game();
+    gs.state = GameStateKind::Shop;
+    for _ in 0..50 {
+        gs.generate_shop();
+        let offered: Vec<JokerKind> = gs
+            .shop_offers
+            .iter()
+            .filter_map(|o| match &o.kind {
+                crate::card::ShopItem::Joker(j) => Some(j.kind),
+                _ => None,
+            })
+            .collect();
+        let distinct: std::collections::HashSet<_> = offered.iter().copied().collect();
+        assert_eq!(distinct.len(), offered.len(), "duplicate joker in one shop: {:?}", offered);
+    }
+}
+
+#[test]
+fn test_pool_still_yields_jokers_with_showman_and_a_full_board() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(0, JokerKind::Showman));
+    for (i, k) in JokerKind::ALL.iter().take(40).enumerate() {
+        gs.jokers.push(joker(100 + i as u64, *k));
+    }
+    assert!(gs.generate_random_joker().is_some());
+}

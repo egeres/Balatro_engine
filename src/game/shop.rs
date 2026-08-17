@@ -9,19 +9,22 @@ impl GameState {
         let joker_slots = 2 + if self.has_voucher(VoucherKind::Overstock) { 1 } else { 0 }
             + if self.has_voucher(VoucherKind::OverstockPlus) { 1 } else { 0 };
 
-        let mut offers: Vec<ShopOffer> = Vec::new();
+        // Cleared up front and filled in place, so each joker rolled is visible to the pool
+        // filter and cannot be rolled twice in the same shop.
+        self.shop_offers.clear();
 
         // Generate jokers
         for _ in 0..joker_slots {
             if let Some(joker) = self.generate_random_joker() {
                 let price = joker.kind.base_cost();
-                offers.push(ShopOffer {
+                self.shop_offers.push(ShopOffer {
                     kind: ShopItem::Joker(joker),
                     price,
                     sold: false,
                 });
             }
         }
+        let mut offers: Vec<ShopOffer> = std::mem::take(&mut self.shop_offers);
 
         // Booster packs: Arcana + Celestial always; Spectral at Purple stake or Ghost deck
         let mut packs = vec![PackKind::ArcanaPack, PackKind::CelestialPack];
@@ -74,6 +77,14 @@ impl GameState {
         if kind.rarity() == 4 {
             return false;
         }
+        // Balatro flags a joker key as used while a copy of it exists anywhere — owned, sitting in
+        // the shop, or inside an open pack (card.lua:352, cleared at :4745) — and only Showman
+        // lifts the restriction (common_events.lua:1987).
+        if !self.jokers.iter().any(|j| j.kind == JokerKind::Showman && j.active)
+            && self.joker_kind_in_play(kind)
+        {
+            return false;
+        }
         let deck_has = |e: Enhancement| self.deck.iter().any(|c| c.enhancement == e);
         match kind {
             JokerKind::SteelJoker => deck_has(Enhancement::Steel),
@@ -85,6 +96,28 @@ impl GameState {
             JokerKind::Cavendish => self.gros_michel_extinct,
             _ => true,
         }
+    }
+
+    /// Whether a copy of `kind` currently exists: held, offered in the shop, or in an open pack.
+    fn joker_kind_in_play(&self, kind: JokerKind) -> bool {
+        if self.jokers.iter().any(|j| j.kind == kind) {
+            return true;
+        }
+        if self.shop_offers.iter().any(|o| match &o.kind {
+            ShopItem::Joker(j) => j.kind == kind && !o.sold,
+            _ => false,
+        }) {
+            return true;
+        }
+        if let Some(pack) = &self.current_pack {
+            if pack.cards.iter().any(|c| match c {
+                PackCard::Joker(j) => j.kind == kind,
+                _ => false,
+            }) {
+                return true;
+            }
+        }
+        false
     }
 
     pub(crate) fn generate_random_joker(&mut self) -> Option<JokerInstance> {
