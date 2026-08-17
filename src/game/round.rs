@@ -849,6 +849,7 @@ impl GameState {
         }
 
         // Post-discard joker updates
+        let mut eaten_jokers: Vec<u64> = Vec::new();
         for i in 0..self.jokers.len() {
             let kind = self.jokers[i].kind;
             match kind {
@@ -902,8 +903,26 @@ impl GameState {
                         self.jokers[i].set_counter_f64("x_mult", cur + 0.5 * jacks as f64);
                     }
                 }
+                JokerKind::Ramen => {
+                    // Loses X0.01 per discarded card; eaten once it would drop to X1 (card.lua:2757).
+                    // `context.discard` fires once per card (state_events.lua:404), so this is
+                    // per-card, not per-discard-action.
+                    let mut x = self.jokers[i].get_counter_f64("x_mult");
+                    for _ in 0..discarded_cards.len() {
+                        if x - 0.01 <= 1.0 {
+                            eaten_jokers.push(self.jokers[i].id);
+                            break;
+                        }
+                        x -= 0.01;
+                    }
+                    self.jokers[i].set_counter_f64("x_mult", x);
+                }
                 _ => {}
             }
+        }
+
+        if !eaten_jokers.is_empty() {
+            self.jokers.retain(|j| !eaten_jokers.contains(&j.id));
         }
 
         // Blue Seal: create planet when card held in hand at round end

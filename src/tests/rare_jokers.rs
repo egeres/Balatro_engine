@@ -297,3 +297,73 @@ fn test_glass_joker_ignores_destroyed_non_glass_cards() {
     let gs = destroy_with_hanged_man(deck, vec![0, 1]);
     assert_eq!(gs.jokers[0].get_counter_f64("x_mult"), 1.0);
 }
+
+// =========================================================
+// Ramen: X2 Mult, loses X0.01 per discarded card
+// =========================================================
+
+/// Discard `per_discard` cards `times` times and return the resulting state.
+fn ramen_after_discards(start_x: f64, per_discard: usize, times: usize) -> GameState {
+    let mut gs = make_game();
+    let deck: Vec<CardInstance> = (0..40)
+        .map(|i| card(i, Rank::Two, Suit::Spades))
+        .collect();
+    setup_round(&mut gs, deck, 8);
+    let mut j = joker(0, JokerKind::Ramen);
+    j.set_counter_f64("x_mult", start_x);
+    gs.jokers.push(j);
+    gs.discards_remaining = times as u32;
+    for _ in 0..times {
+        for k in 0..per_discard {
+            gs.select_card(k).unwrap();
+        }
+        gs.discard_hand().unwrap();
+    }
+    gs
+}
+
+#[test]
+fn test_ramen_starts_at_x2() {
+    assert_eq!(
+        joker(0, JokerKind::Ramen).get_counter_f64("x_mult"),
+        2.0
+    );
+}
+
+#[test]
+fn test_ramen_loses_x001_per_discarded_card() {
+    let gs = ramen_after_discards(2.0, 5, 1);
+    assert!(
+        (gs.jokers[0].get_counter_f64("x_mult") - 1.95).abs() < 1e-9,
+        "got {}",
+        gs.jokers[0].get_counter_f64("x_mult")
+    );
+}
+
+#[test]
+fn test_ramen_decays_per_card_not_per_discard_action() {
+    let one_big = ramen_after_discards(2.0, 4, 1);
+    let two_small = ramen_after_discards(2.0, 2, 2);
+    assert!(
+        (one_big.jokers[0].get_counter_f64("x_mult")
+            - two_small.jokers[0].get_counter_f64("x_mult"))
+        .abs()
+            < 1e-9
+    );
+}
+
+#[test]
+fn test_ramen_is_eaten_when_it_would_drop_to_x1() {
+    let gs = ramen_after_discards(1.01, 1, 1);
+    assert!(
+        gs.jokers.is_empty(),
+        "Ramen should be destroyed instead of dropping to X1"
+    );
+}
+
+#[test]
+fn test_ramen_survives_at_exactly_above_the_threshold() {
+    let gs = ramen_after_discards(1.02, 1, 1);
+    assert_eq!(gs.jokers.len(), 1);
+    assert!((gs.jokers[0].get_counter_f64("x_mult") - 1.01).abs() < 1e-9);
+}
