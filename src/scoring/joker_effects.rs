@@ -127,6 +127,33 @@ pub(crate) fn count_retriggers(
     retriggers
 }
 
+/// Retriggers for a card *held in hand* (state_events.lua:809-830).
+///
+/// Red Seal and Mime both add a repetition, and each repetition re-runs the card's own effect
+/// (Steel) *and* every joker's held-in-hand effect (Baron, Shoot the Moon, Raised Fist).
+/// Balatro only grants these when the card produced an effect in the first place, which the
+/// caller decides.
+pub(crate) fn count_hand_retriggers(card: &CardInstance, jokers: &[JokerInstance]) -> usize {
+    let mut retriggers = 0usize;
+    if card.seal == Seal::Red {
+        retriggers += 1;
+    }
+    for (j_idx, joker) in jokers.iter().enumerate().filter(|(_, j)| j.active) {
+        let kind = if is_copy_joker(joker.kind) {
+            match copy_target(jokers, j_idx) {
+                Some(t) => jokers[t].kind,
+                None => continue,
+            }
+        } else {
+            joker.kind
+        };
+        if kind == JokerKind::Mime {
+            retriggers += 1;
+        }
+    }
+    retriggers
+}
+
 // ---------------------------------------------------------------------------
 // Phase 2 — per scoring-card effects
 // ---------------------------------------------------------------------------

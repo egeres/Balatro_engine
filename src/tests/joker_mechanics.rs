@@ -320,3 +320,86 @@ fn test_wee_joker_counts_retriggers() {
     // 2 twos x 2 triggers each x 8 = 32
     assert_eq!(gs.jokers[0].get_counter_i64("chips"), 32);
 }
+
+// =========================================================
+// Mime retriggers every held-in-hand effect
+// =========================================================
+
+#[test]
+fn test_mime_retriggers_baron() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let hand = vec![card(1, Rank::King, Suit::Hearts)];
+    let solo = score(&played, &hand, &[joker(0, JokerKind::Baron)]);
+    let mimed = score(
+        &played,
+        &hand,
+        &[joker(0, JokerKind::Baron), joker(1, JokerKind::Mime)],
+    );
+    assert!((solo.final_mult - 1.5).abs() < 1e-9);
+    assert!((mimed.final_mult - 2.25).abs() < 1e-9, "got {}", mimed.final_mult);
+}
+
+#[test]
+fn test_mime_retriggers_shoot_the_moon() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let hand = vec![card(1, Rank::Queen, Suit::Hearts)];
+    let solo = score(&played, &hand, &[joker(0, JokerKind::ShootTheMoon)]);
+    let mimed = score(
+        &played,
+        &hand,
+        &[joker(0, JokerKind::ShootTheMoon), joker(1, JokerKind::Mime)],
+    );
+    // 1 + 13 = 14 solo; 1 + 13 + 13 = 27 with Mime
+    assert_eq!(solo.final_mult as i64, 14);
+    assert_eq!(mimed.final_mult as i64, 27);
+}
+
+#[test]
+fn test_mime_still_retriggers_steel() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let mut steel = card(1, Rank::King, Suit::Hearts);
+    steel.enhancement = Enhancement::Steel;
+    let hand = vec![steel];
+    let mimed = score(&played, &hand, &[joker(0, JokerKind::Mime)]);
+    // 1 * 1.5 * 1.5 = 2.25
+    assert!((mimed.final_mult - 2.25).abs() < 1e-9);
+}
+
+/// A held card that does nothing gains no repetition (state_events.lua:814).
+#[test]
+fn test_mime_does_not_retrigger_an_inert_held_card() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let hand = vec![card(1, Rank::Three, Suit::Hearts)];
+    let r = score(&played, &hand, &[joker(0, JokerKind::Mime)]);
+    assert_eq!(r.final_mult as i64, 1);
+}
+
+/// A Red Seal on a held card retriggers its held-in-hand effects too.
+#[test]
+fn test_red_seal_retriggers_a_held_steel_card() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let mut steel = card(1, Rank::King, Suit::Hearts);
+    steel.enhancement = Enhancement::Steel;
+    steel.seal = Seal::Red;
+    let r = score(&played, &[steel], &[]);
+    assert!((r.final_mult - 2.25).abs() < 1e-9);
+}
+
+/// Blueprint copying Mime adds another repetition.
+#[test]
+fn test_blueprint_copying_mime_adds_a_repetition() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let hand = vec![card(1, Rank::King, Suit::Hearts)];
+    let r = score(
+        &played,
+        &hand,
+        &[
+            joker(0, JokerKind::Baron),
+            joker(1, JokerKind::Blueprint),
+            joker(2, JokerKind::Mime),
+        ],
+    );
+    // Baron fires 3x (base + Mime + Blueprint-as-Mime); Blueprint also copies Mime for the
+    // hand-card phase, which contributes no direct effect. 1.5^3 = 3.375
+    assert!((r.final_mult - 3.375).abs() < 1e-9, "got {}", r.final_mult);
+}

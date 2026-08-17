@@ -244,11 +244,28 @@ pub fn score_hand(
     }
 
     // ── PHASE 2: held-hand cards — Steel x-mult and hand-card joker effects ──
+    // Red Seal and Mime add repetitions that re-run *everything* a held card does, the card's own
+    // Steel x-mult and every joker's held-in-hand effect alike (state_events.lua:789-830).
     for card in hand_cards.iter().filter(|c| !c.debuffed) {
         let steel_xmult = card.steel_x_mult();
-        if steel_xmult != 1.0 {
-            let mime_count = jokers.iter().filter(|j| j.kind == JokerKind::Mime && j.active).count();
-            for _ in 0..=mime_count {
+        let joker_effects: Vec<(usize, JokerEffect)> = jokers
+            .iter()
+            .enumerate()
+            .filter(|(_, j)| j.active)
+            .map(|(j_idx, joker)| (j_idx, calc_joker_hand_card(joker, j_idx, jokers, card)))
+            .filter(|(_, e)| e.mult != 0 || e.x_mult != 1.0 || e.dollars != 0)
+            .collect();
+
+        // Balatro only grants the repetition when the card actually did something.
+        let did_something = steel_xmult != 1.0 || !joker_effects.is_empty();
+        let repetitions = if did_something {
+            1 + count_hand_retriggers(card, jokers)
+        } else {
+            1
+        };
+
+        for _ in 0..repetitions {
+            if steel_xmult != 1.0 {
                 mult *= steel_xmult;
                 events.push(ScoreEvent {
                     source: format!("{:?} of {:?} (Steel)", card.rank, card.suit),
@@ -256,13 +273,13 @@ pub fn score_hand(
                     value: steel_xmult,
                 });
             }
-        }
-
-        for (j_idx, joker) in jokers.iter().enumerate().filter(|(_, j)| j.active) {
-            let effect = calc_joker_hand_card(joker, j_idx, jokers, card);
-            mult  += effect.mult  as f64;
-            mult  *= effect.x_mult;
-            dollars_earned += effect.dollars;
+            for (j_idx, _) in &joker_effects {
+                let effect = calc_joker_hand_card(&jokers[*j_idx], *j_idx, jokers, card);
+                mult += effect.mult as f64;
+                mult *= effect.x_mult;
+                dollars_earned += effect.dollars;
+                push_effect_events(&mut events, &effect, jokers[*j_idx].kind.display_name());
+            }
         }
     }
 
@@ -326,6 +343,6 @@ pub fn score_hand(
 
 pub(crate) mod joker_effects;
 pub(crate) use joker_effects::{
-    JokerEffect, calc_joker_individual,
-    calc_joker_hand_card, calc_joker_main, count_retriggers,
+    JokerEffect, calc_joker_individual, calc_joker_hand_card, calc_joker_main,
+    count_hand_retriggers, count_retriggers,
 };
