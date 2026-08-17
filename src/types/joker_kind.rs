@@ -530,6 +530,7 @@ impl JokerKind {
             | JokerKind::HangingChad
             | JokerKind::ReservedParking
             | JokerKind::ShootTheMoon
+            | JokerKind::Hallucination
             | JokerKind::Popcorn => 1,
 
             JokerKind::JokerStencil
@@ -593,8 +594,7 @@ impl JokerKind {
             | JokerKind::Astronomer
             | JokerKind::Bootstraps
             | JokerKind::TheIdol
-            | JokerKind::OopsAll6s
-            | JokerKind::Hallucination => 2,
+            | JokerKind::OopsAll6s => 2,
 
             JokerKind::Dna
             | JokerKind::Stuntman
