@@ -864,31 +864,51 @@ fn test_juggler_increases_hand_size_by_one() {
 // =========================================================
 
 #[test]
-fn test_loyalty_card_fires_on_5th_modulo_6_total_plays() {
-    // 5 total hands played → (5 % 6) == 5 → fires
+fn test_loyalty_card_fires_every_sixth_hand_since_acquisition() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
-    let jokers = vec![joker(0, JokerKind::LoyaltyCard)];
-
-    let mut levels = default_hand_levels();
-    // Set high card played=5 total
-    levels.get_mut(&HandType::HighCard).unwrap().played = 5;
-
-    let r = score_hand(&played, &played, &jokers, &levels, 3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0, RoundTargets::default(), false);
-    // x4 mult → HC: 16*4=64
-    assert_eq!(r.final_score as i64, 64);
+    let fires = |hands: i64| {
+        let mut j = joker(0, JokerKind::LoyaltyCard);
+        j.set_counter_i64("hands", hands);
+        score(&played, &played, &[j]).final_mult as i64 == 4
+    };
+    for n in 1..=5 {
+        assert!(!fires(n), "should not fire on hand {}", n);
+    }
+    assert!(fires(6), "should fire on the 6th hand");
+    for n in 7..=11 {
+        assert!(!fires(n), "should not fire on hand {}", n);
+    }
+    assert!(fires(12), "should fire again on the 12th hand");
 }
 
+/// The count starts when the joker is acquired, not at the start of the run.
 #[test]
-fn test_loyalty_card_does_not_fire_on_other_totals() {
-    let played = vec![card(0, Rank::Ace, Suit::Spades)];
-    let jokers = vec![joker(0, JokerKind::LoyaltyCard)];
+fn test_loyalty_card_counts_from_acquisition() {
+    let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    gs.score_goal = f64::MAX;
 
-    let mut levels = default_hand_levels();
-    levels.get_mut(&HandType::HighCard).unwrap().played = 3;
+    // Three hands played before Loyalty Card is bought.
+    for _ in 0..3 {
+        gs.hand = vec![0];
+        gs.hands_remaining = 4;
+        gs.select_card(0).unwrap();
+        gs.play_hand().unwrap();
+    }
+    gs.jokers.push(joker(0, JokerKind::LoyaltyCard));
 
-    let r = score_hand(&played, &played, &jokers, &levels, 3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0, RoundTargets::default(), false);
-    // No x4, just HC: 16*1=16
-    assert_eq!(r.final_score as i64, 16);
+    // It should fire on its own 6th hand, not on the run's 6th.
+    let mut fired_on = Vec::new();
+    for n in 1..=6 {
+        gs.hand = vec![0];
+        gs.hands_remaining = 4;
+        gs.select_card(0).unwrap();
+        let r = gs.play_hand().unwrap();
+        if r.final_mult as i64 == 4 {
+            fired_on.push(n);
+        }
+    }
+    assert_eq!(fired_on, vec![6]);
 }
 
 // =========================================================
@@ -2001,4 +2021,48 @@ fn test_credit_card_lets_a_purchase_go_through_into_debt() {
     gs.buy_joker(idx).unwrap();
     assert!(gs.money < 0, "buying on credit should push the balance negative");
     assert!(gs.money >= gs.bankrupt_at());
+}
+
+/// Sixth Sense only fires on the first hand of the round (card.lua:2604).
+#[test]
+fn test_sixth_sense_does_not_fire_after_the_first_hand() {
+    let mut gs = make_game();
+    setup_round(
+        &mut gs,
+        vec![card(0, Rank::Six, Suit::Spades), card(1, Rank::Ace, Suit::Hearts)],
+        2,
+    );
+    gs.jokers.push(joker(1, JokerKind::SixthSense));
+    gs.consumable_slots = 5;
+    gs.score_goal = f64::MAX;
+
+    // Burn the first hand on something else.
+    gs.select_card(1).unwrap();
+    gs.play_hand().unwrap();
+    gs.consumables.clear();
+
+    // Now play the lone 6 — too late.
+    gs.hand = vec![0];
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    assert!(
+        gs.consumables.is_empty(),
+        "Sixth Sense should only fire on the round's first hand"
+    );
+    assert_eq!(gs.deck.len(), 2, "the 6 should survive");
+}
+
+/// The 6 is destroyed even when there is no room for the spectral.
+#[test]
+fn test_sixth_sense_destroys_the_six_with_no_consumable_room() {
+    let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Six, Suit::Spades)], 1);
+    gs.jokers.push(joker(1, JokerKind::SixthSense));
+    gs.consumable_slots = 0;
+    gs.score_goal = f64::MAX;
+
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    assert!(gs.consumables.is_empty());
+    assert!(gs.deck.is_empty(), "the 6 should still be destroyed");
 }

@@ -85,6 +85,18 @@ impl GameState {
                 continue;
             }
             match self.jokers[i].kind {
+                JokerKind::Misprint => {
+                    // Rolls a fresh 0..=23 Mult every hand (card.lua:3701). Pre-rolled here so
+                    // score_hand stays deterministic given the state it is handed.
+                    let roll = self.rng.range_usize(0, 23) as i64;
+                    self.jokers[i].set_counter_i64("mult", roll);
+                }
+                JokerKind::LoyaltyCard => {
+                    // X4 Mult every 6th hand played since the joker was acquired
+                    // (card.lua:3633 counts from hands_played_at_create).
+                    let n = self.jokers[i].get_counter_i64("hands") + 1;
+                    self.jokers[i].set_counter_i64("hands", n);
+                }
                 JokerKind::SquareJoker => {
                     if played.len() == 4 {
                         let cur = self.jokers[i].get_counter_i64("chips");
@@ -812,8 +824,10 @@ impl GameState {
                     }
                 }
                 JokerKind::SixthSense => {
-                    // If only a 6 is played, destroy it and create a spectral card
-                    if played.len() == 1 && played[0].rank == Rank::Six {
+                    // Only fires on the *first* hand of the round (card.lua:2604). The 6 is
+                    // destroyed either way; a full consumable slot only skips the spectral.
+                    let is_first_hand = self.hands_remaining + 1 == self.effective_max_hands();
+                    if is_first_hand && played.len() == 1 && played[0].rank == Rank::Six {
                         if self.consumables.len() < self.consumable_slots as usize {
                             let spectrals = [
                                 SpectralCard::Familiar, SpectralCard::Grim, SpectralCard::Incantation,
@@ -822,10 +836,21 @@ impl GameState {
                             ];
                             let idx = self.rng.range_usize(0, spectrals.len() - 1);
                             self.consumables.push(ConsumableCard::Spectral(spectrals[idx]));
-                            // Destroy the 6
-                            let card_id = played[0].id;
-                            self.destroy_deck_card(card_id);
                         }
+                        // Take the card out of hand before destroying it — destroy_deck_card
+                        // remaps stored indices and assumes the card is no longer referenced.
+                        let card_id = played[0].id;
+                        if let Some(hi) = self.hand.iter().position(|&di| self.deck[di].id == card_id)
+                        {
+                            self.hand.remove(hi);
+                            self.selected_indices.retain(|&s| s != hi);
+                            for s in self.selected_indices.iter_mut() {
+                                if *s > hi {
+                                    *s -= 1;
+                                }
+                            }
+                        }
+                        self.destroy_deck_card(card_id);
                     }
                 }
                 JokerKind::Hiker => {

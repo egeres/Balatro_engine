@@ -1048,11 +1048,34 @@ fn test_erosion_does_not_fire_when_deck_is_full() {
 }
 
 #[test]
-fn test_misprint_adds_flat_mult() {
+fn test_misprint_adds_its_prerolled_mult() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
-    let r = score(&played, &played, &[joker(0, JokerKind::Misprint)]);
-    // +11 mult → HC: 16*(1+11)=192
-    assert_eq!(r.final_score as i64, 192);
+    let mut j = joker(0, JokerKind::Misprint);
+    j.set_counter_i64("mult", 17);
+    let r = score(&played, &played, &[j]);
+    // HC: 16 * (1 + 17) = 288
+    assert_eq!(r.final_score as i64, 288);
+}
+
+/// The roll is re-made every hand and spans 0..=23 (card.lua:3701).
+#[test]
+fn test_misprint_rerolls_across_the_full_range() {
+    let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    gs.jokers.push(joker(0, JokerKind::Misprint));
+    gs.score_goal = f64::MAX;
+
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..400 {
+        gs.hand = vec![0];
+        gs.hands_remaining = 4;
+        gs.select_card(0).unwrap();
+        gs.play_hand().unwrap();
+        seen.insert(gs.jokers[0].get_counter_i64("mult"));
+    }
+    assert!(seen.len() > 15, "expected a spread of rolls, saw {}", seen.len());
+    assert!(seen.iter().all(|&v| (0..=23).contains(&v)), "rolls out of range: {:?}", seen);
+    assert!(seen.contains(&0) || seen.contains(&23), "range endpoints should be reachable");
 }
 
 #[test]

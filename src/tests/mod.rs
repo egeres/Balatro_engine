@@ -187,8 +187,9 @@ pub fn make_game() -> GameState {
 pub fn setup_round(gs: &mut GameState, deck_cards: Vec<CardInstance>, hand_size: usize) {
     gs.state = GameStateKind::Round;
     gs.score_accumulated = 0.0;
-    gs.hands_remaining = 4;
-    gs.discards_remaining = 3;
+    // Start at a full complement so "first hand of the round" checks (DNA, Sixth Sense) behave.
+    gs.hands_remaining = gs.effective_max_hands();
+    gs.discards_remaining = gs.effective_max_discards();
     gs.selected_indices.clear();
     gs.hand.clear();
     gs.draw_pile.clear();

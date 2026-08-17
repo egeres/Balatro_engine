@@ -533,8 +533,11 @@ pub(crate) fn calc_joker_main(
             if played_this_round > 0 { effect.x_mult = 3.0; }
         }
         JokerKind::LoyaltyCard => {
-            let total: u32 = ctx.hand_levels.values().map(|h| h.played).sum();
-            if total > 0 && (total % 6) == 5 { effect.x_mult = 4.0; }
+            // Counts hands since this joker was acquired, not hands played this run.
+            let hands = joker.get_counter_i64("hands");
+            if hands > 0 && hands % 6 == 0 {
+                effect.x_mult = 4.0;
+            }
         }
 
         // ── Suit / card-set conditions ────────────────────────────────────
@@ -595,7 +598,8 @@ pub(crate) fn calc_joker_main(
             effect.mult += plays as i64;
         }
         JokerKind::Misprint => {
-            effect.mult += 11; // simplified: average of the 0–23 range
+            // Pre-rolled per hand in pre_score_joker_updates.
+            effect.mult += joker.get_counter_i64("mult");
         }
         JokerKind::Bootstraps => {
             effect.mult += (ctx.money / 5).max(0) as i64 * 2;

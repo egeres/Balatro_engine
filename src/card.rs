@@ -161,6 +161,14 @@ impl JokerInstance {
             JokerKind::IceCream => {
                 counters.insert("chips".to_string(), serde_json::json!(100));
             }
+            JokerKind::LoyaltyCard => {
+                // Hands played since acquisition; X4 Mult on every 6th.
+                counters.insert("hands".to_string(), serde_json::json!(0_i64));
+            }
+            JokerKind::Misprint => {
+                // Re-rolled to 0..=23 before each hand scores.
+                counters.insert("mult".to_string(), serde_json::json!(0_i64));
+            }
             JokerKind::Popcorn => {
                 counters.insert("mult".to_string(), serde_json::json!(20));
             }

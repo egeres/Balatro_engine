@@ -25,7 +25,7 @@ fn test_play_pair_through_game_state() {
 
     // Pair of Aces = 64
     assert!(gs.score_accumulated >= 64.0);
-    assert_eq!(gs.hands_remaining, 3);
+    assert_eq!(gs.hands_remaining, gs.effective_max_hands() - 1);
 }
 
 #[test]
