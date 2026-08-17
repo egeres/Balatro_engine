@@ -275,6 +275,7 @@ impl GameState {
             self.money,
             self.draw_pile.len(),
             self.deck.len(),
+            self.starting_deck_size,
             self.boss_blind,
             self.joker_slots as usize,
             self.tarot_cards_used,

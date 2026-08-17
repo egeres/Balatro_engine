@@ -309,7 +309,7 @@ pub(crate) fn calc_joker_main(
             effect.chips += ctx.deck_cards_remaining as i64 * 2;
         }
         JokerKind::Erosion => {
-            let below = (52i64 - ctx.total_deck_size as i64).max(0);
+            let below = (ctx.starting_deck_size as i64 - ctx.total_deck_size as i64).max(0);
             effect.mult += below * 4;
         }
         JokerKind::StoneJoker => {

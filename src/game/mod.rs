@@ -33,6 +33,9 @@ pub struct GameState {
 
     // Round state
     pub deck: Vec<CardInstance>,  // full ordered deck
+    /// Number of cards the deck started the run with. Erosion measures the full deck against
+    /// this, not against a hardcoded 52 (Abandoned Deck starts at 40).
+    pub starting_deck_size: usize,
     pub draw_pile: Vec<usize>,    // indices into deck of remaining drawable cards
     pub hand: Vec<usize>,         // indices of cards currently in hand
     pub discard_pile: Vec<usize>, // indices of discarded cards this round
@@ -156,6 +159,7 @@ impl GameState {
             skipped_blinds: Vec::new(),
             blind_defeated_this_ante: [false; 3],
             deck: Vec::new(),
+            starting_deck_size: 52,
             draw_pile: Vec::new(),
             hand: Vec::new(),
             discard_pile: Vec::new(),
@@ -330,6 +334,7 @@ impl GameState {
         // Shuffle
         self.rng.shuffle(&mut cards);
         self.deck = cards;
+        self.starting_deck_size = self.deck.len();
         self.draw_pile = (0..self.deck.len()).collect();
     }
 

@@ -87,6 +87,7 @@ pub fn score(
         0,    // money
         40,   // deck_remaining
         52,   // total_deck
+        52,   // starting_deck_size
         None, // boss_blind
         5,    // joker_slot_count
         0,    // tarot_cards_used
@@ -125,6 +126,7 @@ pub fn score_full(
         money,
         deck_remaining,
         total_deck,
+        52, // starting_deck_size: these tests all assume a standard 52-card deck
         None,
         joker_slot_count,
         tarot_cards_used,

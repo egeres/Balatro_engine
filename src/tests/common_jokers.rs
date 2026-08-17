@@ -598,6 +598,7 @@ fn test_mystic_summit_fires_only_at_zero_discards() {
         0,
         40,
         52,
+        52,
         None,
         5,
         0,
@@ -627,6 +628,7 @@ fn test_supernova_adds_mult_equal_to_times_played() {
         3,
         0,
         40,
+        52,
         52,
         None,
         5,
@@ -833,7 +835,7 @@ fn test_card_sharp_fires_when_hand_type_already_played_this_round() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
     let mut levels = default_hand_levels();
     levels.get_mut(&HandType::HighCard).unwrap().played_this_round = 1;
-    let r = score_hand(&played, &played, &[joker(0, JokerKind::CardSharp)], &levels, 3, 3, 0, 40, 52, None, 5, 0, 0, 0, 0);
+    let r = score_hand(&played, &played, &[joker(0, JokerKind::CardSharp)], &levels, 3, 3, 0, 40, 52, 52, None, 5, 0, 0, 0, 0);
     // HC: 16 chips, mult=1*3=3 → 48 (X3 because HighCard already played this round)
     assert_eq!(r.final_score as i64, 48);
 }
@@ -941,6 +943,29 @@ fn test_erosion_fires_when_deck_is_smaller_than_starting_size() {
     let r = score_full(&played, &played, &[joker(0, JokerKind::Erosion)], 3, 3, 0, 40, 42, 5, 0);
     // HC: 16*(1+40)=656
     assert_eq!(r.final_score as i64, 656);
+}
+
+/// Erosion measures against the deck's *starting* size, not a hardcoded 52. The Abandoned Deck
+/// starts at 40 cards, so an untouched Abandoned deck must give Erosion nothing.
+#[test]
+fn test_erosion_uses_starting_deck_size_not_52() {
+    let gs = GameState::new(DeckType::Abandoned, Stake::White, Some("EROSION".to_string()));
+    assert_eq!(gs.starting_deck_size, 40, "Abandoned Deck starts at 40 cards");
+
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let r = score_hand(
+        &played,
+        &played,
+        &[joker(0, JokerKind::Erosion)],
+        &default_hand_levels(),
+        3, 3, 0,
+        30,                      // deck_remaining
+        gs.deck.len(),           // total_deck = 40
+        gs.starting_deck_size,   // starting_deck_size = 40
+        None, 5, 0, 0, 0, 0,
+    );
+    // No cards removed → no Erosion mult. HC: (5+11) * 1 = 16
+    assert_eq!(r.final_score as i64, 16);
 }
 
 #[test]

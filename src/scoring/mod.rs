@@ -49,6 +49,9 @@ pub struct ScoringContext<'a> {
     pub money: i32,
     pub deck_cards_remaining: usize,
     pub total_deck_size: usize,
+    /// Size of the deck at the start of the run (G.GAME.starting_deck_size). Deck-dependent:
+    /// 52 for most decks, 40 for Abandoned. Used by Erosion.
+    pub starting_deck_size: usize,
     pub boss_blind: Option<BossBlind>,
     pub joker_count: usize,
     pub joker_slot_count: usize,
@@ -88,6 +91,7 @@ pub fn score_hand(
     money: i32,
     deck_remaining: usize,
     total_deck: usize,
+    starting_deck_size: usize,
     boss_blind: Option<BossBlind>,
     joker_slot_count: usize,
     tarot_cards_used: u32,
@@ -252,6 +256,7 @@ pub fn score_hand(
         money,
         deck_cards_remaining: deck_remaining,
         total_deck_size: total_deck,
+        starting_deck_size,
         boss_blind,
         joker_count: jokers.len(),
         joker_slot_count,
