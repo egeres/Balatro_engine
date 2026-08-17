@@ -1871,3 +1871,80 @@ fn test_raised_fist_yields_nothing_when_the_lowest_card_is_debuffed() {
     // The Two is still chosen, but being debuffed it pays nothing — the Nine does not stand in.
     assert_eq!(r.final_mult as i64, 1);
 }
+
+// =========================================================
+// Wild Cards fill one missing suit, not all four
+// =========================================================
+
+fn wild(id: u64, rank: Rank, suit: Suit) -> CardInstance {
+    let mut c = card(id, rank, suit);
+    c.enhancement = Enhancement::Wild;
+    c
+}
+
+#[test]
+fn test_flower_pot_needs_four_real_suits() {
+    let played = vec![
+        card(0, Rank::Two, Suit::Hearts),
+        card(1, Rank::Two, Suit::Diamonds),
+        card(2, Rank::Two, Suit::Spades),
+        card(3, Rank::Two, Suit::Clubs),
+    ];
+    let r = score(&played, &[], &[joker(0, JokerKind::FlowerPot)]);
+    assert_eq!(r.final_mult as i64, 21); // FourOfAKind mult 7 x3
+}
+
+#[test]
+fn test_flower_pot_is_not_satisfied_by_a_single_wild() {
+    let played = vec![
+        card(0, Rank::Two, Suit::Hearts),
+        card(1, Rank::Two, Suit::Hearts),
+        card(2, Rank::Two, Suit::Hearts),
+        wild(3, Rank::Two, Suit::Hearts),
+    ];
+    let r = score(&played, &[], &[joker(0, JokerKind::FlowerPot)]);
+    // One Wild covers one missing suit; Hearts + one other is only two suits.
+    assert_eq!(r.final_mult as i64, 7);
+}
+
+#[test]
+fn test_flower_pot_uses_wilds_to_fill_missing_suits() {
+    let played = vec![
+        card(0, Rank::Two, Suit::Hearts),
+        card(1, Rank::Two, Suit::Diamonds),
+        wild(2, Rank::Two, Suit::Hearts),
+        wild(3, Rank::Two, Suit::Hearts),
+    ];
+    // Two wilds fill Spades and Clubs → all four suits covered.
+    let r = score(&played, &[], &[joker(0, JokerKind::FlowerPot)]);
+    assert_eq!(r.final_mult as i64, 21);
+}
+
+#[test]
+fn test_seeing_double_is_not_satisfied_by_a_single_wild() {
+    let played = vec![wild(0, Rank::Two, Suit::Spades)];
+    let r = score(&played, &[], &[joker(0, JokerKind::SeeingDouble)]);
+    // The lone Wild claims Clubs, leaving no non-Club suit → no X2.
+    assert_eq!(r.final_mult as i64, 1);
+}
+
+#[test]
+fn test_seeing_double_wild_supplies_the_club() {
+    let played = vec![
+        card(0, Rank::Two, Suit::Hearts),
+        wild(1, Rank::Two, Suit::Hearts),
+    ];
+    let r = score(&played, &[], &[joker(0, JokerKind::SeeingDouble)]);
+    // Hearts from the real card, Clubs from the Wild → X2.
+    assert_eq!(r.final_mult as i64, 4);
+}
+
+#[test]
+fn test_seeing_double_needs_a_non_club() {
+    let played = vec![
+        card(0, Rank::Two, Suit::Clubs),
+        card(1, Rank::Two, Suit::Clubs),
+    ];
+    let r = score(&played, &[], &[joker(0, JokerKind::SeeingDouble)]);
+    assert_eq!(r.final_mult as i64, 2);
+}

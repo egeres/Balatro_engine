@@ -68,6 +68,42 @@ fn is_copy_joker(kind: JokerKind) -> bool {
     matches!(kind, JokerKind::Blueprint | JokerKind::Brainstorm)
 }
 
+/// Which suits a scoring hand covers, with Wild Cards each filling at most **one** still-missing
+/// suit rather than counting as all four (card.lua:3807, :3842).
+///
+/// `wild_priority` is the order Balatro tries when assigning a Wild — it differs per joker and it
+/// matters: Flower Pot tries Hearts first, Seeing Double tries Clubs first.
+fn covered_suits(
+    scoring_cards: &[usize],
+    played: &[CardInstance],
+    wild_priority: [Suit; 4],
+    count_debuffed: bool,
+) -> std::collections::HashSet<Suit> {
+    let mut present = std::collections::HashSet::new();
+
+    // Pass 1: cards with a concrete suit.
+    for &i in scoring_cards {
+        let c = &played[i];
+        if c.enhancement == Enhancement::Wild || (!count_debuffed && c.debuffed) {
+            continue;
+        }
+        present.insert(c.suit);
+    }
+
+    // Pass 2: each Wild claims the first suit still missing.
+    for &i in scoring_cards {
+        let c = &played[i];
+        if c.enhancement != Enhancement::Wild || c.debuffed {
+            continue;
+        }
+        if let Some(&s) = wild_priority.iter().find(|s| !present.contains(s)) {
+            present.insert(s);
+        }
+    }
+
+    present
+}
+
 // ---------------------------------------------------------------------------
 // Retrigger counting
 // ---------------------------------------------------------------------------
@@ -509,18 +545,33 @@ pub(crate) fn calc_joker_main(
             if all_dark { effect.x_mult = 3.0; }
         }
         JokerKind::SeeingDouble => {
-            let has_club = scoring_cards.iter()
-                .any(|&i| played[i].effective_suits().contains(&Suit::Clubs));
-            let has_non_club = scoring_cards.iter()
-                .any(|&i| played[i].effective_suits().iter().any(|s| *s != Suit::Clubs));
-            if has_club && has_non_club { effect.x_mult = 2.0; }
+            // Needs a scoring Club plus a scoring card of some other suit. Debuffed cards do not
+            // count here — card.lua:3845 calls is_suit() without bypass_debuff.
+            let suits = covered_suits(
+                scoring_cards,
+                played,
+                [Suit::Clubs, Suit::Diamonds, Suit::Spades, Suit::Hearts],
+                false,
+            );
+            let has_other = [Suit::Hearts, Suit::Diamonds, Suit::Spades]
+                .iter()
+                .any(|s| suits.contains(s));
+            if suits.contains(&Suit::Clubs) && has_other {
+                effect.x_mult = 2.0;
+            }
         }
         JokerKind::FlowerPot => {
-            let suits_present: std::collections::HashSet<Suit> = scoring_cards
-                .iter()
-                .flat_map(|&i| played[i].effective_suits())
-                .collect();
-            if suits_present.len() == 4 { effect.x_mult = 3.0; }
+            // All four suits among the scoring cards. Debuffed cards still count — card.lua:3812
+            // passes bypass_debuff.
+            let suits = covered_suits(
+                scoring_cards,
+                played,
+                [Suit::Hearts, Suit::Diamonds, Suit::Spades, Suit::Clubs],
+                true,
+            );
+            if suits.len() == 4 {
+                effect.x_mult = 3.0;
+            }
         }
         JokerKind::AncientJoker => {
             // Target suit is re-rolled every round (card.lua:3255).
