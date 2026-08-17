@@ -22,6 +22,16 @@ pub fn evaluate_hand(
     splash: bool,
 ) -> HandEvalResult {
     let mut result = evaluate_hand_inner(cards, four_fingers, shortcut, smeared, splash);
+
+    // Stone cards take no part in deciding the hand type, but they always score. Balatro appends
+    // them to the scoring hand as "pures" after the hand has been determined
+    // (state_events.lua:581-599) — that is the whole point of the enhancement.
+    for (i, c) in cards.iter().enumerate() {
+        if c.is_stone() && !result.scoring_indices.contains(&i) {
+            result.scoring_indices.push(i);
+        }
+    }
+
     // Balatro sorts the scoring hand left-to-right by on-screen position before scoring
     // (state_events.lua:600). Jokers that key off "the first scoring card" — Hanging Chad,
     // Photograph — depend on this, and grouping the hand by rank leaves them in an order that

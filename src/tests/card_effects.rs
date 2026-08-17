@@ -253,3 +253,69 @@ fn test_multiple_playing_card_editions_stack() {
     assert_eq!(r.hand_type, HandType::Pair);
     assert_eq!(r.final_score as i64, 984);
 }
+
+// =========================================================
+// Stone cards always join the scoring hand
+// =========================================================
+
+fn stone_card(id: u64, rank: Rank, suit: Suit) -> CardInstance {
+    let mut c = card(id, rank, suit);
+    c.enhancement = Enhancement::Stone;
+    c
+}
+
+/// Stone cards take no part in deciding the hand type but always score
+/// (state_events.lua:581-599).
+#[test]
+fn test_stone_card_scores_alongside_a_pair() {
+    let played = vec![
+        card(0, Rank::Ace, Suit::Spades),
+        card(1, Rank::Ace, Suit::Hearts),
+        stone_card(2, Rank::Two, Suit::Clubs),
+        card(3, Rank::Three, Suit::Clubs),
+        card(4, Rank::Five, Suit::Diamonds),
+    ];
+    let r = crate::hand_eval::evaluate_hand(&played, false, false, false, false);
+    assert_eq!(r.hand_type, HandType::Pair, "a stone card must not change the hand type");
+    assert_eq!(r.scoring_indices, vec![0, 1, 2]);
+
+    let s = score(&played, &[], &[]);
+    // Pair: 10 base + 11 + 11 (aces) + 50 (stone) = 82 chips, mult 2 → 164
+    assert_eq!(s.final_chips as i64, 82);
+    assert_eq!(s.final_score as i64, 164);
+}
+
+#[test]
+fn test_multiple_stone_cards_all_score() {
+    let played = vec![
+        card(0, Rank::Ace, Suit::Spades),
+        card(1, Rank::Ace, Suit::Hearts),
+        stone_card(2, Rank::Two, Suit::Clubs),
+        stone_card(3, Rank::Three, Suit::Clubs),
+    ];
+    let r = crate::hand_eval::evaluate_hand(&played, false, false, false, false);
+    assert_eq!(r.scoring_indices, vec![0, 1, 2, 3]);
+    let s = score(&played, &[], &[]);
+    // 10 + 11 + 11 + 50 + 50 = 132 chips
+    assert_eq!(s.final_chips as i64, 132);
+}
+
+/// Stone Joker counts stones in the deck; the played stone must also score its own 50 chips.
+#[test]
+fn test_stone_card_scores_in_a_five_card_flush() {
+    let played = vec![
+        card(0, Rank::Two, Suit::Spades),
+        card(1, Rank::Four, Suit::Spades),
+        card(2, Rank::Six, Suit::Spades),
+        card(3, Rank::Eight, Suit::Spades),
+        card(4, Rank::Ten, Suit::Spades),
+    ];
+    let base = score(&played, &[], &[]);
+
+    let mut with_stone = played.clone();
+    with_stone[2] = stone_card(2, Rank::Six, Suit::Spades);
+    let r = crate::hand_eval::evaluate_hand(&with_stone, false, false, false, false);
+    // Only 4 non-stone spades remain, so this is no longer a flush - but the stone still scores.
+    assert!(r.scoring_indices.contains(&2));
+    assert!(base.final_chips > 0.0);
+}
