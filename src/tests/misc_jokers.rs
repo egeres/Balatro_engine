@@ -1694,3 +1694,104 @@ fn test_vagabond_does_not_create_tarot_when_rich() {
     assert!(gs.consumables.is_empty(),
         "Vagabond should not create tarot when money > $4");
 }
+
+// =========================================================
+// Blueprint / Brainstorm copy every phase, not just joker_main
+// =========================================================
+
+#[test]
+fn test_blueprint_copies_a_per_card_joker() {
+    // Greedy Joker is a `context.individual` effect: +3 Mult per scoring Diamond.
+    let played = vec![card(0, Rank::Ace, Suit::Diamonds)];
+    let solo = score(&played, &[], &[joker(1, JokerKind::GreedyJoker)]);
+    let copied = score(
+        &played,
+        &[],
+        &[joker(0, JokerKind::Blueprint), joker(1, JokerKind::GreedyJoker)],
+    );
+    // HC mult 1 + 3 = 4 solo; 1 + 3 + 3 = 7 with Blueprint doubling it.
+    assert_eq!(solo.final_mult as i64, 4);
+    assert_eq!(copied.final_mult as i64, 7);
+}
+
+#[test]
+fn test_blueprint_copies_a_retrigger_joker() {
+    // Sock and Buskin retriggers face cards.
+    let played = vec![card(0, Rank::King, Suit::Spades)];
+    let solo = score(&played, &[], &[joker(1, JokerKind::SockAndBuskin)]);
+    let copied = score(
+        &played,
+        &[],
+        &[joker(0, JokerKind::Blueprint), joker(1, JokerKind::SockAndBuskin)],
+    );
+    // HC: 5 base + 10 per King trigger. 2 triggers solo = 25; 3 with Blueprint = 35.
+    assert_eq!(solo.final_chips as i64, 25);
+    assert_eq!(copied.final_chips as i64, 35);
+}
+
+#[test]
+fn test_blueprint_copies_a_held_in_hand_joker() {
+    // Baron gives X1.5 per King held in hand.
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let hand = vec![card(1, Rank::King, Suit::Hearts)];
+    let solo = score(&played, &hand, &[joker(1, JokerKind::Baron)]);
+    let copied = score(
+        &played,
+        &hand,
+        &[joker(0, JokerKind::Blueprint), joker(1, JokerKind::Baron)],
+    );
+    assert!((solo.final_mult - 1.5).abs() < 1e-9);
+    assert!((copied.final_mult - 2.25).abs() < 1e-9);
+}
+
+#[test]
+fn test_brainstorm_copies_the_leftmost_joker_even_if_it_is_a_copy() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    // [Blueprint, Joker, Brainstorm]: BP copies Joker (+4), BS copies BP which copies Joker (+4).
+    let r = score(
+        &played,
+        &[],
+        &[
+            joker(0, JokerKind::Blueprint),
+            joker(1, JokerKind::Joker),
+            joker(2, JokerKind::Brainstorm),
+        ],
+    );
+    // mult = 1 + 4 (BP) + 4 (Joker) + 4 (BS) = 13
+    assert_eq!(r.final_mult as i64, 13);
+}
+
+#[test]
+fn test_brainstorm_in_first_position_copies_nothing() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let r = score(
+        &played,
+        &[],
+        &[joker(0, JokerKind::Brainstorm), joker(1, JokerKind::Joker)],
+    );
+    // Brainstorm would copy itself, which Balatro rejects (other_joker ~= self) → mult 1 + 4
+    assert_eq!(r.final_mult as i64, 5);
+}
+
+#[test]
+fn test_copy_joker_loop_yields_nothing() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    // [Blueprint, Brainstorm]: BP copies BS, BS copies BP. Neither resolves.
+    let r = score(
+        &played,
+        &[],
+        &[joker(0, JokerKind::Blueprint), joker(1, JokerKind::Brainstorm)],
+    );
+    assert_eq!(r.final_mult as i64, 1);
+}
+
+#[test]
+fn test_blueprint_with_nothing_to_its_right_does_nothing() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let r = score(
+        &played,
+        &[],
+        &[joker(0, JokerKind::Joker), joker(1, JokerKind::Blueprint)],
+    );
+    assert_eq!(r.final_mult as i64, 5);
+}

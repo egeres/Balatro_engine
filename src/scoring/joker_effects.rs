@@ -16,6 +16,59 @@ impl JokerEffect {
 }
 
 // ---------------------------------------------------------------------------
+// Blueprint / Brainstorm target resolution
+// ---------------------------------------------------------------------------
+
+/// Resolve which joker a copy joker imitates, following chains (card.lua:2304-2334).
+///
+/// Blueprint copies the joker immediately to its right; Brainstorm copies the leftmost joker,
+/// whatever that is. Either can point at another copy joker, so the chain is followed until it
+/// reaches a real joker — with a visit set, because Blueprint-next-to-Brainstorm forms a loop.
+/// Balatro bounds the same loop with `context.blueprint > #G.jokers.cards + 1`, which likewise
+/// ends in no effect.
+///
+/// Note this deliberately does *not* consult `blueprint_compat`: that flag only drives the
+/// "Compatible/Incompatible" UI label (card.lua:4234). At runtime Blueprint calls straight into
+/// the target's `calculate_joker`, and it is the target's own `not context.blueprint` guards that
+/// stop state-mutating effects from being duplicated.
+///
+/// Returns `None` when the chain dead-ends, loops, or reaches an inactive joker.
+pub(crate) fn copy_target(jokers: &[JokerInstance], idx: usize) -> Option<usize> {
+    let mut seen = [false; 64];
+    let mut cur = idx;
+    loop {
+        if cur < seen.len() {
+            if seen[cur] {
+                return None;
+            }
+            seen[cur] = true;
+        }
+        let next = match jokers.get(cur)?.kind {
+            JokerKind::Blueprint => cur + 1,
+            JokerKind::Brainstorm => 0,
+            _ => return None,
+        };
+        let target = jokers.get(next)?;
+        if next == cur {
+            return None;
+        }
+        if matches!(target.kind, JokerKind::Blueprint | JokerKind::Brainstorm) {
+            cur = next;
+            continue;
+        }
+        if !target.active {
+            return None;
+        }
+        return Some(next);
+    }
+}
+
+/// True if this joker is a copy joker (Blueprint / Brainstorm).
+fn is_copy_joker(kind: JokerKind) -> bool {
+    matches!(kind, JokerKind::Blueprint | JokerKind::Brainstorm)
+}
+
+// ---------------------------------------------------------------------------
 // Retrigger counting
 // ---------------------------------------------------------------------------
 
@@ -32,7 +85,17 @@ pub(crate) fn count_retriggers(
         retriggers += 1;
     }
 
-    for joker in jokers.iter().filter(|j| j.active) {
+    for (j_idx, joker) in jokers.iter().enumerate().filter(|(_, j)| j.active) {
+        // A copy joker retriggers exactly like whatever it is imitating, reading that joker's
+        // counters too (Seltzer's remaining hands, for instance).
+        let joker = if is_copy_joker(joker.kind) {
+            match copy_target(jokers, j_idx) {
+                Some(t) => &jokers[t],
+                None => continue,
+            }
+        } else {
+            joker
+        };
         match joker.kind {
             JokerKind::Dusk if hands_remaining == 0 => {
                 retriggers += 1;
@@ -70,6 +133,8 @@ pub(crate) fn count_retriggers(
 
 pub(crate) fn calc_joker_individual(
     joker: &JokerInstance,
+    joker_idx: usize,
+    all_jokers: &[JokerInstance],
     card_idx: usize,
     card: &CardInstance,
     scoring_indices: &[usize],
@@ -77,6 +142,18 @@ pub(crate) fn calc_joker_individual(
     pareidolia: bool,
     targets: RoundTargets,
 ) -> JokerEffect {
+    // Blueprint / Brainstorm copy every context, not just joker_main, so a copy joker sitting
+    // next to Greedy Joker or Photograph fires here too.
+    if is_copy_joker(joker.kind) {
+        return match copy_target(all_jokers, joker_idx) {
+            Some(t) => calc_joker_individual(
+                &all_jokers[t], t, all_jokers, card_idx, card, scoring_indices, played_cards,
+                pareidolia, targets,
+            ),
+            None => JokerEffect::new(),
+        };
+    }
+
     let mut effect = JokerEffect::new();
     let is_scoring = scoring_indices.contains(&card_idx);
 
@@ -197,7 +274,19 @@ pub(crate) fn calc_joker_individual(
 // Phase 3 — effects for cards held in hand (not played)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn calc_joker_hand_card(joker: &JokerInstance, card: &CardInstance) -> JokerEffect {
+pub(crate) fn calc_joker_hand_card(
+    joker: &JokerInstance,
+    joker_idx: usize,
+    all_jokers: &[JokerInstance],
+    card: &CardInstance,
+) -> JokerEffect {
+    if is_copy_joker(joker.kind) {
+        return match copy_target(all_jokers, joker_idx) {
+            Some(t) => calc_joker_hand_card(&all_jokers[t], t, all_jokers, card),
+            None => JokerEffect::new(),
+        };
+    }
+
     let mut effect = JokerEffect::new();
     match joker.kind {
         JokerKind::Baron => {
@@ -224,6 +313,15 @@ pub(crate) fn calc_joker_main(
     joker_idx: usize,
     ctx: &ScoringContext,
 ) -> JokerEffect {
+    // Blueprint copies the joker to its right, Brainstorm the leftmost one, following chains
+    // (card.lua:4225). Resolving the target here means every phase copies identically.
+    if is_copy_joker(joker.kind) {
+        return match copy_target(ctx.jokers, joker_idx) {
+            Some(t) => calc_joker_main(&ctx.jokers[t], t, ctx),
+            None => JokerEffect::new(),
+        };
+    }
+
     let mut effect = JokerEffect::new();
     let hand_type = ctx.hand_type;
     let scoring_cards = ctx.scoring_cards;
@@ -443,32 +541,8 @@ pub(crate) fn calc_joker_main(
         }
 
         // ── Copy effects ──────────────────────────────────────────────────
-        JokerKind::Blueprint => {
-            let next_idx = joker_idx + 1;
-            if next_idx < ctx.jokers.len() {
-                let next = &ctx.jokers[next_idx];
-                if next.active && !matches!(next.kind, JokerKind::Blueprint | JokerKind::Brainstorm) {
-                    let copied = calc_joker_main(next, next_idx, ctx);
-                    effect.chips  += copied.chips;
-                    effect.mult   += copied.mult;
-                    effect.x_mult *= copied.x_mult;
-                    effect.dollars += copied.dollars;
-                }
-            }
-        }
-        JokerKind::Brainstorm => {
-            if let Some((first_idx, first)) = ctx.jokers.iter().enumerate().find(|(idx, j)| {
-                *idx != joker_idx
-                    && j.active
-                    && !matches!(j.kind, JokerKind::Blueprint | JokerKind::Brainstorm)
-            }) {
-                let copied = calc_joker_main(first, first_idx, ctx);
-                effect.chips  += copied.chips;
-                effect.mult   += copied.mult;
-                effect.x_mult *= copied.x_mult;
-                effect.dollars += copied.dollars;
-            }
-        }
+        // Handled up front via copy_target(); nothing to do here.
+        JokerKind::Blueprint | JokerKind::Brainstorm => {}
 
         _ => {}
     }

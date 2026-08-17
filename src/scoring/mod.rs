@@ -229,10 +229,10 @@ pub fn score_hand(
             }
 
             // Per-card joker effects
-            for joker in &active_jokers {
+            for (j_idx, joker) in jokers.iter().enumerate().filter(|(_, j)| j.active) {
                 let effect = calc_joker_individual(
-                    joker, card_idx, card, &scoring_indices, played_cards, has_pareidolia,
-                    round_targets,
+                    joker, j_idx, jokers, card_idx, card, &scoring_indices, played_cards,
+                    has_pareidolia, round_targets,
                 );
                 chips += effect.chips as f64;
                 mult  += effect.mult  as f64;
@@ -258,8 +258,8 @@ pub fn score_hand(
             }
         }
 
-        for joker in &active_jokers {
-            let effect = calc_joker_hand_card(joker, card);
+        for (j_idx, joker) in jokers.iter().enumerate().filter(|(_, j)| j.active) {
+            let effect = calc_joker_hand_card(joker, j_idx, jokers, card);
             mult  += effect.mult  as f64;
             mult  *= effect.x_mult;
             dollars_earned += effect.dollars;

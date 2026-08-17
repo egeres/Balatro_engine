@@ -469,6 +469,44 @@ impl JokerKind {
         }
     }
 
+    /// Whether Blueprint / Brainstorm can copy this joker (`blueprint_compat` in game.lua).
+    /// The incompatible ones are mostly passive rule-changers and once-per-round economy jokers
+    /// whose effects have no meaning when duplicated.
+    pub fn blueprint_compat(&self) -> bool {
+        !matches!(
+            self,
+            JokerKind::FourFingers
+                | JokerKind::CreditCard
+                | JokerKind::ChaosTheClown
+                | JokerKind::DelayedGratification
+                | JokerKind::Pareidolia
+                | JokerKind::Egg
+                | JokerKind::Splash
+                | JokerKind::SixthSense
+                | JokerKind::Shortcut
+                | JokerKind::Cloud9
+                | JokerKind::Rocket
+                | JokerKind::MidasMask
+                | JokerKind::GiftCard
+                | JokerKind::TurtleBean
+                | JokerKind::ToTheMoon
+                | JokerKind::Juggler
+                | JokerKind::Drunkard
+                | JokerKind::GoldenJoker
+                | JokerKind::TradingCard
+                | JokerKind::MrBones
+                | JokerKind::Troubadour
+                | JokerKind::SmearedJoker
+                | JokerKind::Showman
+                | JokerKind::MerryAndy
+                | JokerKind::OopsAll6s
+                | JokerKind::InvisibleJoker
+                | JokerKind::Satellite
+                | JokerKind::Astronomer
+                | JokerKind::Chicot
+        )
+    }
+
     pub fn rarity(&self) -> u8 {
         match self {
             JokerKind::Joker

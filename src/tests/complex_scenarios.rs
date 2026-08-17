@@ -1029,21 +1029,22 @@ fn test_scenario_swap_jokers_changes_blueprint_scoring_across_rounds() {
 // AbstractJoker gives +3×(joker count) = +3×4 = +12 mult throughout.
 // All rounds play a single Ace as High Card: chips=16, base mult=1.
 //
-// Blueprint (BP): copies the joker immediately to its right (skips BP/BS).
-// Brainstorm (BS): copies the leftmost non-BP/BS joker in the list.
+// Blueprint (BP): copies the joker immediately to its right, whatever it is.
+// Brainstorm (BS): copies the leftmost joker, whatever it is.
+// If the target is itself a copy joker the chain is followed; a BP<->BS loop yields nothing.
 //
 // Stage 1: [Joker, Blueprint, AbstractJoker, Brainstorm]
 //   Joker:         +4          → 5
 //   Blueprint:     copies AJ   → +12       (AJ is to BP's right)
 //   AbstractJoker: +12
-//   Brainstorm:    copies Joker → +4        (leftmost non-BP/BS)
+//   Brainstorm:    copies Joker → +4        (leftmost joker)
 //   mult = 1 + 4 + 12 + 12 + 4 = 33   →  16×33 = 528
 //
 // swap(1, 3) → [Joker, Brainstorm, AbstractJoker, Blueprint]
 //
 // Stage 2: [Joker, Brainstorm, AbstractJoker, Blueprint]
 //   Joker:         +4
-//   Brainstorm:    copies Joker → +4        (leftmost non-BP/BS)
+//   Brainstorm:    copies Joker → +4        (leftmost joker)
 //   AbstractJoker: +12
 //   Blueprint:     nothing to its right → 0
 //   mult = 1 + 4 + 4 + 12 + 0 = 21   →  16×21 = 336
@@ -1051,18 +1052,18 @@ fn test_scenario_swap_jokers_changes_blueprint_scoring_across_rounds() {
 // swap(0, 3) → [Blueprint, Brainstorm, AbstractJoker, Joker]
 //
 // Stage 3: [Blueprint, Brainstorm, AbstractJoker, Joker]
-//   Blueprint:     copies BS → skip; no valid right neighbour → 0
-//   Brainstorm:    copies AJ → +12          (leftmost non-BP/BS)
+//   Blueprint:     copies BS, which copies BP again → loop, no effect → 0
+//   Brainstorm:    copies BP, which copies BS again → loop, no effect → 0
 //   AbstractJoker: +12
 //   Joker:         +4
-//   mult = 1 + 0 + 12 + 12 + 4 = 29  →  16×29 = 464
+//   mult = 1 + 0 + 0 + 12 + 4 = 17  →  16×17 = 272
 //
 // swap(1, 2) → [Blueprint, AbstractJoker, Brainstorm, Joker]
 //
 // Stage 4: [Blueprint, AbstractJoker, Brainstorm, Joker]
 //   Blueprint:     copies AJ → +12          (AJ is to BP's right)
 //   AbstractJoker: +12
-//   Brainstorm:    copies AJ → +12          (leftmost non-BP/BS)
+//   Brainstorm:    copies BP, which copies AJ → +12
 //   Joker:         +4
 //   mult = 1 + 12 + 12 + 12 + 4 = 41 →  16×41 = 656
 #[test]
@@ -1104,8 +1105,8 @@ fn test_scenario_four_jokers_three_swaps_four_distinct_scores() {
     assert_eq!(gs.jokers[2].kind, JokerKind::AbstractJoker, "s2 slot2");
     assert_eq!(gs.jokers[3].kind, JokerKind::Joker,         "s2 slot3");
 
-    // ── Stage 3: [Blueprint, Brainstorm, AbstractJoker, Joker] → 464 ──
-    play_round!(gs, 30, 464, "Stage 3: [BP, BS, AJ, Joker] → 464");
+    // ── Stage 3: [Blueprint, Brainstorm, AbstractJoker, Joker] → 272 ──
+    play_round!(gs, 30, 272, "Stage 3: [BP, BS, AJ, Joker] → 272");
 
     // ── swap(1, 2) → [Blueprint, AbstractJoker, Brainstorm, Joker] ──
     gs.swap_jokers(1, 2).unwrap();
