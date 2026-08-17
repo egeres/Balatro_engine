@@ -367,3 +367,76 @@ fn test_ramen_survives_at_exactly_above_the_threshold() {
     assert_eq!(gs.jokers.len(), 1);
     assert!((gs.jokers[0].get_counter_f64("x_mult") - 1.01).abs() < 1e-9);
 }
+
+// =========================================================
+// Ceremonial Dagger: slices the joker to its right on blind select
+// =========================================================
+
+fn dagger_setup(jokers: Vec<JokerInstance>) -> GameState {
+    let mut gs = make_game();
+    gs.jokers = jokers;
+    gs.select_blind().unwrap();
+    gs
+}
+
+#[test]
+fn test_ceremonial_dagger_destroys_joker_to_its_right() {
+    let gs = dagger_setup(vec![
+        joker(0, JokerKind::CeremonialDagger),
+        joker(1, JokerKind::Blueprint), // cost 10 → sell value 5
+    ]);
+    assert_eq!(gs.jokers.len(), 1);
+    assert_eq!(gs.jokers[0].kind, JokerKind::CeremonialDagger);
+    // 2 x sell value (10/2 = 5) = +10 Mult
+    assert_eq!(gs.jokers[0].get_counter_i64("mult"), 10);
+}
+
+#[test]
+fn test_ceremonial_dagger_does_nothing_when_rightmost() {
+    let gs = dagger_setup(vec![
+        joker(0, JokerKind::Joker),
+        joker(1, JokerKind::CeremonialDagger),
+    ]);
+    assert_eq!(gs.jokers.len(), 2);
+    assert_eq!(gs.jokers[1].get_counter_i64("mult"), 0);
+}
+
+#[test]
+fn test_ceremonial_dagger_spares_eternal_jokers() {
+    let mut eternal = joker(1, JokerKind::Blueprint);
+    eternal.eternal = true;
+    let gs = dagger_setup(vec![joker(0, JokerKind::CeremonialDagger), eternal]);
+    assert_eq!(gs.jokers.len(), 2);
+    assert_eq!(gs.jokers[0].get_counter_i64("mult"), 0);
+}
+
+#[test]
+fn test_ceremonial_dagger_accumulates_across_blinds() {
+    let mut gs = make_game();
+    gs.jokers = vec![
+        joker(0, JokerKind::CeremonialDagger),
+        joker(1, JokerKind::Blueprint),   // sell 5 → +10
+        joker(2, JokerKind::Brainstorm),  // sell 5 → +10
+    ];
+    gs.select_blind().unwrap();
+    assert_eq!(gs.jokers[0].get_counter_i64("mult"), 10);
+
+    gs.state = crate::game::GameStateKind::BlindSelect;
+    gs.select_blind().unwrap();
+    assert_eq!(gs.jokers.len(), 1);
+    assert_eq!(gs.jokers[0].get_counter_i64("mult"), 20);
+}
+
+#[test]
+fn test_sliced_joker_does_not_fire_its_own_setting_blind_effect() {
+    // Marble Joker adds a stone card on blind select; sliced first, it must not.
+    let mut gs = make_game();
+    let deck_before = gs.deck.len();
+    gs.jokers = vec![
+        joker(0, JokerKind::CeremonialDagger),
+        joker(1, JokerKind::MarbleJoker),
+    ];
+    gs.select_blind().unwrap();
+    assert_eq!(gs.jokers.len(), 1);
+    assert_eq!(gs.deck.len(), deck_before, "sliced Marble Joker must not add a stone card");
+}

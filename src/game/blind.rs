@@ -354,7 +354,35 @@ impl GameState {
         }
     }
 
+    /// Ceremonial Dagger: on blind select, destroy the joker immediately to its right and gain
+    /// Mult equal to twice that joker's sell value (`card.lua:2561`). Eternal jokers are spared,
+    /// and a joker already marked for slicing cannot be sliced twice.
+    ///
+    /// Runs before the other setting-blind effects because a sliced joker must not get to fire
+    /// its own effect — Balatro guards those with `not self.getting_sliced`.
+    fn apply_ceremonial_daggers(&mut self) {
+        let mut sliced: Vec<u64> = Vec::new();
+        for i in 0..self.jokers.len() {
+            if self.jokers[i].kind != JokerKind::CeremonialDagger || !self.jokers[i].active {
+                continue;
+            }
+            let Some(target) = self.jokers.get(i + 1) else { continue };
+            if target.eternal || sliced.contains(&target.id) {
+                continue;
+            }
+            let gained = target.sell_value() as i64 * 2;
+            sliced.push(target.id);
+            let cur = self.jokers[i].get_counter_i64("mult");
+            self.jokers[i].set_counter_i64("mult", cur + gained);
+        }
+        if !sliced.is_empty() {
+            self.jokers.retain(|j| !sliced.contains(&j.id));
+        }
+    }
+
     fn notify_jokers_setting_blind(&mut self) {
+        self.apply_ceremonial_daggers();
+
         // Process jokers that trigger when blind is set
         let joker_kinds: Vec<JokerKind> = self.jokers.iter().map(|j| j.kind).collect();
         for kind in joker_kinds {
