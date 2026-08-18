@@ -1,6 +1,173 @@
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 
+/// Everything static about a joker, in one row.
+///
+/// One table instead of three parallel `match self` arms: a joker's name, price and rarity are
+/// read together far more often than apart, and keeping them on one line is what stops the three
+/// from drifting when a joker is added or retuned.
+struct JokerData {
+    kind: JokerKind,
+    name: &'static str,
+    cost: u32,
+    rarity: u8,
+}
+
+/// Every joker, in `order` from game.lua. Indexed by enum discriminant, so the order here is
+/// load-bearing — `joker_table_is_indexed_by_discriminant` guards it.
+const JOKERS: [JokerData; 150] = [
+    JokerData { kind: JokerKind::Joker,                name: "Joker",                 cost:  2, rarity: 1 },
+    JokerData { kind: JokerKind::GreedyJoker,          name: "Greedy Joker",          cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::LustyJoker,           name: "Lusty Joker",           cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::WrathfulJoker,        name: "Wrathful Joker",        cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::GluttonousJoker,      name: "Gluttonous Joker",      cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::JollyJoker,           name: "Jolly Joker",           cost:  3, rarity: 1 },
+    JokerData { kind: JokerKind::ZanyJoker,            name: "Zany Joker",            cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::MadJoker,             name: "Mad Joker",             cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::CrazyJoker,           name: "Crazy Joker",           cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::DrollJoker,           name: "Droll Joker",           cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::SlyJoker,             name: "Sly Joker",             cost:  3, rarity: 1 },
+    JokerData { kind: JokerKind::WilyJoker,            name: "Wily Joker",            cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::CleverJoker,          name: "Clever Joker",          cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::DeviousJoker,         name: "Devious Joker",         cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::CraftyJoker,          name: "Crafty Joker",          cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::HalfJoker,            name: "Half Joker",            cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::JokerStencil,         name: "Joker Stencil",         cost:  8, rarity: 2 },
+    JokerData { kind: JokerKind::FourFingers,          name: "Four Fingers",          cost:  7, rarity: 2 },
+    JokerData { kind: JokerKind::Mime,                 name: "Mime",                  cost:  5, rarity: 2 },
+    JokerData { kind: JokerKind::CreditCard,           name: "Credit Card",           cost:  1, rarity: 1 },
+    JokerData { kind: JokerKind::CeremonialDagger,     name: "Ceremonial Dagger",     cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::Banner,               name: "Banner",                cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::MysticSummit,         name: "Mystic Summit",         cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::MarbleJoker,          name: "Marble Joker",          cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::LoyaltyCard,          name: "Loyalty Card",          cost:  5, rarity: 2 },
+    JokerData { kind: JokerKind::EightBall,            name: "8 Ball",                cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::Misprint,             name: "Misprint",              cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::Dusk,                 name: "Dusk",                  cost:  5, rarity: 2 },
+    JokerData { kind: JokerKind::RaisedFist,           name: "Raised Fist",           cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::ChaosTheClown,        name: "Chaos the Clown",       cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::Fibonacci,            name: "Fibonacci",             cost:  8, rarity: 2 },
+    JokerData { kind: JokerKind::SteelJoker,           name: "Steel Joker",           cost:  7, rarity: 2 },
+    JokerData { kind: JokerKind::ScaryFace,            name: "Scary Face",            cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::AbstractJoker,        name: "Abstract Joker",        cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::DelayedGratification, name: "Delayed Gratification", cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::Hack,                 name: "Hack",                  cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::Pareidolia,           name: "Pareidolia",            cost:  5, rarity: 2 },
+    JokerData { kind: JokerKind::GrosMichel,           name: "Gros Michel",           cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::EvenSteven,           name: "Even Steven",           cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::OddTodd,              name: "Odd Todd",              cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::Scholar,              name: "Scholar",               cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::BusinessCard,         name: "Business Card",         cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::Supernova,            name: "Supernova",             cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::RideTheBus,           name: "Ride the Bus",          cost:  6, rarity: 1 },
+    JokerData { kind: JokerKind::SpaceJoker,           name: "Space Joker",           cost:  5, rarity: 2 },
+    JokerData { kind: JokerKind::Egg,                  name: "Egg",                   cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::Burglar,              name: "Burglar",               cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::Blackboard,           name: "Blackboard",            cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::Runner,               name: "Runner",                cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::IceCream,             name: "Ice Cream",             cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::Dna,                  name: "DNA",                   cost:  8, rarity: 3 },
+    JokerData { kind: JokerKind::Splash,               name: "Splash",                cost:  3, rarity: 1 },
+    JokerData { kind: JokerKind::BlueJoker,            name: "Blue Joker",            cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::SixthSense,           name: "Sixth Sense",           cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::Constellation,        name: "Constellation",         cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::Hiker,                name: "Hiker",                 cost:  5, rarity: 2 },
+    JokerData { kind: JokerKind::FacelessJoker,        name: "Faceless Joker",        cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::GreenJoker,           name: "Green Joker",           cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::Superposition,        name: "Superposition",         cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::ToDoList,             name: "To Do List",            cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::Cavendish,            name: "Cavendish",             cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::CardSharp,            name: "Card Sharp",            cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::RedCard,              name: "Red Card",              cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::Madness,              name: "Madness",               cost:  7, rarity: 2 },
+    JokerData { kind: JokerKind::SquareJoker,          name: "Square Joker",          cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::Seance,               name: "Seance",                cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::RiffRaff,             name: "Riff-raff",             cost:  6, rarity: 1 },
+    JokerData { kind: JokerKind::Vampire,              name: "Vampire",               cost:  7, rarity: 2 },
+    JokerData { kind: JokerKind::Shortcut,             name: "Shortcut",              cost:  7, rarity: 2 },
+    JokerData { kind: JokerKind::Hologram,             name: "Hologram",              cost:  7, rarity: 2 },
+    JokerData { kind: JokerKind::Vagabond,             name: "Vagabond",              cost:  8, rarity: 3 },
+    JokerData { kind: JokerKind::Baron,                name: "Baron",                 cost:  8, rarity: 3 },
+    JokerData { kind: JokerKind::Cloud9,               name: "Cloud 9",               cost:  7, rarity: 2 },
+    JokerData { kind: JokerKind::Rocket,               name: "Rocket",                cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::Obelisk,              name: "Obelisk",               cost:  8, rarity: 3 },
+    JokerData { kind: JokerKind::MidasMask,            name: "Midas Mask",            cost:  7, rarity: 2 },
+    JokerData { kind: JokerKind::Luchador,             name: "Luchador",              cost:  5, rarity: 2 },
+    JokerData { kind: JokerKind::Photograph,           name: "Photograph",            cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::GiftCard,             name: "Gift Card",             cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::TurtleBean,           name: "Turtle Bean",           cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::Erosion,              name: "Erosion",               cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::ReservedParking,      name: "Reserved Parking",      cost:  6, rarity: 1 },
+    JokerData { kind: JokerKind::MailInRebate,         name: "Mail-In Rebate",        cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::ToTheMoon,            name: "To the Moon",           cost:  5, rarity: 2 },
+    JokerData { kind: JokerKind::Hallucination,        name: "Hallucination",         cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::FortuneTeller,        name: "Fortune Teller",        cost:  6, rarity: 1 },
+    JokerData { kind: JokerKind::Juggler,              name: "Juggler",               cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::Drunkard,             name: "Drunkard",              cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::StoneJoker,           name: "Stone Joker",           cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::GoldenJoker,          name: "Golden Joker",          cost:  6, rarity: 1 },
+    JokerData { kind: JokerKind::LuckyCat,             name: "Lucky Cat",             cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::BaseballCard,         name: "Baseball Card",         cost:  8, rarity: 3 },
+    JokerData { kind: JokerKind::Bull,                 name: "Bull",                  cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::DietCola,             name: "Diet Cola",             cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::TradingCard,          name: "Trading Card",          cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::FlashCard,            name: "Flash Card",            cost:  5, rarity: 2 },
+    JokerData { kind: JokerKind::Popcorn,              name: "Popcorn",               cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::SpareTrousers,        name: "Spare Trousers",        cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::AncientJoker,         name: "Ancient Joker",         cost:  8, rarity: 3 },
+    JokerData { kind: JokerKind::Ramen,                name: "Ramen",                 cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::WalkieTalkie,         name: "Walkie Talkie",         cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::Seltzer,              name: "Seltzer",               cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::Castle,               name: "Castle",                cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::SmileyFace,           name: "Smiley Face",           cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::Campfire,             name: "Campfire",              cost:  9, rarity: 3 },
+    JokerData { kind: JokerKind::GoldenTicket,         name: "Golden Ticket",         cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::MrBones,              name: "Mr. Bones",             cost:  5, rarity: 2 },
+    JokerData { kind: JokerKind::Acrobat,              name: "Acrobat",               cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::SockAndBuskin,        name: "Sock and Buskin",       cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::Swashbuckler,         name: "Swashbuckler",          cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::Troubadour,           name: "Troubadour",            cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::Certificate,          name: "Certificate",           cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::SmearedJoker,         name: "Smeared Joker",         cost:  7, rarity: 2 },
+    JokerData { kind: JokerKind::Throwback,            name: "Throwback",             cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::HangingChad,          name: "Hanging Chad",          cost:  4, rarity: 1 },
+    JokerData { kind: JokerKind::RoughGem,             name: "Rough Gem",             cost:  7, rarity: 2 },
+    JokerData { kind: JokerKind::Bloodstone,           name: "Bloodstone",            cost:  7, rarity: 2 },
+    JokerData { kind: JokerKind::Arrowhead,            name: "Arrowhead",             cost:  7, rarity: 2 },
+    JokerData { kind: JokerKind::OnyxAgate,            name: "Onyx Agate",            cost:  7, rarity: 2 },
+    JokerData { kind: JokerKind::GlassJoker,           name: "Glass Joker",           cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::Showman,              name: "Showman",               cost:  5, rarity: 2 },
+    JokerData { kind: JokerKind::FlowerPot,            name: "Flower Pot",            cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::Blueprint,            name: "Blueprint",             cost: 10, rarity: 3 },
+    JokerData { kind: JokerKind::WeeJoker,             name: "Wee Joker",             cost:  8, rarity: 3 },
+    JokerData { kind: JokerKind::MerryAndy,            name: "Merry Andy",            cost:  7, rarity: 2 },
+    JokerData { kind: JokerKind::OopsAll6s,            name: "Oops! All 6s",          cost:  4, rarity: 2 },
+    JokerData { kind: JokerKind::TheIdol,              name: "The Idol",              cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::SeeingDouble,         name: "Seeing Double",         cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::Matador,              name: "Matador",               cost:  7, rarity: 2 },
+    JokerData { kind: JokerKind::HitTheRoad,           name: "Hit the Road",          cost:  8, rarity: 3 },
+    JokerData { kind: JokerKind::TheDuo,               name: "The Duo",               cost:  8, rarity: 3 },
+    JokerData { kind: JokerKind::TheTrio,              name: "The Trio",              cost:  8, rarity: 3 },
+    JokerData { kind: JokerKind::TheFamily,            name: "The Family",            cost:  8, rarity: 3 },
+    JokerData { kind: JokerKind::TheOrder,             name: "The Order",             cost:  8, rarity: 3 },
+    JokerData { kind: JokerKind::TheTribe,             name: "The Tribe",             cost:  8, rarity: 3 },
+    JokerData { kind: JokerKind::Stuntman,             name: "Stuntman",              cost:  7, rarity: 3 },
+    JokerData { kind: JokerKind::InvisibleJoker,       name: "Invisible Joker",       cost:  8, rarity: 3 },
+    JokerData { kind: JokerKind::Brainstorm,           name: "Brainstorm",            cost: 10, rarity: 3 },
+    JokerData { kind: JokerKind::Satellite,            name: "Satellite",             cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::ShootTheMoon,         name: "Shoot the Moon",        cost:  5, rarity: 1 },
+    JokerData { kind: JokerKind::DriversLicense,       name: "Driver's License",      cost:  7, rarity: 3 },
+    JokerData { kind: JokerKind::Cartomancer,          name: "Cartomancer",           cost:  6, rarity: 2 },
+    JokerData { kind: JokerKind::Astronomer,           name: "Astronomer",            cost:  8, rarity: 2 },
+    JokerData { kind: JokerKind::BurntJoker,           name: "Burnt Joker",           cost:  8, rarity: 3 },
+    JokerData { kind: JokerKind::Bootstraps,           name: "Bootstraps",            cost:  7, rarity: 2 },
+    JokerData { kind: JokerKind::Canio,                name: "Canio",                 cost: 20, rarity: 4 },
+    JokerData { kind: JokerKind::Triboulet,            name: "Triboulet",             cost: 20, rarity: 4 },
+    JokerData { kind: JokerKind::Yorick,               name: "Yorick",                cost: 20, rarity: 4 },
+    JokerData { kind: JokerKind::Chicot,               name: "Chicot",                cost: 20, rarity: 4 },
+    JokerData { kind: JokerKind::Perkeo,               name: "Perkeo",                cost: 20, rarity: 4 },
+];
+
 #[pyclass(eq, eq_int)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum JokerKind {
@@ -162,311 +329,11 @@ impl JokerKind {
         format!("{:?}", self)
     }
     pub fn display_name(&self) -> &'static str {
-        match self {
-            JokerKind::Joker => "Joker",
-            JokerKind::GreedyJoker => "Greedy Joker",
-            JokerKind::LustyJoker => "Lusty Joker",
-            JokerKind::WrathfulJoker => "Wrathful Joker",
-            JokerKind::GluttonousJoker => "Gluttonous Joker",
-            JokerKind::JollyJoker => "Jolly Joker",
-            JokerKind::ZanyJoker => "Zany Joker",
-            JokerKind::MadJoker => "Mad Joker",
-            JokerKind::CrazyJoker => "Crazy Joker",
-            JokerKind::DrollJoker => "Droll Joker",
-            JokerKind::SlyJoker => "Sly Joker",
-            JokerKind::WilyJoker => "Wily Joker",
-            JokerKind::CleverJoker => "Clever Joker",
-            JokerKind::DeviousJoker => "Devious Joker",
-            JokerKind::CraftyJoker => "Crafty Joker",
-            JokerKind::HalfJoker => "Half Joker",
-            JokerKind::JokerStencil => "Joker Stencil",
-            JokerKind::FourFingers => "Four Fingers",
-            JokerKind::Mime => "Mime",
-            JokerKind::CreditCard => "Credit Card",
-            JokerKind::CeremonialDagger => "Ceremonial Dagger",
-            JokerKind::Banner => "Banner",
-            JokerKind::MysticSummit => "Mystic Summit",
-            JokerKind::MarbleJoker => "Marble Joker",
-            JokerKind::LoyaltyCard => "Loyalty Card",
-            JokerKind::EightBall => "8 Ball",
-            JokerKind::Misprint => "Misprint",
-            JokerKind::Dusk => "Dusk",
-            JokerKind::RaisedFist => "Raised Fist",
-            JokerKind::ChaosTheClown => "Chaos the Clown",
-            JokerKind::Fibonacci => "Fibonacci",
-            JokerKind::SteelJoker => "Steel Joker",
-            JokerKind::ScaryFace => "Scary Face",
-            JokerKind::AbstractJoker => "Abstract Joker",
-            JokerKind::DelayedGratification => "Delayed Gratification",
-            JokerKind::Hack => "Hack",
-            JokerKind::Pareidolia => "Pareidolia",
-            JokerKind::GrosMichel => "Gros Michel",
-            JokerKind::EvenSteven => "Even Steven",
-            JokerKind::OddTodd => "Odd Todd",
-            JokerKind::Scholar => "Scholar",
-            JokerKind::BusinessCard => "Business Card",
-            JokerKind::Supernova => "Supernova",
-            JokerKind::RideTheBus => "Ride the Bus",
-            JokerKind::SpaceJoker => "Space Joker",
-            JokerKind::Egg => "Egg",
-            JokerKind::Burglar => "Burglar",
-            JokerKind::Blackboard => "Blackboard",
-            JokerKind::Runner => "Runner",
-            JokerKind::IceCream => "Ice Cream",
-            JokerKind::Dna => "DNA",
-            JokerKind::Splash => "Splash",
-            JokerKind::BlueJoker => "Blue Joker",
-            JokerKind::SixthSense => "Sixth Sense",
-            JokerKind::Constellation => "Constellation",
-            JokerKind::Hiker => "Hiker",
-            JokerKind::FacelessJoker => "Faceless Joker",
-            JokerKind::GreenJoker => "Green Joker",
-            JokerKind::Superposition => "Superposition",
-            JokerKind::ToDoList => "To Do List",
-            JokerKind::Cavendish => "Cavendish",
-            JokerKind::CardSharp => "Card Sharp",
-            JokerKind::RedCard => "Red Card",
-            JokerKind::Madness => "Madness",
-            JokerKind::SquareJoker => "Square Joker",
-            JokerKind::Seance => "Seance",
-            JokerKind::RiffRaff => "Riff-raff",
-            JokerKind::Vampire => "Vampire",
-            JokerKind::Shortcut => "Shortcut",
-            JokerKind::Hologram => "Hologram",
-            JokerKind::Vagabond => "Vagabond",
-            JokerKind::Baron => "Baron",
-            JokerKind::Cloud9 => "Cloud 9",
-            JokerKind::Rocket => "Rocket",
-            JokerKind::Obelisk => "Obelisk",
-            JokerKind::MidasMask => "Midas Mask",
-            JokerKind::Luchador => "Luchador",
-            JokerKind::Photograph => "Photograph",
-            JokerKind::GiftCard => "Gift Card",
-            JokerKind::TurtleBean => "Turtle Bean",
-            JokerKind::Erosion => "Erosion",
-            JokerKind::ReservedParking => "Reserved Parking",
-            JokerKind::MailInRebate => "Mail-In Rebate",
-            JokerKind::ToTheMoon => "To the Moon",
-            JokerKind::Hallucination => "Hallucination",
-            JokerKind::FortuneTeller => "Fortune Teller",
-            JokerKind::Juggler => "Juggler",
-            JokerKind::Drunkard => "Drunkard",
-            JokerKind::StoneJoker => "Stone Joker",
-            JokerKind::GoldenJoker => "Golden Joker",
-            JokerKind::LuckyCat => "Lucky Cat",
-            JokerKind::BaseballCard => "Baseball Card",
-            JokerKind::Bull => "Bull",
-            JokerKind::DietCola => "Diet Cola",
-            JokerKind::TradingCard => "Trading Card",
-            JokerKind::FlashCard => "Flash Card",
-            JokerKind::Popcorn => "Popcorn",
-            JokerKind::SpareTrousers => "Spare Trousers",
-            JokerKind::AncientJoker => "Ancient Joker",
-            JokerKind::Ramen => "Ramen",
-            JokerKind::WalkieTalkie => "Walkie Talkie",
-            JokerKind::Seltzer => "Seltzer",
-            JokerKind::Castle => "Castle",
-            JokerKind::SmileyFace => "Smiley Face",
-            JokerKind::Campfire => "Campfire",
-            JokerKind::GoldenTicket => "Golden Ticket",
-            JokerKind::MrBones => "Mr. Bones",
-            JokerKind::Acrobat => "Acrobat",
-            JokerKind::SockAndBuskin => "Sock and Buskin",
-            JokerKind::Swashbuckler => "Swashbuckler",
-            JokerKind::Troubadour => "Troubadour",
-            JokerKind::Certificate => "Certificate",
-            JokerKind::SmearedJoker => "Smeared Joker",
-            JokerKind::Throwback => "Throwback",
-            JokerKind::HangingChad => "Hanging Chad",
-            JokerKind::RoughGem => "Rough Gem",
-            JokerKind::Bloodstone => "Bloodstone",
-            JokerKind::Arrowhead => "Arrowhead",
-            JokerKind::OnyxAgate => "Onyx Agate",
-            JokerKind::GlassJoker => "Glass Joker",
-            JokerKind::Showman => "Showman",
-            JokerKind::FlowerPot => "Flower Pot",
-            JokerKind::Blueprint => "Blueprint",
-            JokerKind::WeeJoker => "Wee Joker",
-            JokerKind::MerryAndy => "Merry Andy",
-            JokerKind::OopsAll6s => "Oops! All 6s",
-            JokerKind::TheIdol => "The Idol",
-            JokerKind::SeeingDouble => "Seeing Double",
-            JokerKind::Matador => "Matador",
-            JokerKind::HitTheRoad => "Hit the Road",
-            JokerKind::TheDuo => "The Duo",
-            JokerKind::TheTrio => "The Trio",
-            JokerKind::TheFamily => "The Family",
-            JokerKind::TheOrder => "The Order",
-            JokerKind::TheTribe => "The Tribe",
-            JokerKind::Stuntman => "Stuntman",
-            JokerKind::InvisibleJoker => "Invisible Joker",
-            JokerKind::Brainstorm => "Brainstorm",
-            JokerKind::Satellite => "Satellite",
-            JokerKind::ShootTheMoon => "Shoot the Moon",
-            JokerKind::DriversLicense => "Driver's License",
-            JokerKind::Cartomancer => "Cartomancer",
-            JokerKind::Astronomer => "Astronomer",
-            JokerKind::BurntJoker => "Burnt Joker",
-            JokerKind::Bootstraps => "Bootstraps",
-            JokerKind::Canio => "Canio",
-            JokerKind::Triboulet => "Triboulet",
-            JokerKind::Yorick => "Yorick",
-            JokerKind::Chicot => "Chicot",
-            JokerKind::Perkeo => "Perkeo",
-        }
+        self.data().name
     }
 
     pub fn base_cost(&self) -> u32 {
-        match self {
-            JokerKind::Joker => 2,
-            JokerKind::GreedyJoker
-            | JokerKind::LustyJoker
-            | JokerKind::WrathfulJoker
-            | JokerKind::GluttonousJoker => 5,
-            JokerKind::JollyJoker => 3,
-            JokerKind::ZanyJoker
-            | JokerKind::MadJoker
-            | JokerKind::CrazyJoker
-            | JokerKind::DrollJoker => 4,
-            JokerKind::SlyJoker => 3,
-            JokerKind::WilyJoker
-            | JokerKind::CleverJoker
-            | JokerKind::DeviousJoker
-            | JokerKind::CraftyJoker => 4,
-            JokerKind::HalfJoker => 5,
-            JokerKind::JokerStencil => 8,
-            JokerKind::FourFingers => 7,
-            JokerKind::Mime => 5,
-            JokerKind::CreditCard => 1,
-            JokerKind::CeremonialDagger => 6,
-            JokerKind::Banner => 5,
-            JokerKind::MysticSummit => 5,
-            JokerKind::MarbleJoker => 6,
-            JokerKind::LoyaltyCard => 5,
-            JokerKind::EightBall => 5,
-            JokerKind::Misprint => 4,
-            JokerKind::Dusk => 5,
-            JokerKind::RaisedFist => 5,
-            JokerKind::ChaosTheClown => 4,
-            JokerKind::Fibonacci => 8,
-            JokerKind::SteelJoker => 7,
-            JokerKind::ScaryFace => 4,
-            JokerKind::AbstractJoker => 4,
-            JokerKind::DelayedGratification => 4,
-            JokerKind::Hack => 6,
-            JokerKind::Pareidolia => 5,
-            JokerKind::GrosMichel => 5,
-            JokerKind::EvenSteven | JokerKind::OddTodd | JokerKind::Scholar => 4,
-            JokerKind::BusinessCard => 4,
-            JokerKind::Supernova => 5,
-            JokerKind::RideTheBus => 6,
-            JokerKind::SpaceJoker => 5,
-            JokerKind::Egg => 4,
-            JokerKind::Burglar => 6,
-            JokerKind::Blackboard => 6,
-            JokerKind::Runner => 5,
-            JokerKind::IceCream => 5,
-            JokerKind::Dna => 8,
-            JokerKind::Splash => 3,
-            JokerKind::BlueJoker => 5,
-            JokerKind::SixthSense => 6,
-            JokerKind::Constellation => 6,
-            JokerKind::Hiker => 5,
-            JokerKind::FacelessJoker => 4,
-            JokerKind::GreenJoker => 4,
-            JokerKind::Superposition => 4,
-            JokerKind::ToDoList => 4,
-            JokerKind::Cavendish => 4,
-            JokerKind::CardSharp => 6,
-            JokerKind::RedCard => 5,
-            JokerKind::Madness => 7,
-            JokerKind::SquareJoker => 4,
-            JokerKind::Seance => 6,
-            JokerKind::RiffRaff => 6,
-            JokerKind::Vampire => 7,
-            JokerKind::Shortcut => 7,
-            JokerKind::Hologram => 7,
-            JokerKind::Vagabond => 8,
-            JokerKind::Baron => 8,
-            JokerKind::Cloud9 => 7,
-            JokerKind::Rocket => 6,
-            JokerKind::Obelisk => 8,
-            JokerKind::MidasMask => 7,
-            JokerKind::Luchador => 5,
-            JokerKind::Photograph => 5,
-            JokerKind::GiftCard => 6,
-            JokerKind::TurtleBean => 6,
-            JokerKind::Erosion => 6,
-            JokerKind::ReservedParking => 6,
-            JokerKind::MailInRebate => 4,
-            JokerKind::ToTheMoon => 5,
-            JokerKind::Hallucination => 4,
-            JokerKind::FortuneTeller => 6,
-            JokerKind::Juggler => 4,
-            JokerKind::Drunkard => 4,
-            JokerKind::StoneJoker => 6,
-            JokerKind::GoldenJoker => 6,
-            JokerKind::LuckyCat => 6,
-            JokerKind::BaseballCard => 8,
-            JokerKind::Bull => 6,
-            JokerKind::DietCola => 6,
-            JokerKind::TradingCard => 6,
-            JokerKind::FlashCard => 5,
-            JokerKind::Popcorn => 5,
-            JokerKind::SpareTrousers => 6,
-            JokerKind::AncientJoker => 8,
-            JokerKind::Ramen => 6,
-            JokerKind::WalkieTalkie => 4,
-            JokerKind::Seltzer => 6,
-            JokerKind::Castle => 6,
-            JokerKind::SmileyFace => 4,
-            JokerKind::Campfire => 9,
-            JokerKind::GoldenTicket => 5,
-            JokerKind::MrBones => 5,
-            JokerKind::Acrobat => 6,
-            JokerKind::SockAndBuskin => 6,
-            JokerKind::Swashbuckler => 4,
-            JokerKind::Troubadour => 6,
-            JokerKind::Certificate => 6,
-            JokerKind::SmearedJoker => 7,
-            JokerKind::Throwback => 6,
-            JokerKind::HangingChad => 4,
-            JokerKind::RoughGem => 7,
-            JokerKind::Bloodstone => 7,
-            JokerKind::Arrowhead => 7,
-            JokerKind::OnyxAgate => 7,
-            JokerKind::GlassJoker => 6,
-            JokerKind::Showman => 5,
-            JokerKind::FlowerPot => 6,
-            JokerKind::Blueprint => 10,
-            JokerKind::WeeJoker => 8,
-            JokerKind::MerryAndy => 7,
-            JokerKind::OopsAll6s => 4,
-            JokerKind::TheIdol => 6,
-            JokerKind::SeeingDouble => 6,
-            JokerKind::Matador => 7,
-            JokerKind::HitTheRoad => 8,
-            JokerKind::TheDuo
-            | JokerKind::TheTrio
-            | JokerKind::TheFamily
-            | JokerKind::TheOrder
-            | JokerKind::TheTribe => 8,
-            JokerKind::Stuntman => 7,
-            JokerKind::InvisibleJoker => 8,
-            JokerKind::Brainstorm => 10,
-            JokerKind::Satellite => 6,
-            JokerKind::ShootTheMoon => 5,
-            JokerKind::DriversLicense => 7,
-            JokerKind::Cartomancer => 6,
-            JokerKind::Astronomer => 8,
-            JokerKind::BurntJoker => 8,
-            JokerKind::Bootstraps => 7,
-            JokerKind::Canio
-            | JokerKind::Triboulet
-            | JokerKind::Yorick
-            | JokerKind::Chicot
-            | JokerKind::Perkeo => 20,
-        }
+        self.data().cost
     }
 
     /// Whether this joker can be given the Eternal sticker (`eternal_compat` in game.lua).
@@ -553,318 +420,45 @@ impl JokerKind {
     }
 
     pub fn rarity(&self) -> u8 {
-        match self {
-            JokerKind::Joker
-            | JokerKind::GreedyJoker
-            | JokerKind::LustyJoker
-            | JokerKind::WrathfulJoker
-            | JokerKind::GluttonousJoker
-            | JokerKind::JollyJoker
-            | JokerKind::ZanyJoker
-            | JokerKind::MadJoker
-            | JokerKind::CrazyJoker
-            | JokerKind::DrollJoker
-            | JokerKind::SlyJoker
-            | JokerKind::WilyJoker
-            | JokerKind::CleverJoker
-            | JokerKind::DeviousJoker
-            | JokerKind::CraftyJoker
-            | JokerKind::HalfJoker
-            | JokerKind::CreditCard
-            | JokerKind::Banner
-            | JokerKind::MysticSummit
-            | JokerKind::EightBall
-            | JokerKind::Misprint
-            | JokerKind::RaisedFist
-            | JokerKind::ChaosTheClown
-            | JokerKind::ScaryFace
-            | JokerKind::AbstractJoker
-            | JokerKind::DelayedGratification
-            | JokerKind::GrosMichel
-            | JokerKind::EvenSteven
-            | JokerKind::OddTodd
-            | JokerKind::Scholar
-            | JokerKind::BusinessCard
-            | JokerKind::Supernova
-            | JokerKind::RideTheBus
-            | JokerKind::Egg
-            | JokerKind::Runner
-            | JokerKind::IceCream
-            | JokerKind::Splash
-            | JokerKind::BlueJoker
-            | JokerKind::FacelessJoker
-            | JokerKind::GreenJoker
-            | JokerKind::Superposition
-            | JokerKind::ToDoList
-            | JokerKind::Cavendish
-            | JokerKind::RedCard
-            | JokerKind::SquareJoker
-            | JokerKind::RiffRaff
-            | JokerKind::Photograph
-            | JokerKind::MailInRebate
-            | JokerKind::FortuneTeller
-            | JokerKind::Juggler
-            | JokerKind::Drunkard
-            | JokerKind::GoldenJoker
-            | JokerKind::WalkieTalkie
-            | JokerKind::SmileyFace
-            | JokerKind::GoldenTicket
-            | JokerKind::Swashbuckler
-            | JokerKind::HangingChad
-            | JokerKind::ReservedParking
-            | JokerKind::ShootTheMoon
-            | JokerKind::Hallucination
-            | JokerKind::Popcorn => 1,
-
-            JokerKind::JokerStencil
-            | JokerKind::FourFingers
-            | JokerKind::Mime
-            | JokerKind::CeremonialDagger
-            | JokerKind::MarbleJoker
-            | JokerKind::LoyaltyCard
-            | JokerKind::Dusk
-            | JokerKind::Fibonacci
-            | JokerKind::SteelJoker
-            | JokerKind::Hack
-            | JokerKind::Pareidolia
-            | JokerKind::SpaceJoker
-            | JokerKind::Burglar
-            | JokerKind::Blackboard
-            | JokerKind::SixthSense
-            | JokerKind::Constellation
-            | JokerKind::Hiker
-            | JokerKind::CardSharp
-            | JokerKind::Madness
-            | JokerKind::Seance
-            | JokerKind::Vampire
-            | JokerKind::Shortcut
-            | JokerKind::Hologram
-            | JokerKind::Cloud9
-            | JokerKind::Rocket
-            | JokerKind::MidasMask
-            | JokerKind::Luchador
-            | JokerKind::GiftCard
-            | JokerKind::TurtleBean
-            | JokerKind::Erosion
-            | JokerKind::ToTheMoon
-            | JokerKind::LuckyCat
-            | JokerKind::Bull
-            | JokerKind::DietCola
-            | JokerKind::TradingCard
-            | JokerKind::FlashCard
-            | JokerKind::SpareTrousers
-            | JokerKind::Ramen
-            | JokerKind::Seltzer
-            | JokerKind::Castle
-            | JokerKind::MrBones
-            | JokerKind::Acrobat
-            | JokerKind::SockAndBuskin
-            | JokerKind::Troubadour
-            | JokerKind::Certificate
-            | JokerKind::SmearedJoker
-            | JokerKind::Throwback
-            | JokerKind::RoughGem
-            | JokerKind::Bloodstone
-            | JokerKind::Arrowhead
-            | JokerKind::OnyxAgate
-            | JokerKind::GlassJoker
-            | JokerKind::Showman
-            | JokerKind::FlowerPot
-            | JokerKind::SeeingDouble
-            | JokerKind::Matador
-            | JokerKind::Satellite
-            | JokerKind::Cartomancer
-            | JokerKind::Astronomer
-            | JokerKind::Bootstraps
-            | JokerKind::TheIdol
-            | JokerKind::OopsAll6s => 2,
-
-            JokerKind::Dna
-            | JokerKind::Stuntman
-            | JokerKind::Vagabond
-            | JokerKind::Baron
-            | JokerKind::Obelisk
-            | JokerKind::BaseballCard
-            | JokerKind::AncientJoker
-            | JokerKind::Campfire
-            | JokerKind::Blueprint
-            | JokerKind::WeeJoker
-            | JokerKind::HitTheRoad
-            | JokerKind::TheDuo
-            | JokerKind::TheTrio
-            | JokerKind::TheFamily
-            | JokerKind::TheOrder
-            | JokerKind::TheTribe
-            | JokerKind::InvisibleJoker
-            | JokerKind::Brainstorm
-            | JokerKind::DriversLicense
-            | JokerKind::BurntJoker => 3,
-
-            JokerKind::Canio
-            | JokerKind::Triboulet
-            | JokerKind::Yorick
-            | JokerKind::Chicot
-            | JokerKind::Perkeo => 4,
-
-            JokerKind::StoneJoker
-            | JokerKind::MerryAndy => 2,
-        }
+        self.data().rarity
     }
 }
 
 impl JokerKind {
-    /// Every joker, in `order` from game.lua. Kept exhaustive so pool generation cannot silently
-    /// drop entries when a joker is added.
-    pub const ALL: [JokerKind; 150] = [
-        JokerKind::Joker,
-        JokerKind::GreedyJoker,
-        JokerKind::LustyJoker,
-        JokerKind::WrathfulJoker,
-        JokerKind::GluttonousJoker,
-        JokerKind::JollyJoker,
-        JokerKind::ZanyJoker,
-        JokerKind::MadJoker,
-        JokerKind::CrazyJoker,
-        JokerKind::DrollJoker,
-        JokerKind::SlyJoker,
-        JokerKind::WilyJoker,
-        JokerKind::CleverJoker,
-        JokerKind::DeviousJoker,
-        JokerKind::CraftyJoker,
-        JokerKind::HalfJoker,
-        JokerKind::JokerStencil,
-        JokerKind::FourFingers,
-        JokerKind::Mime,
-        JokerKind::CreditCard,
-        JokerKind::CeremonialDagger,
-        JokerKind::Banner,
-        JokerKind::MysticSummit,
-        JokerKind::MarbleJoker,
-        JokerKind::LoyaltyCard,
-        JokerKind::EightBall,
-        JokerKind::Misprint,
-        JokerKind::Dusk,
-        JokerKind::RaisedFist,
-        JokerKind::ChaosTheClown,
-        JokerKind::Fibonacci,
-        JokerKind::SteelJoker,
-        JokerKind::ScaryFace,
-        JokerKind::AbstractJoker,
-        JokerKind::DelayedGratification,
-        JokerKind::Hack,
-        JokerKind::Pareidolia,
-        JokerKind::GrosMichel,
-        JokerKind::EvenSteven,
-        JokerKind::OddTodd,
-        JokerKind::Scholar,
-        JokerKind::BusinessCard,
-        JokerKind::Supernova,
-        JokerKind::RideTheBus,
-        JokerKind::SpaceJoker,
-        JokerKind::Egg,
-        JokerKind::Burglar,
-        JokerKind::Blackboard,
-        JokerKind::Runner,
-        JokerKind::IceCream,
-        JokerKind::Dna,
-        JokerKind::Splash,
-        JokerKind::BlueJoker,
-        JokerKind::SixthSense,
-        JokerKind::Constellation,
-        JokerKind::Hiker,
-        JokerKind::FacelessJoker,
-        JokerKind::GreenJoker,
-        JokerKind::Superposition,
-        JokerKind::ToDoList,
-        JokerKind::Cavendish,
-        JokerKind::CardSharp,
-        JokerKind::RedCard,
-        JokerKind::Madness,
-        JokerKind::SquareJoker,
-        JokerKind::Seance,
-        JokerKind::RiffRaff,
-        JokerKind::Vampire,
-        JokerKind::Shortcut,
-        JokerKind::Hologram,
-        JokerKind::Vagabond,
-        JokerKind::Baron,
-        JokerKind::Cloud9,
-        JokerKind::Rocket,
-        JokerKind::Obelisk,
-        JokerKind::MidasMask,
-        JokerKind::Luchador,
-        JokerKind::Photograph,
-        JokerKind::GiftCard,
-        JokerKind::TurtleBean,
-        JokerKind::Erosion,
-        JokerKind::ReservedParking,
-        JokerKind::MailInRebate,
-        JokerKind::ToTheMoon,
-        JokerKind::Hallucination,
-        JokerKind::FortuneTeller,
-        JokerKind::Juggler,
-        JokerKind::Drunkard,
-        JokerKind::StoneJoker,
-        JokerKind::GoldenJoker,
-        JokerKind::LuckyCat,
-        JokerKind::BaseballCard,
-        JokerKind::Bull,
-        JokerKind::DietCola,
-        JokerKind::TradingCard,
-        JokerKind::FlashCard,
-        JokerKind::Popcorn,
-        JokerKind::SpareTrousers,
-        JokerKind::AncientJoker,
-        JokerKind::Ramen,
-        JokerKind::WalkieTalkie,
-        JokerKind::Seltzer,
-        JokerKind::Castle,
-        JokerKind::SmileyFace,
-        JokerKind::Campfire,
-        JokerKind::GoldenTicket,
-        JokerKind::MrBones,
-        JokerKind::Acrobat,
-        JokerKind::SockAndBuskin,
-        JokerKind::Swashbuckler,
-        JokerKind::Troubadour,
-        JokerKind::Certificate,
-        JokerKind::SmearedJoker,
-        JokerKind::Throwback,
-        JokerKind::HangingChad,
-        JokerKind::RoughGem,
-        JokerKind::Bloodstone,
-        JokerKind::Arrowhead,
-        JokerKind::OnyxAgate,
-        JokerKind::GlassJoker,
-        JokerKind::Showman,
-        JokerKind::FlowerPot,
-        JokerKind::Blueprint,
-        JokerKind::WeeJoker,
-        JokerKind::MerryAndy,
-        JokerKind::OopsAll6s,
-        JokerKind::TheIdol,
-        JokerKind::SeeingDouble,
-        JokerKind::Matador,
-        JokerKind::HitTheRoad,
-        JokerKind::TheDuo,
-        JokerKind::TheTrio,
-        JokerKind::TheFamily,
-        JokerKind::TheOrder,
-        JokerKind::TheTribe,
-        JokerKind::Stuntman,
-        JokerKind::InvisibleJoker,
-        JokerKind::Brainstorm,
-        JokerKind::Satellite,
-        JokerKind::ShootTheMoon,
-        JokerKind::DriversLicense,
-        JokerKind::Cartomancer,
-        JokerKind::Astronomer,
-        JokerKind::BurntJoker,
-        JokerKind::Bootstraps,
-        JokerKind::Canio,
-        JokerKind::Triboulet,
-        JokerKind::Yorick,
-        JokerKind::Chicot,
-        JokerKind::Perkeo,
-    ];
+    /// Every joker, in `order` from game.lua.
+    ///
+    /// Derived from [`JOKERS`] rather than written out a second time, so a joker cannot be added
+    /// to the table and then quietly left out of every pool.
+    pub const ALL: [JokerKind; JOKERS.len()] = {
+        let mut all = [JokerKind::Joker; JOKERS.len()];
+        let mut i = 0;
+        while i < JOKERS.len() {
+            all[i] = JOKERS[i].kind;
+            i += 1;
+        }
+        all
+    };
+
+    /// This joker's row in [`JOKERS`].
+    fn data(&self) -> &'static JokerData {
+        &JOKERS[*self as usize]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `JokerKind::data` indexes [`JOKERS`] by discriminant, so a row inserted out of order would
+    /// silently hand every joker after it the wrong name, price and rarity.
+    #[test]
+    fn joker_table_is_indexed_by_discriminant() {
+        for (i, entry) in JOKERS.iter().enumerate() {
+            assert_eq!(
+                entry.kind as usize, i,
+                "JOKERS[{i}] holds {:?}, whose discriminant is {}",
+                entry.kind, entry.kind as usize
+            );
+        }
+    }
 }

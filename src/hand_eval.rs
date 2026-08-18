@@ -148,148 +148,83 @@ fn evaluate_hand_inner(
 
     let eval_cards: Vec<&CardInstance> = eval_indices.iter().map(|&i| &cards[i]).collect();
 
-    let flush_threshold = if four_fingers { 4 } else { 5 };
-    let straight_threshold = if four_fingers { 4 } else { 5 };
+    // Four Fingers lets a flush or a straight get there with four cards instead of five.
+    let threshold = if four_fingers { 4 } else { 5 };
 
-    // Check flush
-    let flush_result = check_flush(&eval_cards, &eval_indices, flush_threshold, smeared);
-    // Check straight
-    let straight_result = check_straight(&eval_cards, &eval_indices, straight_threshold, shortcut);
-    // Check groups (pairs, trips, quads, quints)
+    let flush = check_flush(&eval_cards, &eval_indices, threshold, smeared);
+    let straight = check_straight(&eval_cards, &eval_indices, threshold, shortcut);
     let groups = get_rank_groups(&eval_cards, &eval_indices);
 
-    // Now determine best hand
-    // Flush Five: 5+ cards of same suit + same rank
-    if let Some(ref flush_idxs) = flush_result {
-        if flush_idxs.len() >= 5 {
-            let flush_cards: Vec<&CardInstance> = flush_idxs.iter().map(|&i| &cards[i]).collect();
-            if let Some(five_kind) = find_five_of_kind(&flush_cards, &flush_idxs[..]) {
-                if five_kind.len() >= 5 {
-                    return HandEvalResult {
-                        hand_type: HandType::FlushFive,
-                        scoring_indices: five_kind,
-                        contained: ContainedHands::default(),
-                    };
-                }
-            }
-            // Flush House: full house all same suit
-            if let Some(fh) = find_full_house(&flush_cards, &flush_idxs[..]) {
-                if fh.len() >= 5 {
-                    return HandEvalResult {
-                        hand_type: HandType::FlushHouse,
-                        scoring_indices: fh,
-                        contained: ContainedHands::default(),
-                    };
-                }
-            }
+    // The hands, best first. The first rule to fire wins, so this ordering *is* the hand
+    // ranking — the sequence below should read as the paytable, top to bottom.
+
+    // The two flush-and-something hands share a prerequisite, so they are tested together.
+    if let Some(flush_idxs) = flush.as_ref().filter(|v| v.len() >= 5) {
+        let flush_cards: Vec<&CardInstance> = flush_idxs.iter().map(|&i| &cards[i]).collect();
+        if let Some(five) = find_five_of_kind(&flush_cards, flush_idxs).filter(|v| v.len() >= 5) {
+            return hand(HandType::FlushFive, five);
+        }
+        if let Some(full) = find_full_house(&flush_cards, flush_idxs).filter(|v| v.len() >= 5) {
+            return hand(HandType::FlushHouse, full);
         }
     }
 
-    // Five of a Kind
-    if let Some(five) = find_five_of_kind(&eval_cards, &eval_indices) {
-        if five.len() >= 5 {
-            return HandEvalResult {
-                hand_type: HandType::FiveOfAKind,
-                scoring_indices: five,
-                contained: ContainedHands::default(),
-            };
-        }
+    if let Some(five) = find_five_of_kind(&eval_cards, &eval_indices).filter(|v| v.len() >= 5) {
+        return hand(HandType::FiveOfAKind, five);
     }
 
-    // Straight Flush
-    if let (Some(flush_idxs), Some(straight_idxs)) = (&flush_result, &straight_result) {
-        // Intersection: cards that are in both flush and straight
-        let sf_idxs: Vec<usize> = straight_idxs
+    // Straight Flush scores the cards that are in both the straight and the flush.
+    if let (Some(flush_idxs), Some(straight_idxs)) = (&flush, &straight) {
+        let both: Vec<usize> = straight_idxs
             .iter()
-            .filter(|i| flush_idxs.contains(i))
             .copied()
+            .filter(|i| flush_idxs.contains(i))
             .collect();
-        if sf_idxs.len() >= straight_threshold {
-            return HandEvalResult {
-                hand_type: HandType::StraightFlush,
-                scoring_indices: sf_idxs,
-                contained: ContainedHands::default(),
-            };
+        if both.len() >= threshold {
+            return hand(HandType::StraightFlush, both);
         }
     }
 
-    // Four of a Kind
-    if let Some((four_idxs, _kicker)) = find_four_of_kind(&groups) {
-        return HandEvalResult {
-            hand_type: HandType::FourOfAKind,
-            scoring_indices: four_idxs,
-            contained: ContainedHands::default(),
-        };
+    if let Some((four, _kicker)) = find_four_of_kind(&groups) {
+        return hand(HandType::FourOfAKind, four);
+    }
+    if let Some(full) = find_full_house(&eval_cards, &eval_indices) {
+        return hand(HandType::FullHouse, full);
+    }
+    if let Some(flush_idxs) = flush.filter(|v| v.len() >= threshold) {
+        return hand(HandType::Flush, flush_idxs);
+    }
+    if let Some(straight_idxs) = straight.filter(|v| v.len() >= threshold) {
+        return hand(HandType::Straight, straight_idxs);
+    }
+    if let Some((trips, _kicker)) = find_three_of_kind(&groups) {
+        return hand(HandType::ThreeOfAKind, trips);
+    }
+    if let Some(two_pair) = find_two_pair(&groups) {
+        return hand(HandType::TwoPair, two_pair);
+    }
+    if let Some((pair, _kicker)) = find_pair(&groups) {
+        return hand(HandType::Pair, pair);
     }
 
-    // Full House
-    if let Some(fh_idxs) = find_full_house(&eval_cards, &eval_indices) {
-        return HandEvalResult {
-            hand_type: HandType::FullHouse,
-            scoring_indices: fh_idxs,
-            contained: ContainedHands::default(),
-        };
-    }
-
-    // Flush
-    if let Some(flush_idxs) = flush_result {
-        if flush_idxs.len() >= flush_threshold {
-            return HandEvalResult {
-                hand_type: HandType::Flush,
-                scoring_indices: flush_idxs,
-                contained: ContainedHands::default(),
-            };
-        }
-    }
-
-    // Straight
-    if let Some(straight_idxs) = straight_result {
-        if straight_idxs.len() >= straight_threshold {
-            return HandEvalResult {
-                hand_type: HandType::Straight,
-                scoring_indices: straight_idxs,
-                contained: ContainedHands::default(),
-            };
-        }
-    }
-
-    // Three of a Kind
-    if let Some((trip_idxs, _)) = find_three_of_kind(&groups) {
-        return HandEvalResult {
-            hand_type: HandType::ThreeOfAKind,
-            scoring_indices: trip_idxs,
-            contained: ContainedHands::default(),
-        };
-    }
-
-    // Two Pair
-    if let Some(tp_idxs) = find_two_pair(&groups) {
-        return HandEvalResult {
-            hand_type: HandType::TwoPair,
-            scoring_indices: tp_idxs,
-            contained: ContainedHands::default(),
-        };
-    }
-
-    // Pair
-    if let Some((pair_idxs, _)) = find_pair(&groups) {
-        return HandEvalResult {
-            hand_type: HandType::Pair,
-            scoring_indices: pair_idxs,
-            contained: ContainedHands::default(),
-        };
-    }
-
-    // High Card - highest single card
+    // Nothing else matched: the single highest card scores.
     let best_idx = eval_indices
         .iter()
         .enumerate()
         .max_by_key(|&(p, _)| eval_cards[p].rank.numeric_value())
         .map(|(_, &i)| i)
         .unwrap_or(0);
+    hand(HandType::HighCard, vec![best_idx])
+}
+
+/// A decided hand: its name and the cards that score for it.
+///
+/// `contained` is left empty on purpose. Working out every hand the cards *also* contain is a
+/// separate question with different rules, and [`evaluate_hand`] fills it in afterwards.
+fn hand(hand_type: HandType, scoring_indices: Vec<usize>) -> HandEvalResult {
     HandEvalResult {
-        hand_type: HandType::HighCard,
-        scoring_indices: vec![best_idx],
+        hand_type,
+        scoring_indices,
         contained: ContainedHands::default(),
     }
 }
