@@ -151,6 +151,10 @@ pub struct GameState {
     /// ThePillar: IDs of cards played in earlier rounds of the current Ante.
     /// Cleared when a new Ante begins. Used to debuff those cards during the Boss blind.
     pub played_card_ids_this_ante: Vec<u64>,
+
+    /// The Fish only hides the cards drawn right after a hand is *played* (`self.prepped`,
+    /// blind.lua:487), not the ones drawn after a discard.
+    pub fish_prepped: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -274,6 +278,7 @@ impl GameState {
             reroll_cost_increase: 0,
             boss_rerolled_this_ante: false,
             played_card_ids_this_ante: Vec::new(),
+            fish_prepped: false,
         };
 
         // Apply deck-type modifications
@@ -524,6 +529,32 @@ impl GameState {
             .filter(|j| j.edition == Edition::Negative)
             .count();
         self.joker_slots as usize + negatives
+    }
+
+    /// Jokers that react to playing cards being added to the deck (`playing_card_joker_effects`,
+    /// misc_functions.lua:1580). Every source calls it: booster packs, a bought playing card,
+    /// Marble Joker, Certificate, DNA and the card-creating spectrals.
+    pub(crate) fn notify_playing_cards_added(&mut self, count: usize) {
+        if count == 0 {
+            return;
+        }
+        for j in self.jokers.iter_mut() {
+            if j.kind == JokerKind::Hologram && j.active {
+                let cur = j.get_counter_f64("x_mult");
+                j.set_counter_f64("x_mult", cur + 0.25 * count as f64);
+            }
+        }
+    }
+
+    /// Jokers that react to any card being sold (`context.selling_card`, card.lua:2394).
+    /// Consumables count, not just jokers.
+    pub(crate) fn notify_card_sold(&mut self) {
+        for j in self.jokers.iter_mut() {
+            if j.kind == JokerKind::Campfire {
+                let cur = j.get_counter_f64("x_mult");
+                j.set_counter_f64("x_mult", cur + 0.25);
+            }
+        }
     }
 
     /// Whether Pareidolia is out. `Card:is_face` answers yes to every card while it is

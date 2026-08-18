@@ -46,6 +46,9 @@ impl GameState {
         self.money += (base_cost / 2).max(1) as i32;
         self.consumables.remove(consumable_index);
         self.release_negative_consumable_slots();
+
+        // Campfire counts every card sold, consumables included (card.lua:2394).
+        self.notify_card_sold();
         Ok(())
     }
 
@@ -91,7 +94,7 @@ impl GameState {
         match tarot {
             TarotCard::TheHangedMan => {
                 // Destroy up to 2 selected cards
-                let mut sorted = targets.to_vec();
+                let mut sorted: Vec<usize> = targets.iter().copied().take(2).collect();
                 sorted.sort_by(|a, b| b.cmp(a));
                 for &hi in &sorted {
                     if hi < self.hand.len() {
@@ -345,6 +348,7 @@ impl GameState {
                         self.deck.push(card);
                         self.draw_pile.push(di);
                     }
+                    self.notify_playing_cards_added(3);
                 }
             }
             SpectralCard::Ectoplasm => {
@@ -476,6 +480,7 @@ impl GameState {
                         self.deck.push(card);
                         self.draw_pile.push(di);
                     }
+                    self.notify_playing_cards_added(2);
                 }
             }
             SpectralCard::Incantation => {
@@ -509,6 +514,7 @@ impl GameState {
                         self.deck.push(card);
                         self.draw_pile.push(di);
                     }
+                    self.notify_playing_cards_added(4);
                 }
             }
             SpectralCard::Talisman => {
@@ -575,6 +581,7 @@ impl GameState {
                             self.deck.push(copy);
                             self.draw_pile.push(di);
                         }
+                        self.notify_playing_cards_added(2);
                     }
                 }
             }

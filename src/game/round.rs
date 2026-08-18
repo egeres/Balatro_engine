@@ -42,9 +42,8 @@ impl GameState {
     /// Whether the current Boss blind's ability actually fires on this hand
     /// (`G.GAME.blind.triggered`, reset per play at state_events.lua:455). Matador pays out on it.
     ///
-    /// Bosses that reject the hand outright — The Eye, The Mouth, The Psychic — also set it, but
-    /// this engine surfaces those as an error from `play_hand` rather than playing a rejected
-    /// hand, so they can never reach scoring.
+    /// The bosses that refuse a hand outright — The Eye, The Mouth, The Psychic — set it too;
+    /// see [`GameState::blind_debuffs_hand`].
     fn boss_ability_triggers(
         &self,
         eval: &crate::hand_eval::HandEvalResult,
@@ -57,6 +56,11 @@ impl GameState {
 
         // A debuffed card in the scoring hand trips the blind (state_events.lua:656).
         if eval.scoring_indices.iter().any(|&i| played[i].debuffed) {
+            return true;
+        }
+
+        // A refused hand trips the blind (blind.lua:527, :541, :546).
+        if self.blind_debuffs_hand(eval, played.len()) {
             return true;
         }
 
@@ -76,6 +80,37 @@ impl GameState {
                 let most = self.hand_levels.values().map(|h| h.played).max().unwrap_or(0);
                 most > 0 && this >= most
             }
+            _ => false,
+        }
+    }
+
+    /// Whether the Boss blind refuses to score this hand (`Blind:debuff_hand`, blind.lua:519).
+    ///
+    /// A refused hand is not blocked: it is played, it counts as played, it costs a hand, and it
+    /// scores nothing, because `evaluate_play` skips its entire scoring block — jokers included —
+    /// when this returns true (state_events.lua:614).
+    fn blind_debuffs_hand(
+        &self,
+        eval: &crate::hand_eval::HandEvalResult,
+        played_count: usize,
+    ) -> bool {
+        if !matches!(self.current_blind, BlindKind::Boss) || self.boss_blind_disabled() {
+            return false;
+        }
+        match self.boss_blind {
+            // `debuff = {h_size_ge = 5}` (game.lua:280): fewer than five cards is refused.
+            Some(BossBlind::ThePsychic) => played_count < 5,
+            // No hand type twice in a round.
+            Some(BossBlind::TheEye) => self
+                .hand_levels
+                .get(&eval.hand_type)
+                .map(|h| h.played_this_round > 0)
+                .unwrap_or(false),
+            // Only one hand type all round.
+            Some(BossBlind::TheMouth) => self
+                .hand_levels
+                .iter()
+                .any(|(ht, h)| *ht != eval.hand_type && h.played_this_round > 0),
             _ => false,
         }
     }
@@ -242,6 +277,7 @@ impl GameState {
                         let deck_idx = self.deck.len();
                         self.deck.push(copy);
                         self.hand.push(deck_idx);
+                        self.notify_playing_cards_added(1);
                     }
                 }
                 _ => {}
@@ -342,12 +378,10 @@ impl GameState {
         }
 
         // Needle boss: only 1 hand
-        if let Some(BossBlind::TheNeedle) = self.boss_blind {
-            if !matches!(self.current_blind, BlindKind::Boss) {
-                // Only apply to boss blind
-            } else if self.hands_remaining < self.effective_max_hands() {
-                return Err(BalatroError::BossBlindEffect("The Needle: only 1 hand allowed".to_string()));
-            }
+        if self.boss_effect_active(BossBlind::TheNeedle)
+            && self.hands_remaining < self.effective_max_hands()
+        {
+            return Err(BalatroError::BossBlindEffect("The Needle: only 1 hand allowed".to_string()));
         }
 
         let played_hand_indices: Vec<usize> = self
@@ -361,55 +395,13 @@ impl GameState {
             .map(|&i| self.deck[i].clone())
             .collect();
 
-        // TheEye / TheMouth: evaluate hand type early to enforce restrictions
-        if matches!(self.current_blind, BlindKind::Boss) {
-            if !self.boss_blind_disabled() {
-                let has_four_fingers = self.jokers.iter().any(|j| j.kind == JokerKind::FourFingers && j.active);
-                let has_shortcut = self.jokers.iter().any(|j| j.kind == JokerKind::Shortcut && j.active);
-                let has_smeared = self.jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active);
-                let has_splash = self.jokers.iter().any(|j| j.kind == JokerKind::Splash && j.active);
-                let preview = evaluate_hand(&played_cards, has_four_fingers, has_shortcut, has_smeared, has_splash);
-
-                // TheEye: no repeat hand types this round
-                if let Some(BossBlind::TheEye) = self.boss_blind {
-                    let already_played = self.hand_levels
-                        .get(&preview.hand_type)
-                        .map(|h| h.played_this_round > 0)
-                        .unwrap_or(false);
-                    if already_played {
-                        return Err(BalatroError::BossBlindEffect(
-                            format!("The Eye: {:?} has already been played this round", preview.hand_type)
-                        ));
-                    }
-                }
-
-                // TheMouth: only one hand type per round
-                if let Some(BossBlind::TheMouth) = self.boss_blind {
-                    let other_type_played = self.hand_levels.iter()
-                        .any(|(ht, h)| *ht != preview.hand_type && h.played_this_round > 0);
-                    if other_type_played {
-                        return Err(BalatroError::BossBlindEffect(
-                            "The Mouth: only one hand type may be played per round".to_string()
-                        ));
-                    }
-                }
-            }
-        }
-
         // The hand type is locked in before any joker gets to touch the cards
         // (get_poker_hand_info runs at the top of evaluate_play), so compute it once here and
         // hand it to the `before` pass.
         let pre_eval = self.preview_hand(&played_cards);
         let boss_ability_triggered = self.boss_ability_triggers(&pre_eval, &played_cards);
 
-        // The Psychic rejects any hand of fewer than 5 cards (`debuff = {h_size_ge = 5}`,
-        // game.lua:280). A rejected hand is not blocked — it is played and simply scores nothing,
-        // burning the hand, because `evaluate_play` skips its whole scoring block when
-        // `Blind:debuff_hand` returns true (state_events.lua:614).
-        let hand_debuffed = matches!(self.current_blind, BlindKind::Boss)
-            && matches!(self.boss_blind, Some(BossBlind::ThePsychic))
-            && !self.boss_blind_disabled()
-            && played_cards.len() < 5;
+        let hand_debuffed = self.blind_debuffs_hand(&pre_eval, played_cards.len());
 
         if !hand_debuffed {
             self.pre_score_joker_updates(&mut played_cards, &pre_eval);
@@ -662,10 +654,8 @@ impl GameState {
         }
 
         // Tooth boss: -$1 per card played
-        if let Some(BossBlind::TheTooth) = self.boss_blind {
-            if matches!(self.current_blind, BlindKind::Boss) {
-                self.money -= played_cards.len() as i32;
-            }
+        if self.boss_effect_active(BossBlind::TheTooth) {
+            self.money -= played_cards.len() as i32;
         }
 
         // Discard played cards, draw new ones
@@ -743,6 +733,10 @@ impl GameState {
                 }
             }
         }
+
+        // The Fish hides the cards drawn immediately after a play, and only those
+        // (`self.prepped`, blind.lua:487, cleared once the draw is done).
+        self.fish_prepped = true;
 
         // Draw: TheSerpent draws exactly 3; otherwise fill to hand size
         let is_serpent = matches!(self.boss_blind, Some(BossBlind::TheSerpent))

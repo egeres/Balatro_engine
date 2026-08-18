@@ -565,13 +565,7 @@ impl GameState {
         let sell_value = self.jokers[joker_index].sell_value();
         self.money += sell_value as i32;
 
-        // Campfire joker: +0.25 Xmult when joker is sold
-        for i in 0..self.jokers.len() {
-            if self.jokers[i].kind == JokerKind::Campfire {
-                let cur = self.jokers[i].get_counter_f64("x_mult");
-                self.jokers[i].set_counter_f64("x_mult", cur + 0.25);
-            }
-        }
+        self.notify_card_sold();
 
         // Luchador: selling it disables the current Boss blind's ability for the rest of the round
         if self.jokers[joker_index].kind == JokerKind::Luchador
@@ -932,14 +926,16 @@ impl GameState {
         self.deck.push(card);
         self.draw_pile.push(deck_idx);
 
-        // Hologram gains +0.25 Xmult for each playing card added to the deck.
-        for j in self.jokers.iter_mut() {
-            if j.kind == JokerKind::Hologram && j.active {
-                let cur = j.get_counter_f64("x_mult");
-                j.set_counter_f64("x_mult", cur + 0.25);
-            }
-        }
+        self.notify_playing_cards_added(1);
         Ok(())
+    }
+
+    /// Whether this Boss blind's ability is switched off right now. Chicot and a sold Luchador
+    /// both do it, and every boss effect has to ask.
+    pub(crate) fn boss_effect_active(&self, boss: BossBlind) -> bool {
+        matches!(self.current_blind, BlindKind::Boss)
+            && self.boss_blind == Some(boss)
+            && !self.boss_blind_disabled()
     }
 
     /// Re-roll the upcoming Boss blind for $10. Director's Cut allows one per ante;

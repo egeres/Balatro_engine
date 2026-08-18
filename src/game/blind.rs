@@ -224,6 +224,7 @@ impl GameState {
         self.discard_pile.clear();
 
         // Reset showdown blind state
+        self.fish_prepped = false;
         self.verdant_leaf_joker_sold = false;
         self.cerulean_forced_card_id = None;
         self.boss_blind_manually_disabled = false;
@@ -419,9 +420,9 @@ impl GameState {
                 let newly_drawn: Vec<usize> = (start_hand_len..self.hand.len()).collect();
                 match self.boss_blind {
                     Some(BossBlind::TheFish) => {
-                        // All cards face-down after the initial draw.
-                        // After the first play, hands_remaining < effective_max_hands().
-                        if self.hands_remaining < self.effective_max_hands() {
+                        // Only the cards drawn right after a hand was *played* are hidden — a
+                        // discard does not set `prepped` (blind.lua:487).
+                        if self.fish_prepped {
                             for hand_idx in newly_drawn {
                                 let card_idx = self.hand[hand_idx];
                                 self.deck[card_idx].face_down = true;
@@ -429,9 +430,15 @@ impl GameState {
                         }
                     }
                     Some(BossBlind::TheWheel) => {
-                        // 1-in-7 chance per newly drawn card
+                        // 1-in-7 per newly drawn card, and it is a listed probability, so Oops!
+                        // All 6s doubles it (`G.GAME.probabilities.normal/7`, blind.lua:607).
+                        let oops = if self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active) {
+                            2.0_f64
+                        } else {
+                            1.0_f64
+                        };
                         for hand_idx in newly_drawn {
-                            if self.rng.range_usize("wheel", 0, 6) == 0 {
+                            if self.rng.next_bool_prob("wheel", (oops / 7.0).min(1.0)) {
                                 let card_idx = self.hand[hand_idx];
                                 self.deck[card_idx].face_down = true;
                             }
@@ -464,6 +471,8 @@ impl GameState {
                 }
             }
         }
+
+        self.fish_prepped = false;
 
         // CeruleanBell: one random newly-drawn card is always selected (forced)
         if let Some(BossBlind::CeruleanBell) = self.boss_blind {
@@ -576,9 +585,14 @@ impl GameState {
     fn notify_jokers_setting_blind(&mut self) {
         self.apply_ceremonial_daggers();
 
-        // Process jokers that trigger when blind is set
-        let joker_kinds: Vec<JokerKind> = self.jokers.iter().map(|j| j.kind).collect();
-        for kind in joker_kinds {
+        // Walked by id rather than index: several of these add or destroy jokers, and each
+        // copy of a joker has to act for itself (Showman makes duplicates reachable).
+        let joker_ids: Vec<(u64, JokerKind)> =
+            self.jokers.iter().map(|j| (j.id, j.kind)).collect();
+        for (joker_id, kind) in joker_ids {
+            let Some(idx) = self.jokers.iter().position(|j| j.id == joker_id) else {
+                continue;
+            };
             match kind {
                 JokerKind::MarbleJoker => {
                     // Add 1 stone card to deck
@@ -588,21 +602,23 @@ impl GameState {
                     let deck_idx = self.deck.len();
                     self.deck.push(stone);
                     self.draw_pile.push(deck_idx);
+                    self.notify_playing_cards_added(1);
                 }
                 JokerKind::Madness => {
                     // Gain +0.5 Xmult, then destroy 1 random non-eternal joker (excluding Madness itself)
-                    if let Some(pos) = self.jokers.iter().position(|j| j.kind == JokerKind::Madness && j.active) {
-                        let cur = self.jokers[pos].get_counter_f64("x_mult");
-                        self.jokers[pos].set_counter_f64("x_mult", cur + 0.5);
+                    if !self.jokers[idx].active {
+                        continue;
                     }
+                    let cur = self.jokers[idx].get_counter_f64("x_mult");
+                    self.jokers[idx].set_counter_f64("x_mult", cur + 0.5);
                     let destroyable: Vec<usize> = self.jokers.iter().enumerate()
                         .filter(|(_, j)| j.kind != JokerKind::Madness && !j.eternal)
                         .map(|(i, _)| i)
                         .collect();
                     if !destroyable.is_empty() {
                         let pick = self.rng.range_usize("madness", 0, destroyable.len() - 1);
-                        let idx = destroyable[pick];
-                        self.jokers.remove(idx);
+                        let victim = destroyable[pick];
+                        self.jokers.remove(victim);
                     }
                 }
                 JokerKind::Cartomancer => {
@@ -633,6 +649,7 @@ impl GameState {
                     let deck_idx = self.deck.len();
                     self.deck.push(new_card);
                     self.hand.push(deck_idx);
+                    self.notify_playing_cards_added(1);
                 }
                 JokerKind::RiffRaff => {
                     // Two *Common* jokers, drawn from the Common pool directly — rolling the
@@ -656,13 +673,13 @@ impl GameState {
                 }
                 JokerKind::TurtleBean => {
                     // TurtleBean shrinks by 1 each round; destroyed when h_size reaches 0
-                    if let Some(pos) = self.jokers.iter().position(|j| j.kind == JokerKind::TurtleBean && j.active) {
-                        let cur = self.jokers[pos].get_counter_i64("h_size");
-                        let new_val = cur - 1;
-                        self.jokers[pos].set_counter_i64("h_size", new_val);
-                        if new_val <= 0 && !self.jokers[pos].eternal {
-                            self.jokers.remove(pos);
-                        }
+                    if !self.jokers[idx].active {
+                        continue;
+                    }
+                    let new_val = self.jokers[idx].get_counter_i64("h_size") - 1;
+                    self.jokers[idx].set_counter_i64("h_size", new_val);
+                    if new_val <= 0 && !self.jokers[idx].eternal {
+                        self.jokers.remove(idx);
                     }
                 }
                 JokerKind::ToDoList => {
@@ -671,13 +688,11 @@ impl GameState {
                         "HighCard", "Pair", "TwoPair", "ThreeOfAKind", "Straight",
                         "Flush", "FullHouse", "FourOfAKind", "StraightFlush",
                     ];
-                    let idx = self.rng.range_usize("to_do", 0, hand_types.len() - 1);
-                    if let Some(pos) = self.jokers.iter().position(|j| j.kind == JokerKind::ToDoList) {
-                        self.jokers[pos].counters.insert(
-                            "hand_type".to_string(),
-                            serde_json::json!(hand_types[idx]),
-                        );
-                    }
+                    let pick = self.rng.range_usize("to_do", 0, hand_types.len() - 1);
+                    self.jokers[idx].counters.insert(
+                        "hand_type".to_string(),
+                        serde_json::json!(hand_types[pick]),
+                    );
                 }
                 _ => {}
             }

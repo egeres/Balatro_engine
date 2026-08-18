@@ -115,12 +115,12 @@ pub enum VoucherKind {
     // Pair 2: discounts
     ClearanceSale,  // -25% all shop prices
     Liquidation,    // -50% all shop prices (replaces ClearanceSale bonus)
-    // Pair 3: card editions in packs
-    Hone,           // Playing cards in packs can have Foil edition
-    GlowUp,         // Playing cards in packs can have Holo/Poly edition too
+    // Pair 3: how often editions show up
+    Hone,           // Foil/Holographic/Polychrome appear 2X as often
+    GlowUp,         // Foil/Holographic/Polychrome appear 4X as often
     // Pair 4: reroll cost
-    RerollSurplus,  // -$1 reroll cost
-    RerollGlut,     // -$1 more reroll cost
+    RerollSurplus,  // -$2 reroll cost
+    RerollGlut,     // -$2 more reroll cost
     // Pair 5: consumable slots
     CrystalBall,    // +1 consumable slot
     OmenGlobe,      // Spectral cards can appear in Arcana packs
@@ -133,27 +133,27 @@ pub enum VoucherKind {
     // Pair 8: discards per round
     Wasteful,       // +1 discard per round
     Recyclomancy,   // +1 more discard per round
-    // Pair 9: tarot card prices
-    TarotMerchant,  // Tarot cards cost $1 less
-    TarotTycoon,    // Tarot cards cost $0
-    // Pair 10: planet card prices
-    PlanetMerchant, // Planet cards cost $1 less
-    PlanetTycoon,   // Planet cards cost $0
+    // Pair 9: how often tarots are stocked
+    TarotMerchant,  // Tarot cards appear 2X as often in the shop
+    TarotTycoon,    // Tarot cards appear 4X as often in the shop
+    // Pair 10: how often planets are stocked
+    PlanetMerchant, // Planet cards appear 2X as often in the shop
+    PlanetTycoon,   // Planet cards appear 4X as often in the shop
     // Pair 11: interest
     SeedMoney,      // +$10 max interest
     MoneyTree,      // +$10 more max interest
     // Pair 12: joker slots
-    Blank,          // +1 joker slot
-    Antimatter,     // +1 more joker slot
+    Blank,          // Does nothing; exists only to unlock Antimatter
+    Antimatter,     // +1 joker slot
     // Pair 13: playing cards in shop
     MagicTrick,     // Playing cards can appear in the shop
-    Illusion,       // Playing cards in packs can have editions
-    // Pair 14: ante skip
-    Hieroglyph,     // -1 ante required to win
-    Petroglyph,     // -1 more ante required to win
-    // Pair 15: free rerolls / boss reroll
-    DirectorsCut,   // +1 free reroll per shop
-    Retcon,         // Can reroll the boss blind once per ante
+    Illusion,       // Shop playing cards may carry an enhancement, edition and/or seal
+    // Pair 14: ante
+    Hieroglyph,     // -1 Ante, -1 hand each round (the winning ante is unchanged)
+    Petroglyph,     // -1 Ante, -1 discard each round
+    // Pair 15: boss reroll
+    DirectorsCut,   // Reroll the Boss blind once per ante for $10
+    Retcon,         // Reroll the Boss blind as often as you like, $10 a go
     // Pair 16: hand size
     PaintBrush,     // +1 hand size
     Palette,        // +1 more hand size

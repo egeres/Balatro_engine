@@ -22,6 +22,7 @@ mod joker_mechanics;
 mod long_runs;
 mod misc_jokers;
 mod packs;
+mod parity_details;
 mod parity_rules;
 mod planet_cards;
 mod rare_jokers;

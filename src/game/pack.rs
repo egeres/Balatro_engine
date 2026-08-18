@@ -199,13 +199,7 @@ impl GameState {
                 self.deck.push(new_card);
                 self.draw_pile.push(deck_idx);
 
-                // Hologram joker: +0.25 Xmult
-                for j in self.jokers.iter_mut() {
-                    if j.kind == JokerKind::Hologram {
-                        let cur = j.get_counter_f64("x_mult");
-                        j.set_counter_f64("x_mult", cur + 0.25);
-                    }
-                }
+                self.notify_playing_cards_added(1);
             }
             PackCard::Joker(j) => {
                 if self.jokers.len() < self.effective_joker_slots() {

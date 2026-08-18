@@ -516,8 +516,17 @@ pub(crate) fn calc_joker_main(
 
         // ── Deck / context scaling ────────────────────────────────────────
         JokerKind::JokerStencil => {
+            // X1 per empty slot, and each Joker Stencil counts itself as one (card.lua:4203).
+            // With no empty slot at all it produces nothing (card.lua:3966).
             let empty = ctx.joker_slot_count.saturating_sub(ctx.joker_count);
-            effect.x_mult = 1.0 + empty as f64;
+            if empty > 0 {
+                let stencils = ctx
+                    .jokers
+                    .iter()
+                    .filter(|j| j.active && j.kind == JokerKind::JokerStencil)
+                    .count();
+                effect.x_mult = (empty + stencils) as f64;
+            }
         }
         JokerKind::AbstractJoker => {
             effect.mult += ctx.joker_count as i64 * 3;

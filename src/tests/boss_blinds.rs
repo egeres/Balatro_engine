@@ -1607,9 +1607,9 @@ fn test_the_eye_allows_first_hand_of_each_type() {
     assert!(gs.play_hand().is_ok(), "TheEye: first hand must succeed");
 }
 
-/// Repeating the same hand type returns BossBlindEffect.
+/// Repeating a hand type is allowed, but it scores nothing and still costs a hand.
 #[test]
-fn test_the_eye_blocks_repeated_hand_type() {
+fn test_the_eye_refuses_to_score_a_repeated_hand_type() {
     let mut gs = boss_select(BossBlind::TheEye);
     // Fill deck with pairs so both hands are detected as HighCard (single card)
     let c1 = card(1, Rank::Ace,  Suit::Spades);
@@ -1619,14 +1619,18 @@ fn test_the_eye_blocks_repeated_hand_type() {
     gs.score_goal = f64::MAX;
     // First High Card (single card)
     gs.select_card(0).unwrap();
-    gs.play_hand().unwrap();
-    // Second High Card must fail
+    let first = gs.play_hand().unwrap();
+    assert!(first.final_score > 0.0);
+
+    // Second High Card is played, but scores nothing.
+    let hands_before = gs.hands_remaining;
+    let score_before = gs.score_accumulated;
     gs.select_card(0).unwrap();
-    let result = gs.play_hand();
-    assert!(
-        matches!(result, Err(BalatroError::BossBlindEffect(_))),
-        "TheEye: second HighCard must return BossBlindEffect, got {:?}", result
-    );
+    let second = gs.play_hand().expect("a refused hand is played, not blocked");
+
+    assert_eq!(second.final_score, 0.0, "The Eye refuses to score a repeat");
+    assert_eq!(gs.score_accumulated, score_before);
+    assert_eq!(gs.hands_remaining, hands_before - 1, "and it still costs a hand");
 }
 
 /// Chicot suppresses TheEye: repeated hand types are allowed.
@@ -1675,9 +1679,9 @@ fn test_the_mouth_allows_first_hand() {
     assert!(gs.play_hand().is_ok(), "TheMouth: first hand must succeed");
 }
 
-/// Playing a different hand type after the first returns BossBlindEffect.
+/// A second hand type is played, but scores nothing.
 #[test]
-fn test_the_mouth_blocks_different_hand_type() {
+fn test_the_mouth_refuses_to_score_a_different_hand_type() {
     let mut gs = boss_select(BossBlind::TheMouth);
     // 4 cards, hand_size=4: play c1 alone (HighCard), then try c2+c3 (Pair)
     let c1 = card(1, Rank::Ace,  Suit::Spades);
@@ -1690,14 +1694,16 @@ fn test_the_mouth_blocks_different_hand_type() {
     gs.select_card(0).unwrap();
     gs.play_hand().unwrap();
     // Hand is now [King♥, King♣, 2♦] at positions 0,1,2
-    // Play King+King → Pair → different hand type → must fail
+    // Play King+King → Pair → a different hand type → played, but worth nothing
+    let hands_before = gs.hands_remaining;
+    let score_before = gs.score_accumulated;
     gs.select_card(0).unwrap();
     gs.select_card(1).unwrap();
-    let result = gs.play_hand();
-    assert!(
-        matches!(result, Err(BalatroError::BossBlindEffect(_))),
-        "TheMouth: different hand type must return BossBlindEffect, got {:?}", result
-    );
+    let result = gs.play_hand().expect("a refused hand is played, not blocked");
+
+    assert_eq!(result.final_score, 0.0, "The Mouth refuses to score a second hand type");
+    assert_eq!(gs.score_accumulated, score_before);
+    assert_eq!(gs.hands_remaining, hands_before - 1, "and it still costs a hand");
 }
 
 /// Replaying the same hand type is allowed under TheMouth.
