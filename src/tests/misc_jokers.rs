@@ -6,6 +6,7 @@
 /// OopsAll6s, Showman
 
 use super::*;
+use crate::card::{ShopItem, ShopOffer};
 use crate::game::{BlindKind, GameStateKind};
 
 // =========================================================
@@ -972,9 +973,12 @@ fn test_juggler_increases_hand_size_by_one() {
 }
 
 // =========================================================
-// LoyaltyCard: x4 mult every 6 hands played
+// LoyaltyCard: x4 mult every 6 hands since acquisition
 // =========================================================
 
+/// `loyalty_remaining` counts 4,3,2,1,0,5,4,… and the X4 lands on the **5**, not on the 0 —
+/// reaching 0 only juices the card as a one-hand warning (card.lua:3642-3650). Net effect: every
+/// 6th hand, as the card says.
 #[test]
 fn test_loyalty_card_fires_every_sixth_hand_since_acquisition() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
@@ -1347,8 +1351,47 @@ fn test_raised_fist_doubles_lowest_held_card_rank_to_mult() {
 // RedCard: +3 mult per skipped blind
 // =========================================================
 
+/// Red Card feeds on skipped **booster packs**, not on skipped blinds — its trigger is
+/// `context.skipping_booster` (card.lua:2441).
 #[test]
-fn test_red_card_gains_mult_per_skipped_blind() {
+fn test_red_card_gains_mult_per_skipped_booster_pack() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(1, JokerKind::RedCard));
+    gs.state = GameStateKind::Shop;
+    gs.shop_offers = vec![ShopOffer::new(ShopItem::Pack(PackKind::ArcanaPack), 4)];
+    gs.money = 20;
+
+    gs.buy_pack(0).unwrap();
+    gs.skip_pack().unwrap();
+
+    assert_eq!(
+        gs.jokers[0].get_counter_i64("mult"), 3,
+        "RedCard should gain +3 mult per skipped booster pack"
+    );
+}
+
+/// Taking every pick closes the pack without it counting as a skip.
+#[test]
+fn test_red_card_ignores_a_pack_that_was_used_up() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(1, JokerKind::RedCard));
+    gs.state = GameStateKind::Shop;
+    gs.shop_offers = vec![ShopOffer::new(ShopItem::Pack(PackKind::ArcanaPack), 4)];
+    gs.money = 20;
+
+    gs.buy_pack(0).unwrap();
+    gs.take_pack_card(0).unwrap(); // an Arcana Pack allows exactly one pick
+
+    assert!(matches!(gs.state, GameStateKind::Shop), "the pack should be closed");
+    assert_eq!(
+        gs.jokers[0].get_counter_i64("mult"), 0,
+        "using a pack up is not skipping it"
+    );
+}
+
+/// Skipping a *blind* does nothing for Red Card — that is Throwback's trigger.
+#[test]
+fn test_red_card_ignores_skipped_blinds() {
     let mut gs = make_game();
     gs.jokers.push(joker(1, JokerKind::RedCard));
     gs.state = GameStateKind::BlindSelect;
@@ -1356,9 +1399,10 @@ fn test_red_card_gains_mult_per_skipped_blind() {
 
     gs.skip_blind().unwrap();
 
-    // RedCard counter should have +3
-    let mult = gs.jokers[0].get_counter_i64("mult");
-    assert_eq!(mult, 3, "RedCard should gain +3 mult per skipped blind");
+    assert_eq!(
+        gs.jokers[0].get_counter_i64("mult"), 0,
+        "RedCard should not react to a skipped blind"
+    );
 }
 
 #[test]
@@ -1703,7 +1747,8 @@ fn test_to_do_list_does_not_earn_on_mismatch() {
 // ToTheMoon: +$1 interest per $5 held (raises the rate, not the cap)
 // =========================================================
 
-/// Run one round to completion and return the money gained beyond the blind reward.
+/// Run one round to completion and return the interest paid: the money gained beyond the blind
+/// reward and the dollar every unused hand pays (state_events.lua:1165).
 fn interest_earned(to_the_moon_count: usize, money: i32, max_interest: i32) -> i32 {
     let mut gs = make_game();
     let cards = vec![card(0, Rank::Ace, Suit::Spades)];
@@ -1718,7 +1763,7 @@ fn interest_earned(to_the_moon_count: usize, money: i32, max_interest: i32) -> i
     let money_before = gs.money;
     gs.select_card(0).unwrap();
     gs.play_hand().unwrap();
-    gs.money - money_before - 3 // subtract the Small blind reward
+    gs.money - money_before - 3 - gs.hands_remaining as i32
 }
 
 #[test]

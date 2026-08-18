@@ -13,7 +13,7 @@ impl GameState {
     pub fn pick_boss_blind(&mut self) -> Option<BossBlind> {
         let ante = self.ante.max(1);
         let win_ante = self.win_ante();
-        let is_showdown_ante = ante % win_ante == 0 && ante >= 2;
+        let is_showdown_ante = ante.is_multiple_of(win_ante) && ante >= 2;
 
         let eligible: Vec<BossBlind> = BossBlind::ALL
             .iter()
@@ -76,10 +76,8 @@ impl GameState {
         let tag = self.tag_on_offer().unwrap_or_else(|| self.random_tag());
         self.gain_tag(tag);
         for j in self.jokers.iter_mut() {
-            match j.kind {
-                JokerKind::Throwback => j.add_counter_i64("skips", 1),
-                JokerKind::RedCard => j.add_counter_i64("mult", 3),
-                _ => {}
+            if j.kind == JokerKind::Throwback {
+                j.add_counter_i64("skips", 1);
             }
         }
 
@@ -145,12 +143,15 @@ impl GameState {
             }
             TagKind::Economy => {
                 // Doubles your money, capped at a $40 gain.
-                self.money += self.money.max(0).min(40);
+                self.money += self.money.clamp(0, 40);
             }
             TagKind::Orbital => {
-                // +3 levels to a random hand type.
-                let hand_types: Vec<HandType> = self.hand_levels.keys().copied().collect();
-                let pick = hand_types[self.rng.range_usize("orbital", 0, hand_types.len() - 1)];
+                // +3 levels to the hand named on the tag. It was chosen when the tag was drawn
+                // (tag.lua:104), so the player could read it before deciding to skip; a copy made
+                // by a Double Tag levels the same hand again.
+                let pick = self
+                    .orbital_hand_on_offer()
+                    .unwrap_or_else(|| self.random_orbital_hand());
                 if let Some(level) = self.hand_levels.get_mut(&pick) {
                     level.level += 3;
                 }
@@ -158,6 +159,12 @@ impl GameState {
             TagKind::TopUp => self.grant_common_jokers("top", 2),
             _ => {}
         }
+    }
+
+    /// A hand type for an Orbital Tag to name. Every hand is eligible, secret ones included —
+    /// Balatro draws from the whole `G.GAME.hands` table.
+    pub(crate) fn random_orbital_hand(&mut self) -> HandType {
+        HandType::ALL[self.rng.range_usize("orbital", 0, HandType::ALL.len() - 1)]
     }
 
     /// Hand the player up to `count` random Common jokers, one at a time so each is visible to
@@ -200,18 +207,18 @@ impl GameState {
             if tag == TagKind::Boss {
                 self.boss_blind = self.pick_boss_blind();
             } else if let Some(pack) = tag.free_pack() {
-                // Only one pack can be open at a time; the rest are dropped, as in Balatro
-                // where they queue behind the current choice.
-                self.pending_free_pack = Some(pack);
+                // Only one pack can be open at a time, so the rest wait their turn.
+                self.pending_free_packs.push(pack);
             }
         }
     }
 
-    /// Open the free booster pack a tag granted, if one is waiting.
+    /// Open the next free booster pack a tag granted, if any are waiting.
     pub fn open_pending_free_pack(&mut self) -> Result<(), BalatroError> {
-        let Some(pack) = self.pending_free_pack.take() else {
+        if self.pending_free_packs.is_empty() {
             return Err(BalatroError::NotInPack);
-        };
+        }
+        let pack = self.pending_free_packs.remove(0);
         self.current_pack = Some(self.generate_pack_contents(pack));
         self.on_booster_opened();
         self.state = GameStateKind::BoosterPack;
@@ -241,6 +248,8 @@ impl GameState {
             data.played_this_round = 0;
         }
 
+        self.ox_target_hand = Some(self.most_played_hand());
+
         // Chaos the Clown's free rerolls are *set*, not accumulated, and the reroll price starts
         // over (state_events.lua:312). Both belong to `G.GAME.current_round`, so they are pinned
         // here and then carried into the shop that follows this round.
@@ -267,9 +276,16 @@ impl GameState {
         // Apply boss blind debuffs to cards
         self.apply_boss_blind_debuffs();
 
-        // AmberAcorn: shuffle joker order at the start of the blind
+        // Amber Acorn turns the jokers face down *and* shuffles them (blind.lua:189-203). Both
+        // halves are needed: the shuffle costs nothing if you can still read the row.
+        for j in self.jokers.iter_mut() {
+            j.face_down = false;
+        }
         if self.boss_effect_active(BossBlind::AmberAcorn) {
             self.rng.shuffle("amber_acorn", &mut self.jokers);
+            for j in self.jokers.iter_mut() {
+                j.face_down = true;
+            }
         }
 
         // Set score goal
@@ -321,6 +337,28 @@ impl GameState {
         targets.ancient_suit = others[self.rng.range_usize(&keyed("anc", ante), 0, others.len() - 1)];
 
         self.round_targets = targets;
+    }
+
+    /// The hand type played most this run — what The Ox names when a Boss round begins
+    /// (state_events.lua:130-137).
+    ///
+    /// Two details Balatro leaves ragged and this pins down. Its tie-break is a no-op — `_order`
+    /// is never reassigned inside the loop, so the winner among equals falls out of Lua's table
+    /// iteration order; taking the better hand is what that code was reaching for and it is at
+    /// least the same answer every run. And with nothing played at all every hand ties on zero,
+    /// where the sensible answer is the High Card that `G.GAME.current_round` is initialised to
+    /// (game.lua:1964) rather than a Flush Five nobody has ever landed.
+    pub(crate) fn most_played_hand(&self) -> HandType {
+        let played = |ht: &HandType| self.hand_levels.get(ht).map(|h| h.played).unwrap_or(0);
+        if HandType::ALL.iter().all(|ht| played(ht) == 0) {
+            return HandType::HighCard;
+        }
+        HandType::ALL
+            .into_iter()
+            // `HandType::ALL` runs best to worst, so a later entry must beat an earlier one
+            // outright to displace it.
+            .max_by_key(|ht| (played(ht), std::cmp::Reverse(*ht as usize)))
+            .unwrap_or(HandType::HighCard)
     }
 
     pub(crate) fn effective_max_hands(&self) -> u32 {
@@ -395,12 +433,6 @@ impl GameState {
                 _ => {}
             }
         }
-        // Psychic boss blind forces 5-card hands if hand_size >= 5
-        if let Some(BossBlind::ThePsychic) = self.boss_blind {
-            if matches!(self.state, GameStateKind::Round) {
-                size = size.max(5);
-            }
-        }
         size
     }
 
@@ -456,10 +488,21 @@ impl GameState {
 
         self.fish_prepped = false;
 
-        // CeruleanBell: one random newly-drawn card is always selected (forced)
-        if self.boss_effect_active(BossBlind::CeruleanBell) && !newly_drawn.is_empty() {
-            let offset = self.rng.range_usize("cerulean_bell", 0, newly_drawn.len() - 1);
-            let forced_hand_idx = newly_drawn[offset];
+        // CeruleanBell keeps one card in hand permanently selected. The choice sticks: Balatro
+        // only draws a new one when no card in hand still carries the flag, and it draws from the
+        // **whole hand**, not just what was drawn this time (blind.lua:574). Picking a new one
+        // clears the rest of the selection with it.
+        if self.boss_effect_active(BossBlind::CeruleanBell) && !self.hand.is_empty() {
+            let still_forced = self
+                .cerulean_forced_card_id
+                .and_then(|id| self.hand.iter().position(|&di| self.deck[di].id == id));
+            let forced_hand_idx = match still_forced {
+                Some(hand_idx) => hand_idx,
+                None => {
+                    self.selected_indices.clear();
+                    self.rng.range_usize("cerulean_bell", 0, self.hand.len() - 1)
+                }
+            };
             self.cerulean_forced_card_id = Some(self.deck[self.hand[forced_hand_idx]].id);
             if !self.selected_indices.contains(&forced_hand_idx) {
                 self.selected_indices.push(forced_hand_idx);

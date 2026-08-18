@@ -460,3 +460,71 @@ fn test_swashbuckler_reads_the_discounted_sell_values() {
     assert_eq!(plain.final_mult - cheap.final_mult, 3.0,
         "Swashbuckler is worth less when the board is worth less");
 }
+
+// =========================================================
+// End-of-round payouts
+// =========================================================
+// `evaluate_round` (state_events.lua:1135) lays out every row in one synchronous pass and only
+// then lets the dollars land, so interest is worked out from the balance the round *ended* on.
+
+/// Win the Small blind having played `hands_used` of the deck's hands, and report the money
+/// gained. Starting balance is forced to `money` so interest is predictable.
+fn small_blind_payout(money: i32, hands_used: u32) -> i32 {
+    let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    gs.money = money;
+    gs.score_goal = f64::MAX;
+
+    // Burn the hands we are not saving, then win on the last one.
+    for _ in 1..hands_used {
+        gs.hand = vec![0];
+        gs.select_card(0).unwrap();
+        gs.play_hand().unwrap();
+    }
+    gs.score_goal = 1.0;
+    gs.hand = vec![0];
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    gs.money - money
+}
+
+/// Every unused hand pays $1 on every deck — `money_per_hand or 1` (state_events.lua:1165).
+/// Only a Challenge ever switches it off.
+#[test]
+fn test_every_unused_hand_pays_a_dollar() {
+    // Blue Deck, five hands. $3 Small blind reward, $0 interest at $4.
+    assert_eq!(small_blind_payout(4, 1), 3 + 4, "four hands left over");
+    assert_eq!(small_blind_payout(4, 3), 3 + 2, "two hands left over");
+    assert_eq!(small_blind_payout(4, 5), 3, "no hands left over, no bonus");
+}
+
+/// The Green Deck raises the rate to $2, adds $1 per unused discard, and gives up interest
+/// (game.lua:631).
+#[test]
+fn test_green_deck_pays_more_per_hand_and_earns_no_interest() {
+    let mut gs = GameState::new(DeckType::Green, Stake::White, Some("GREENPAY".to_string()));
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    gs.money = 50; // enough that interest would be very visible
+    gs.score_goal = 1.0;
+    let hands = gs.hands_remaining;
+    let discards = gs.discards_remaining;
+
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+
+    let expected = 3 + 2 * (hands - 1) as i32 + discards as i32;
+    assert_eq!(gs.money - 50, expected, "Green Deck: $2 a hand, $1 a discard, no interest");
+}
+
+/// Interest is charged on the balance the round ended on, before the round's own payouts.
+#[test]
+fn test_interest_ignores_the_rewards_it_is_paid_alongside() {
+    // At $4 the player is one dollar short of an interest step. The $3 blind reward and the
+    // $4 of unused hands would push the balance past $5, but interest is already settled.
+    assert_eq!(small_blind_payout(4, 1), 3 + 4, "no interest at $4");
+    // At $5 exactly one step is due.
+    assert_eq!(small_blind_payout(5, 1), 3 + 4 + 1);
+    // At $9 still one step — $10 would be two, and the payouts do not count towards it.
+    assert_eq!(small_blind_payout(9, 1), 3 + 4 + 1);
+    assert_eq!(small_blind_payout(10, 1), 3 + 4 + 2);
+}

@@ -868,7 +868,18 @@ fn test_flower_pot_fires_with_all_four_suits_in_scoring_cards() {
 #[test]
 fn test_card_sharp_does_not_fire_on_first_play_this_round() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
-    let r = score(&played, &played, &[joker(0, JokerKind::CardSharp)]);
+    let mut levels = default_hand_levels();
+    // Balatro counts the hand being scored before any joker looks (state_events.lua:575), so one
+    // play means "this is the first".
+    levels.get_mut(&HandType::HighCard).unwrap().played_this_round = 1;
+    let r = {
+        let jokers = [joker(0, JokerKind::CardSharp)];
+        let mut si = ScoreInputs::new(&played, &played, &jokers, &levels);
+        si.hands_remaining = 3;
+        si.discards_remaining = 3;
+        si.deck_cards_remaining = 40;
+        score_hand(si)
+    };
     // HC: 16 chips, mult=1 (no X3 — hand not yet played this round) → 16
     assert_eq!(r.final_score as i64, 16);
 }
@@ -877,7 +888,8 @@ fn test_card_sharp_does_not_fire_on_first_play_this_round() {
 fn test_card_sharp_fires_when_hand_type_already_played_this_round() {
     let played = vec![card(0, Rank::Ace, Suit::Spades)];
     let mut levels = default_hand_levels();
-    levels.get_mut(&HandType::HighCard).unwrap().played_this_round = 1;
+    // Two: one earlier this round, plus the hand being scored.
+    levels.get_mut(&HandType::HighCard).unwrap().played_this_round = 2;
     let r = {
         let jokers = [joker(0, JokerKind::CardSharp)];
         let mut si = ScoreInputs::new(&played, &played, &jokers, &levels);

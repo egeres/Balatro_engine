@@ -273,3 +273,155 @@ fn test_the_hanged_man_destroys_at_most_two_cards() {
 
     assert_eq!(gs.deck.len(), 2, "The Hanged Man destroys up to 2, however many are selected");
 }
+
+// =========================================================
+// The hand is booked as played before anything scores
+// =========================================================
+// `evaluate_play` bumps `played`, `played_this_round` and `visible` at its very top
+// (state_events.lua:574-578), so every joker that reads those counters sees this hand included.
+
+#[test]
+fn test_supernova_counts_the_hand_being_played() {
+    let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    gs.jokers.push(joker(1, JokerKind::Supernova));
+    gs.score_goal = f64::MAX;
+
+    // High Card, first time: 16 chips, mult 1 + 1 play = 2 → 32.
+    gs.select_card(0).unwrap();
+    let first = gs.play_hand().unwrap();
+    assert_eq!(first.final_score as i64, 32,
+        "Supernova pays for the hand in front of it, not only for earlier ones");
+
+    // Second time: mult 1 + 2 plays = 3 → 48.
+    gs.hand = vec![0];
+    gs.select_card(0).unwrap();
+    let second = gs.play_hand().unwrap();
+    assert_eq!(second.final_score as i64, 48);
+}
+
+#[test]
+fn test_playing_a_secret_hand_makes_it_visible() {
+    let five_aces: Vec<CardInstance> = (0..5)
+        .map(|i| card(i, Rank::Ace, Suit::Spades))
+        .collect();
+    let mut gs = make_game();
+    setup_round(&mut gs, five_aces, 5);
+    gs.score_goal = f64::MAX;
+
+    assert!(!gs.hand_levels[&HandType::FlushFive].visible,
+        "Flush Five starts hidden");
+
+    for i in 0..5 {
+        gs.select_card(i).unwrap();
+    }
+    let r = gs.play_hand().unwrap();
+    assert_eq!(r.hand_type, HandType::FlushFive);
+    assert!(gs.hand_levels[&HandType::FlushFive].visible,
+        "landing a secret hand reveals it (state_events.lua:578)");
+}
+
+// =========================================================
+// The Ox names one hand when the round begins
+// =========================================================
+
+#[test]
+fn test_the_ox_target_is_fixed_at_the_start_of_the_round() {
+    let mut gs = make_game();
+    gs.boss_blind = Some(BossBlind::TheOx);
+    gs.current_blind = BlindKind::Boss;
+    // Pair is the most played going in, so that is the hand The Ox names.
+    gs.hand_levels.get_mut(&HandType::Pair).unwrap().played = 4;
+    setup_round(&mut gs, vec![
+        card(0, Rank::Ace, Suit::Spades),
+        card(1, Rank::King, Suit::Hearts),
+    ], 2);
+    gs.money = 100;
+    gs.score_goal = f64::MAX;
+    assert_eq!(gs.ox_target_hand, Some(HandType::Pair));
+
+    // Playing High Card enough times to tie Pair must not retarget the blind mid-round.
+    for _ in 0..5 {
+        gs.hand = vec![0, 1];
+        gs.select_card(0).unwrap();
+        gs.play_hand().unwrap();
+    }
+    assert!(gs.hand_levels[&HandType::HighCard].played > 4, "High Card is now the most played");
+    assert_eq!(gs.money, 100, "The Ox only ever punishes the hand it named");
+}
+
+// =========================================================
+// Golden Ticket pays per trigger
+// =========================================================
+
+#[test]
+fn test_golden_ticket_pays_again_on_a_retrigger() {
+    let mut gold = card(0, Rank::Two, Suit::Spades);
+    gold.enhancement = Enhancement::Gold;
+    let played = vec![gold];
+
+    let once = score(&played, &[], &[joker(1, JokerKind::GoldenTicket)]);
+    assert_eq!(once.dollars_earned, 4);
+
+    // Hack retriggers 2s, so the Gold card scores twice and pays twice (card.lua:3150 is a
+    // `context.individual` effect).
+    let twice = score(&played, &[], &[
+        joker(1, JokerKind::GoldenTicket),
+        joker(2, JokerKind::Hack),
+    ]);
+    assert_eq!(twice.dollars_earned, 8,
+        "Golden Ticket is a per-card effect, so retriggers pay again");
+}
+
+// =========================================================
+// Oops! All 6s doubles per copy
+// =========================================================
+
+#[test]
+fn test_oops_all_6s_doubles_again_for_every_copy() {
+    // A Lucky card's $20 is a 1-in-15 shot. Two copies take it to 4-in-15, three to 8-in-15,
+    // so the payout gets steadily more common across a fixed number of trials.
+    let lucky_payouts = |copies: usize| -> i32 {
+        let mut total = 0;
+        for seed in 0..60u32 {
+            let mut gs = GameState::new(DeckType::Red, Stake::White, Some(format!("OOPS{seed}")));
+            let mut lucky = card(0, Rank::Two, Suit::Spades);
+            lucky.enhancement = Enhancement::Lucky;
+            setup_round(&mut gs, vec![lucky], 1);
+            for i in 0..copies {
+                gs.jokers.push(joker(100 + i as u64, JokerKind::OopsAll6s));
+            }
+            gs.score_goal = f64::MAX;
+            let before = gs.money;
+            gs.select_card(0).unwrap();
+            gs.play_hand().unwrap();
+            total += gs.money - before;
+        }
+        total
+    };
+    let none = lucky_payouts(0);
+    let one = lucky_payouts(1);
+    let three = lucky_payouts(3);
+    assert!(one > none, "one copy doubles the odds: {none} → {one}");
+    assert!(three > one, "three copies multiply them by eight: {one} → {three}");
+}
+
+// =========================================================
+// Verdant Leaf switches the whole blind off
+// =========================================================
+
+#[test]
+fn test_selling_a_joker_under_verdant_leaf_disables_the_blind() {
+    let mut gs = make_game();
+    gs.boss_blind = Some(BossBlind::VerdantLeaf);
+    gs.current_blind = BlindKind::Boss;
+    gs.jokers.push(joker(1, JokerKind::Joker));
+    gs.select_blind().unwrap();
+
+    assert!(gs.deck.iter().all(|c| c.debuffed), "Verdant Leaf debuffs everything up front");
+
+    gs.sell_joker(0).unwrap();
+    assert!(gs.deck.iter().all(|c| !c.debuffed), "the debuffs lift");
+    assert!(gs.active_boss().is_none(),
+        "the blind itself is disabled (card.lua:1615), not just its card debuffs");
+}

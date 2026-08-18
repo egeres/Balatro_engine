@@ -82,12 +82,8 @@ impl GameState {
                 .get(&eval.hand_type)
                 .map(|h| h.level > 1)
                 .unwrap_or(false),
-            // The Ox trips on the most-played hand type (blind.lua:561).
-            BossBlind::TheOx => {
-                let this = self.hand_levels.get(&eval.hand_type).map(|h| h.played).unwrap_or(0);
-                let most = self.hand_levels.values().map(|h| h.played).max().unwrap_or(0);
-                most > 0 && this >= most
-            }
+            // The Ox trips on the hand it named when the round began (blind.lua:562).
+            BossBlind::TheOx => self.ox_target_hand == Some(eval.hand_type),
             _ => false,
         }
     }
@@ -105,11 +101,12 @@ impl GameState {
         match self.active_boss() {
             // `debuff = {h_size_ge = 5}` (game.lua:280): fewer than five cards is refused.
             Some(BossBlind::ThePsychic) => played_count < 5,
-            // No hand type twice in a round.
+            // No hand type twice in a round. The counter already counts this hand, so two means
+            // it has come up before.
             Some(BossBlind::TheEye) => self
                 .hand_levels
                 .get(&eval.hand_type)
-                .map(|h| h.played_this_round > 0)
+                .map(|h| h.played_this_round > 1)
                 .unwrap_or(false),
             // Only one hand type all round.
             Some(BossBlind::TheMouth) => self
@@ -147,8 +144,8 @@ impl GameState {
                     self.jokers[i].set_counter_i64("mult", roll);
                 }
                 JokerKind::LoyaltyCard => {
-                    // X4 Mult every 6th hand played since the joker was acquired
-                    // (card.lua:3633 counts from hands_played_at_create).
+                    // Hands played since the joker was acquired, counting this one
+                    // (card.lua:3633 counts from `hands_played_at_create`). X4 Mult on every 6th.
                     self.jokers[i].add_counter_i64("hands", 1);
                 }
                 JokerKind::SquareJoker => {
@@ -162,7 +159,7 @@ impl GameState {
                     // effects run before joker_main, so the gain counts on this hand.
                     let twos: usize = scoring
                         .iter()
-                        .filter(|&&s| played[s].rank == Rank::Two && !played[s].debuffed)
+                        .filter(|&&s| played[s].has_rank(Rank::Two) && !played[s].debuffed)
                         .map(|&s| {
                             1 + crate::scoring::count_retriggers(
                                 s,
@@ -202,14 +199,13 @@ impl GameState {
                 }
                 JokerKind::Obelisk => {
                     // Reset unless some *other* visible hand has been played at least as often
-                    // (card.lua:3543). `played` for this hand type is incremented after scoring,
-                    // so add 1 here to match Balatro, which increments up front.
+                    // (card.lua:3543). `played` already counts this hand — it was bumped before
+                    // the `before` pass, as Balatro does.
                     let this_plays = self
                         .hand_levels
                         .get(&hand_type)
                         .map(|h| h.played)
-                        .unwrap_or(0)
-                        + 1;
+                        .unwrap_or(0);
                     let another_is_at_least_as_played = self
                         .hand_levels
                         .iter()
@@ -327,12 +323,14 @@ impl GameState {
         if !matches!(self.state, GameStateKind::Round) {
             return Err(BalatroError::NotInRound);
         }
+        // `has_rank` rather than a bare comparison: a Stone card shows no rank to select by.
         for i in 0..self.hand.len() {
             let card_idx = self.hand[i];
-            if self.deck[card_idx].rank == rank && !self.selected_indices.contains(&i) {
-                if self.selected_indices.len() < 5 {
-                    self.selected_indices.push(i);
-                }
+            if self.deck[card_idx].has_rank(rank)
+                && !self.selected_indices.contains(&i)
+                && self.selected_indices.len() < 5
+            {
+                self.selected_indices.push(i);
             }
         }
         Ok(())
@@ -364,6 +362,18 @@ impl GameState {
         // (get_poker_hand_info runs at the top of evaluate_play), so compute it once here and
         // hand it to the `before` pass.
         let pre_eval = self.preview_hand(&played_cards);
+
+        // Balatro books the hand as played at the very top of `evaluate_play`
+        // (state_events.lua:574-578) — before the blind may refuse it, before the `before` joker
+        // pass, before anything scores. Everything downstream therefore reads a counter that
+        // already includes this hand: Supernova pays out on it, Card Sharp asks for *two*, and
+        // the three secret hands become visible the moment you first land one.
+        if let Some(level) = self.hand_levels.get_mut(&pre_eval.hand_type) {
+            level.played += 1;
+            level.played_this_round += 1;
+            level.visible = true;
+        }
+
         let boss_ability_triggered = self.boss_ability_triggers(&pre_eval, &played_cards);
 
         let hand_debuffed = self.blind_debuffs_hand(&pre_eval, played_cards.len());
@@ -391,11 +401,16 @@ impl GameState {
         // +20 Mult on 1/5 (written into extra_mult so flat_mult_bonus picks it up).
         // $20 on 1/15 (counted here, paid out after scoring).
         let mut lucky_dollar_count: i32 = 0;
-        for idx in 0..played_cards.len() {
-            let card = &played_cards[idx];
-            if hand_debuffed || card.enhancement != Enhancement::Lucky || card.debuffed {
-                continue;
-            }
+        let lucky_cards: Vec<usize> = match hand_debuffed {
+            true => Vec::new(),
+            false => played_cards
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.enhancement == Enhancement::Lucky && !c.debuffed)
+                .map(|(idx, _)| idx)
+                .collect(),
+        };
+        for idx in lucky_cards {
             if self.roll_chance("lucky_mult", 1.0 / 5.0) {
                 played_cards[idx].extra_mult += 20;
             }
@@ -457,12 +472,26 @@ impl GameState {
             }
         }
 
+        // Observatory pays out on the Planet cards still sitting in the consumable slots.
+        let observatory_planets: Vec<HandType> = match self.has_voucher(VoucherKind::Observatory) {
+            true => self
+                .consumables
+                .iter()
+                .filter_map(|c| match c.card {
+                    ConsumableCard::Planet(p) => Some(p.hand_type()),
+                    _ => None,
+                })
+                .collect(),
+            false => Vec::new(),
+        };
+
         let mut inputs = crate::scoring::ScoreInputs::new(
             &played_cards,
             &hand_cards,
             &self.jokers,
             &self.hand_levels,
         );
+        inputs.observatory_planets = &observatory_planets;
         inputs.hands_remaining = self.hands_remaining - 1;
         inputs.discards_remaining = self.discards_remaining;
         inputs.money = self.money;
@@ -504,19 +533,11 @@ impl GameState {
 
         self.last_hand_played = Some(result.hand_type);
 
-        // Update hand level stats
-        if let Some(level) = self.hand_levels.get_mut(&result.hand_type) {
-            level.played += 1;
-            level.played_this_round += 1;
-        }
-
-        // TheOx: playing the most-played hand type this run sets money to $0
-        if self.boss_effect_active(BossBlind::TheOx) {
-            let most_played = self.hand_levels.values().map(|h| h.played).max().unwrap_or(0);
-            let this_played = self.hand_levels.get(&result.hand_type).map_or(0, |h| h.played);
-            if most_played > 0 && this_played >= most_played {
-                self.money = 0;
-            }
+        // TheOx: playing the hand it named at the start of the round sets money to $0.
+        if self.boss_effect_active(BossBlind::TheOx)
+            && self.ox_target_hand == Some(result.hand_type)
+        {
+            self.money = 0;
         }
 
         // ThePillar: record played card IDs for this Ante
@@ -730,7 +751,7 @@ impl GameState {
                     let eights = result
                         .scoring_card_indices
                         .iter()
-                        .filter(|&&idx| played[idx].rank == Rank::Eight)
+                        .filter(|&&idx| played[idx].has_rank(Rank::Eight))
                         .count();
                     for _ in 0..eights {
                         if self.roll_chance("8ball", 0.25) {
@@ -750,7 +771,7 @@ impl GameState {
                     let has_ace = result
                         .scoring_card_indices
                         .iter()
-                        .any(|&idx| played[idx].rank == Rank::Ace);
+                        .any(|&idx| played[idx].has_rank(Rank::Ace));
                     if has_ace && result.contained.contains(HandType::Straight) {
                         self.create_tarot();
                     }
@@ -759,7 +780,7 @@ impl GameState {
                     // Only fires on the *first* hand of the round (card.lua:2604). The 6 is
                     // destroyed either way; a full consumable slot only skips the spectral.
                     let is_first_hand = self.hands_remaining + 1 == self.effective_max_hands();
-                    if is_first_hand && played.len() == 1 && played[0].rank == Rank::Six {
+                    if is_first_hand && played.len() == 1 && played[0].has_rank(Rank::Six) {
                         self.create_spectral_from("sixth", &SIXTH_SENSE_SPECTRALS);
                         // Take the card out of hand before destroying it — destroy_deck_card
                         // remaps stored indices and assumes the card is no longer referenced.
@@ -826,7 +847,7 @@ impl GameState {
         if mail_count > 0 {
             let matching = discarded_cards
                 .iter()
-                .filter(|c| c.rank == self.round_targets.mail_rank)
+                .filter(|c| c.has_rank(self.round_targets.mail_rank))
                 .count();
             self.money += 5 * matching as i32 * mail_count as i32;
         }
@@ -855,6 +876,7 @@ impl GameState {
         }
 
         // Post-discard joker updates
+        let smeared = self.has_smeared();
         let mut eaten_jokers: Vec<u64> = Vec::new();
         for i in 0..self.jokers.len() {
             let kind = self.jokers[i].kind;
@@ -877,14 +899,18 @@ impl GameState {
                 JokerKind::Castle => {
                     // Target suit is re-rolled every round (common_events.lua:2312).
                     let target_suit = self.round_targets.castle_suit;
-                    let count = discarded_cards.iter().filter(|c| c.suit == target_suit).count();
+                    let count = discarded_cards.iter().filter(|c| c.is_suit(target_suit, smeared)).count();
                     if count > 0 {
                         self.jokers[i].add_counter_i64("chips", 3 * count as i64);
                     }
                 }
                 JokerKind::HitTheRoad => {
                     // Gains X0.5 Mult for every Jack discarded this round
-                    let jacks = discarded_cards.iter().filter(|c| c.rank == Rank::Jack).count();
+                    // `not context.other_card.debuff` (card.lua:2834): a debuffed Jack feeds it nothing.
+                    let jacks = discarded_cards
+                        .iter()
+                        .filter(|c| c.has_rank(Rank::Jack) && !c.debuffed)
+                        .count();
                     if jacks > 0 {
                         self.jokers[i].add_counter_f64("x_mult", 0.5 * jacks as f64);
                     }
@@ -923,6 +949,17 @@ impl GameState {
     }
 
     fn win_round(&mut self) {
+        // `evaluate_round` lays out every payout row in one synchronous pass and only lets the
+        // dollars land afterwards, so the interest row is worked out from the balance the round
+        // *ended* on — before the blind reward, the unused hands, the jokers and the tags have
+        // paid anything (state_events.lua:1191). Snapshot it, or interest earns on its own payout.
+        let money_at_round_end = self.money;
+
+        // Beating the blind turns Amber Acorn's jokers back over (`Blind:defeat`, blind.lua:338).
+        for j in self.jokers.iter_mut() {
+            j.face_down = false;
+        }
+
         // Garbage Tag pays out per discard left unused across the run.
         self.unused_discards_this_run += self.discards_remaining;
         let is_boss = matches!(self.current_blind, BlindKind::Boss);
@@ -972,7 +1009,7 @@ impl GameState {
             (self.planet_types_used.len() * self.count_joker(JokerKind::Satellite)) as i32;
 
         // Cloud9: +$1 per 9 in full deck at end of round
-        let nines_in_deck = self.deck.iter().filter(|c| c.rank == Rank::Nine && !c.debuffed).count();
+        let nines_in_deck = self.deck.iter().filter(|c| c.has_rank(Rank::Nine) && !c.debuffed).count();
         self.money += (nines_in_deck * self.count_joker(JokerKind::Cloud9)) as i32;
 
         // DelayedGratification: +$2 per available discard if no discards were used this round
@@ -1018,15 +1055,22 @@ impl GameState {
         // ToTheMoon raises the interest *amount* paid per $5, not the cap (card.lua:614 bumps
         // G.GAME.interest_amount). Payout is amount × min(money/5, cap/5) — state_events.lua:1202.
         let to_the_moon_count = self.count_joker(JokerKind::ToTheMoon);
+        let green = self.deck_type == DeckType::Green;
 
-        if self.deck_type == DeckType::Green {
-            // Green deck: $2 per remaining hand, $1 per remaining discard, and no interest
-            // (`extra_hand_bonus = 2, extra_discard_bonus = 1, no_interest = true`, game.lua:631)
-            self.money += 2 * self.hands_remaining as i32;
+        // Every hand left unplayed pays out, on every deck — `money_per_hand or 1`
+        // (state_events.lua:1165). Only a Challenge ever switches it off, so a vanilla run banks
+        // a dollar per unused hand every round. The Green Deck raises it to $2 and adds $1 per
+        // unused discard, and gives up interest to do it
+        // (`extra_hand_bonus = 2, extra_discard_bonus = 1, no_interest = true`, game.lua:631).
+        let money_per_hand = if green { 2 } else { 1 };
+        self.money += money_per_hand * self.hands_remaining as i32;
+        if green {
             self.money += self.discards_remaining as i32;
-        } else {
+        }
+
+        if !green {
             let interest_amount = 1 + to_the_moon_count as i32;
-            let interest_steps = (self.money / 5).min(self.max_interest / 5).max(0);
+            let interest_steps = (money_at_round_end / 5).min(self.max_interest / 5).max(0);
             self.money += interest_amount * interest_steps;
         }
 
@@ -1077,10 +1121,7 @@ impl GameState {
             // The next ante's tags are drawn here too, and eligibility is judged against the
             // ante about to begin (button_callbacks.lua:2951).
             let next_ante = self.ante + 1;
-            self.blind_tags = [
-                self.random_tag_for_ante(next_ante),
-                self.random_tag_for_ante(next_ante),
-            ];
+            self.draw_blind_tags_for_ante(next_ante);
         }
 
         // Mark blind as defeated

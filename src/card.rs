@@ -143,11 +143,34 @@ impl CardInstance {
         self.suit == suit
     }
 
+    /// This card's rank as the jokers see it — `None` for a Stone card.
+    ///
+    /// `Card:get_id` hands a Stone card a fresh random negative on every call (card.lua:957), so
+    /// it answers no to every rank question there is: not Scholar's Ace, not Wee Joker's 2, not
+    /// the King Baron wants held in hand, not the 9 Cloud 9 counts. A Stone card made from a King
+    /// with The Tower keeps its King printed on it and none of the King's behaviour.
+    pub fn scoring_rank(&self) -> Option<Rank> {
+        (!self.is_stone()).then_some(self.rank)
+    }
+
+    /// Whether this card counts as `rank`. See [`Self::scoring_rank`].
+    pub fn has_rank(&self, rank: Rank) -> bool {
+        self.scoring_rank() == Some(rank)
+    }
+
+    /// Whether this card's rank satisfies `pred` — the Fibonacci / even / odd questions.
+    /// A Stone card satisfies none of them.
+    pub fn rank_is(&self, pred: impl Fn(&Rank) -> bool) -> bool {
+        self.scoring_rank().is_some_and(|r| pred(&r))
+    }
+
+    /// Mirrors `Card:is_face` (card.lua:964), which reads the card's id — so a Stone card is not
+    /// a face card, but Pareidolia still overrides everything and makes it one.
     pub fn is_face(&self, pareidolia: bool) -> bool {
         if pareidolia {
             return true;
         }
-        self.rank.is_face()
+        self.rank_is(Rank::is_face)
     }
 
     /// Is this card a stone card?
@@ -178,6 +201,13 @@ pub struct JokerInstance {
     pub counters: std::collections::HashMap<String, serde_json::Value>,
     /// Is this joker currently active/enabled? (perishable can disable)
     pub active: bool,
+    /// Turned face down by Amber Acorn (blind.lua:189-203) and turned back over when that blind
+    /// is beaten or disabled (blind.lua:338, :359).
+    ///
+    /// Purely a matter of what the *player* can see — a face-down joker scores exactly as it
+    /// would face up. That is the whole point: Amber Acorn shuffles the row as well, and the
+    /// shuffle only bites because you have lost track of which joker is which.
+    pub face_down: bool,
 }
 
 /// Jokers whose Mult counter starts at zero and climbs.
@@ -227,6 +257,7 @@ impl JokerInstance {
             rental: false,
             counters: std::collections::HashMap::new(),
             active: true,
+            face_down: false,
         };
         joker.init_counters();
         joker
@@ -445,8 +476,6 @@ pub struct HandLevelData {
     pub played: u32,
     pub played_this_round: u32,
     pub visible: bool,
-    /// Cumulative X1.5 multiplier stacked by Observatory voucher each time a Planet card is used
-    pub observatory_x_mult: f64,
 }
 
 impl HandLevelData {
@@ -456,7 +485,6 @@ impl HandLevelData {
             played: 0,
             played_this_round: 0,
             visible,
-            observatory_x_mult: 1.0,
         }
     }
 

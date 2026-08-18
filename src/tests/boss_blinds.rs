@@ -33,8 +33,8 @@
 ///
 ///   8.  TheTooth — deducts $1 per card played on a Boss round; no deduction elsewhere.
 ///
-///   9.  ThePsychic — forces the hand draw to at least 5 cards during a Round
-///         (uses `effective_hand_size().max(5)`).
+///   9.  ThePsychic — refuses to score a hand of fewer than 5 cards. It has no effect on
+///         hand size.
 ///
 ///  10.  Chip goal multipliers:
 ///         TheWall 4×, VioletVessel 6×, TheNeedle 1×, all other bosses 2×.
@@ -790,22 +790,24 @@ fn test_the_tooth_no_deduction_on_big_blind() {
 }
 
 // =========================================================
-// 9. ThePsychic — forces ≥5 card hand draw
+// 9. ThePsychic — refuses hands under 5 cards
 // =========================================================
 
-/// ThePsychic forces the hand to contain at least 5 cards, even when hand_size < 5.
+/// ThePsychic does not touch hand size. Its whole effect is `debuff = {h_size_ge = 5}`
+/// (game.lua:280): a hand of fewer than five cards is played, costs a hand, and scores nothing.
+/// A player whose hand size is below 5 simply cannot beat it.
 #[test]
-fn test_the_psychic_forces_minimum_5_card_hand() {
+fn test_the_psychic_leaves_hand_size_alone() {
     let mut gs = boss_select(BossBlind::ThePsychic);
     gs.hand_size = 3; // explicitly below 5
     gs.select_blind().unwrap();
-    assert!(
-        gs.hand.len() >= 5,
-        "ThePsychic should force hand size to at least 5; got {}", gs.hand.len()
+    assert_eq!(
+        gs.hand.len(), 3,
+        "ThePsychic has no hand-size effect; got {}", gs.hand.len()
     );
 }
 
-/// ThePsychic does not reduce a hand that is already larger than 5.
+/// ThePsychic leaves a normal hand alone.
 /// Blue deck default hand_size = 8 → hand should stay at 8.
 #[test]
 fn test_the_psychic_does_not_reduce_large_hand() {
@@ -814,7 +816,7 @@ fn test_the_psychic_does_not_reduce_large_hand() {
     gs.select_blind().unwrap();
     assert_eq!(
         gs.hand.len(), 8,
-        "ThePsychic must not reduce hand below the normal hand_size (8)"
+        "ThePsychic must not change the normal hand_size (8)"
     );
 }
 
@@ -880,10 +882,10 @@ fn test_all_standard_bosses_have_2x_chip_goal() {
 // =========================================================
 // 11. Boss blind dollar rewards
 // =========================================================
-// Interest formula: floor((money_before + reward) / 5), capped at max_interest/5 = 5.
-// make_game() money = 4; dollars_earned from scoring = 0 for simple hands.
+// make_game() starts on the Blue Deck with $4 and five hands; dollars_earned from scoring is 0
+// for these simple hands.
 
-/// Helper: win a boss blind and return the money delta (reward + interest).
+/// Helper: win a boss blind and return the money delta.
 fn win_boss_and_get_money_delta(boss: BossBlind) -> i32 {
     let mut gs = boss_select(boss);
     gs.select_blind().unwrap();
@@ -894,86 +896,70 @@ fn win_boss_and_get_money_delta(boss: BossBlind) -> i32 {
     gs.money - money_before
 }
 
+/// What beating a Boss is worth on a fresh `make_game()`: the blind's reward, a dollar for every
+/// hand left unplayed (state_events.lua:1165), and interest on the balance the round *ended* on —
+/// which is the balance before any of this lands (state_events.lua:1191), so the reward does not
+/// earn interest on itself.
+fn expected_boss_delta(reward: i32) -> i32 {
+    let money_at_round_end = 4;
+    let hands_left = 5 - 1; // Blue Deck's five hands, one of them spent winning
+    reward + hands_left + money_at_round_end / 5
+}
+
 /// Regular boss blinds (non-showdown) award $5 on defeat.
 #[test]
 fn test_regular_boss_blind_awards_5_dollars() {
     // TheWall is a representative regular boss with no score or money side-effect
-    let money_before = 4_i32;
-    let reward = 5_i32;
-    let interest = (money_before + reward) / 5; // 9/5 = 1
-    let expected_delta = reward + interest;       // 5 + 1 = 6
     assert_eq!(
-        win_boss_and_get_money_delta(BossBlind::TheWall), expected_delta,
-        "regular boss should award $5 + $1 interest = $6 delta"
+        win_boss_and_get_money_delta(BossBlind::TheWall), expected_boss_delta(5),
+        "regular boss should award $5, plus $1 per unused hand"
     );
 }
 
 /// CeruleanBell (showdown) awards $8 on defeat.
 #[test]
 fn test_cerulean_bell_awards_8_dollars() {
-    let money_before = 4_i32;
-    let reward = 8_i32;
-    let interest = (money_before + reward) / 5; // 12/5 = 2
-    let expected_delta = reward + interest;
     assert_eq!(
-        win_boss_and_get_money_delta(BossBlind::CeruleanBell), expected_delta,
-        "CeruleanBell should award $8 + $2 interest = $10 delta"
+        win_boss_and_get_money_delta(BossBlind::CeruleanBell), expected_boss_delta(8),
+        "CeruleanBell should award $8, plus $1 per unused hand"
     );
 }
 
 /// VerdantLeaf (showdown) awards $8 on defeat.
 #[test]
 fn test_verdant_leaf_awards_8_dollars() {
-    let money_before = 4_i32;
-    let reward = 8_i32;
-    let interest = (money_before + reward) / 5;
-    assert_eq!(
-        win_boss_and_get_money_delta(BossBlind::VerdantLeaf), reward + interest
-    );
+    assert_eq!(win_boss_and_get_money_delta(BossBlind::VerdantLeaf), expected_boss_delta(8));
 }
 
 /// VioletVessel (showdown) awards $8 on defeat.
 #[test]
 fn test_violet_vessel_awards_8_dollars() {
-    let money_before = 4_i32;
-    let reward = 8_i32;
-    let interest = (money_before + reward) / 5;
-    assert_eq!(
-        win_boss_and_get_money_delta(BossBlind::VioletVessel), reward + interest
-    );
+    assert_eq!(win_boss_and_get_money_delta(BossBlind::VioletVessel), expected_boss_delta(8));
 }
 
 /// AmberAcorn (showdown) awards $8 on defeat.
 #[test]
 fn test_amber_acorn_awards_8_dollars() {
-    let money_before = 4_i32;
-    let reward = 8_i32;
-    let interest = (money_before + reward) / 5;
-    assert_eq!(
-        win_boss_and_get_money_delta(BossBlind::AmberAcorn), reward + interest
-    );
+    assert_eq!(win_boss_and_get_money_delta(BossBlind::AmberAcorn), expected_boss_delta(8));
 }
 
 /// CrimsonHeart (showdown) awards $8 on defeat.
 #[test]
 fn test_crimson_heart_awards_8_dollars() {
-    let money_before = 4_i32;
-    let reward = 8_i32;
-    let interest = (money_before + reward) / 5;
-    assert_eq!(
-        win_boss_and_get_money_delta(BossBlind::CrimsonHeart), reward + interest
-    );
+    assert_eq!(win_boss_and_get_money_delta(BossBlind::CrimsonHeart), expected_boss_delta(8));
 }
 
 /// Showdown bosses award $3 more than regular bosses (8 − 5 = 3).
+///
+/// Exactly $3 and no more: interest is worked out from the balance *before* the reward, so a
+/// bigger reward no longer drags a bigger interest payment along with it.
 #[test]
 fn test_showdown_bosses_award_3_more_than_regular() {
     let delta_regular  = win_boss_and_get_money_delta(BossBlind::TheWall);
     let delta_showdown = win_boss_and_get_money_delta(BossBlind::CeruleanBell);
-    // Interest differs too: regular 9/5=1, showdown 12/5=2, so delta showdown = 10, regular = 6
     assert_eq!(
-        delta_showdown - delta_regular, 4,
-        "showdown boss should net $4 more than a regular boss (3 extra reward + 1 extra interest)"
+        delta_showdown - delta_regular, 3,
+        "showdown boss should net exactly its $3 bigger reward"
     );
 }
 
@@ -2198,4 +2184,140 @@ fn test_hieroglyph_does_not_move_the_winning_ante() {
     assert_eq!(gs.win_ante(), 8);
     gs.vouchers.push(VoucherKind::Petroglyph);
     assert_eq!(gs.win_ante(), 8);
+}
+
+// =========================================================
+// 13. Cerulean Bell — one card in hand stays selected
+// =========================================================
+// `Blind:drawn_to_hand` only picks a card when nothing in hand still carries the flag, and it
+// picks from the whole hand rather than from what was just drawn (blind.lua:574-587).
+
+/// The forced card is always highlighted, so it leaves with whatever you play or discard and a
+/// fresh one is chosen. That new pick comes from the **whole hand** — which matters once the draw
+/// pile is empty and there are no freshly drawn cards to choose from at all.
+#[test]
+fn test_cerulean_bell_still_forces_a_card_when_nothing_is_drawn() {
+    let mut gs = boss_select(BossBlind::CeruleanBell);
+    gs.select_blind().unwrap();
+    gs.draw_pile.clear();
+
+    let before = gs.cerulean_forced_card_id.expect("a card must be forced");
+    // Only the forced card is selected, so this discards exactly it — and draws nothing back.
+    gs.discard_hand().unwrap();
+
+    let after = gs.cerulean_forced_card_id.expect("a card must still be forced");
+    assert_ne!(after, before, "the discarded card cannot still be the forced one");
+    assert!(gs.hand.iter().any(|&di| gs.deck[di].id == after),
+        "the pick comes from the whole hand, not only from freshly drawn cards");
+    assert!(
+        gs.selected_indices.iter().any(|&hi| gs.deck[gs.hand[hi]].id == after),
+        "and it is selected"
+    );
+}
+
+#[test]
+fn test_cerulean_bell_picks_a_new_card_once_the_old_one_is_gone() {
+    let mut gs = boss_select(BossBlind::CeruleanBell);
+    gs.select_blind().unwrap();
+    let forced = gs.cerulean_forced_card_id.expect("a card must be forced");
+
+    // Discarding the forced card itself frees the flag for a fresh pick.
+    gs.discard_hand().unwrap();
+
+    let now = gs.cerulean_forced_card_id.expect("a new card must be forced");
+    assert_ne!(now, forced, "the discarded card cannot still be the forced one");
+    assert!(gs.hand.iter().any(|&di| gs.deck[di].id == now),
+        "the new forced card is one of the cards in hand");
+}
+
+#[test]
+fn test_cerulean_bells_forced_card_cannot_be_deselected() {
+    let mut gs = boss_select(BossBlind::CeruleanBell);
+    gs.select_blind().unwrap();
+    let forced_idx = gs.selected_indices[0];
+    assert!(gs.deselect_card(forced_idx).is_err());
+}
+
+// =========================================================
+// 14. Amber Acorn — the jokers go face down as well as shuffled
+// =========================================================
+
+#[test]
+fn test_amber_acorn_turns_the_jokers_face_down() {
+    let mut gs = boss_select(BossBlind::AmberAcorn);
+    for i in 0..4 {
+        gs.jokers.push(joker(100 + i, JokerKind::Joker));
+    }
+    gs.select_blind().unwrap();
+    assert!(gs.jokers.iter().all(|j| j.face_down),
+        "Amber Acorn hides the whole row — the shuffle is only a punishment if you cannot read it");
+}
+
+#[test]
+fn test_a_face_down_joker_still_scores() {
+    let mut gs = boss_select(BossBlind::AmberAcorn);
+    gs.jokers.push(joker(100, JokerKind::Joker)); // +4 Mult
+    gs.select_blind().unwrap();
+    gs.hand = vec![gs.hand[0]];
+    gs.score_goal = f64::MAX;
+    gs.select_card(0).unwrap();
+    let r = gs.play_hand().unwrap();
+    assert!(r.final_mult >= 5.0,
+        "being face down is what the player can see, not what the joker does; got {}",
+        r.final_mult);
+}
+
+#[test]
+fn test_beating_amber_acorn_turns_the_jokers_back_over() {
+    let mut gs = boss_select(BossBlind::AmberAcorn);
+    gs.jokers.push(joker(100, JokerKind::Joker));
+    gs.select_blind().unwrap();
+    assert!(gs.jokers[0].face_down);
+
+    gs.score_goal = 1.0;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    assert!(!gs.jokers[0].face_down, "`Blind:defeat` flips them back (blind.lua:338)");
+}
+
+#[test]
+fn test_disabling_amber_acorn_turns_the_jokers_back_over() {
+    let mut gs = boss_select(BossBlind::AmberAcorn);
+    gs.jokers.push(joker(100, JokerKind::Luchador));
+    gs.select_blind().unwrap();
+    assert!(gs.jokers[0].face_down);
+
+    gs.sell_joker(0).unwrap(); // Luchador disables the blind on sale
+    gs.jokers.push(joker(101, JokerKind::Joker));
+    // A fresh round under any other blind leaves the row face up too.
+    assert!(gs.jokers.iter().all(|j| !j.face_down),
+        "`Blind:disable` flips them back (blind.lua:359)");
+}
+
+#[test]
+fn test_only_amber_acorn_hides_the_jokers() {
+    let mut gs = boss_select(BossBlind::TheWall);
+    gs.jokers.push(joker(100, JokerKind::Joker));
+    gs.select_blind().unwrap();
+    assert!(gs.jokers.iter().all(|j| !j.face_down));
+}
+
+/// With nothing played yet every hand ties on zero, and the answer is the High Card that
+/// `G.GAME.current_round` starts out naming (game.lua:1964) — not the Flush Five at the top of
+/// the table that no one has ever landed.
+#[test]
+fn test_the_ox_names_high_card_before_anything_has_been_played() {
+    let mut gs = boss_select(BossBlind::TheOx);
+    gs.select_blind().unwrap();
+    assert_eq!(gs.ox_target_hand, Some(HandType::HighCard));
+}
+
+/// Among genuine ties the better hand wins.
+#[test]
+fn test_the_ox_breaks_ties_towards_the_better_hand() {
+    let mut gs = boss_select(BossBlind::TheOx);
+    gs.hand_levels.get_mut(&HandType::Pair).unwrap().played = 3;
+    gs.hand_levels.get_mut(&HandType::Flush).unwrap().played = 3;
+    gs.select_blind().unwrap();
+    assert_eq!(gs.ox_target_hand, Some(HandType::Flush));
 }

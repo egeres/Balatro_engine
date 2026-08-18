@@ -61,22 +61,24 @@ fn force_win(gs: &mut GameState) {
 
 /// Win all three Ante 1 blinds while buying and selling jokers in each shop.
 ///
-/// Money trace (Blue deck, White stake, starting money $4):
+/// Money trace (Blue deck, White stake, starting money $4). Each win spends one of the deck's
+/// five hands, so four are left to pay out at $1 each.
 ///
-///   Small blind win  → +$3 reward, money=$7 → +$1 interest (floor(7/5)=1) → $8
-///   Buy AbstractJoker ($4)                                                  → $4
-///   leave_shop (no rentals)                                                 → $4
-///
-///   Big blind win    → +$4 reward, money=$8 → +$1 interest (floor(8/5)=1)  → $9
-///   Sell AbstractJoker (+$2, sell_value=(4+1)/2=2)                          → $11
-///   Buy Scholar ($4)                                                        → $7
+///   Small blind win  → $4 +$3 reward +$4 hands +$0 interest (floor(4/5))    → $11
+///   Buy AbstractJoker ($4)                                                  → $7
 ///   leave_shop (no rentals)                                                 → $7
 ///
-///   Boss blind win   → +$5 reward, money=$12 → +$2 interest (floor(12/5)=2) → $14
-///   leave_shop → ante advances to 2                                          → $14
+///   Big blind win    → $7 +$4 reward +$4 hands +$1 interest (floor(7/5))    → $16
+///   Sell AbstractJoker (+$2, sell_value=(4+1)/2=2)                          → $18
+///   Buy Scholar ($4)                                                        → $14
+///   leave_shop (no rentals)                                                 → $14
 ///
-/// Interest formula: floor(money_after_reward / 5), capped at max_interest/5.
-/// At White stake max_interest=25, so cap is 5 — not reached here.
+///   Boss blind win   → $14 +$5 reward +$4 hands +$2 interest (floor(14/5))  → $25
+///   leave_shop → ante advances to 2                                         → $25
+///
+/// Interest is floor(money_at_round_end / 5), capped at max_interest/5 — worked out before the
+/// round's own payouts land, so a reward never earns interest on itself. At White stake
+/// max_interest=25, so the cap is 5 steps, not reached here.
 #[test]
 fn run_joker_economy_across_three_blinds() {
     let mut gs = GameState::new(DeckType::Blue, Stake::White, Some("ECONOMY1".to_string()));
@@ -89,42 +91,42 @@ fn run_joker_economy_across_three_blinds() {
     // ── Small blind ──────────────────────────────────────────────
     gs.select_blind().unwrap();
     force_win(&mut gs);
-    // reward=$3 → money=7; interest=floor(7/5)=1 → money=8
-    assert_eq!(gs.money, 8, "after small blind win: expected $8");
+    // $4 + $3 reward + $4 unused hands + $0 interest
+    assert_eq!(gs.money, 11, "after small blind win: expected $11");
 
     // Inject AbstractJoker (base_cost=4) at the front of shop offers.
     gs.shop_offers.insert(0, ShopOffer::new(ShopItem::Joker(JokerInstance::new(1000, JokerKind::AbstractJoker, Edition::None)), 4));
 
     gs.buy_joker(0).unwrap();
-    assert_eq!(gs.money, 4, "after buying AbstractJoker ($4): expected $4");
+    assert_eq!(gs.money, 7, "after buying AbstractJoker ($4): expected $7");
     assert_eq!(gs.jokers.len(), 1);
     assert_eq!(gs.jokers[0].kind, JokerKind::AbstractJoker);
 
     // Not a rental joker → no cost on leave_shop.
     gs.leave_shop().unwrap();
-    assert_eq!(gs.money, 4);
+    assert_eq!(gs.money, 7);
     assert!(matches!(gs.current_blind, BlindKind::Big));
 
     // ── Big blind ────────────────────────────────────────────────
     gs.select_blind().unwrap();
     force_win(&mut gs);
-    // reward=$4 → money=8; interest=floor(8/5)=1 → money=9
-    assert_eq!(gs.money, 9, "after big blind win: expected $9");
+    // $7 + $4 reward + $4 unused hands + $1 interest
+    assert_eq!(gs.money, 16, "after big blind win: expected $16");
 
     // Sell AbstractJoker: sell_value = (base_cost + 1) / 2 = (4+1)/2 = 2.
     gs.sell_joker(0).unwrap();
-    assert_eq!(gs.money, 11, "after selling AbstractJoker (+$2): expected $11");
+    assert_eq!(gs.money, 18, "after selling AbstractJoker (+$2): expected $18");
     assert!(gs.jokers.is_empty());
 
     // Inject Scholar (base_cost=4) at the front.
     gs.shop_offers.insert(0, ShopOffer::new(ShopItem::Joker(JokerInstance::new(1001, JokerKind::Scholar, Edition::None)), 4));
 
     gs.buy_joker(0).unwrap();
-    assert_eq!(gs.money, 7, "after buying Scholar ($4): expected $7");
+    assert_eq!(gs.money, 14, "after buying Scholar ($4): expected $14");
     assert_eq!(gs.jokers[0].kind, JokerKind::Scholar);
 
     gs.leave_shop().unwrap();
-    assert_eq!(gs.money, 7);
+    assert_eq!(gs.money, 14);
     assert!(matches!(gs.current_blind, BlindKind::Boss));
 
     // ── Boss blind ───────────────────────────────────────────────
@@ -134,8 +136,8 @@ fn run_joker_economy_across_three_blinds() {
     gs.boss_blind = None;
     gs.select_blind().unwrap();
     force_win(&mut gs);
-    // reward=$5 → money=12; interest=floor(12/5)=2 → money=14
-    assert_eq!(gs.money, 14, "after boss blind win: expected $14");
+    // $14 + $5 reward + $4 unused hands + $2 interest
+    assert_eq!(gs.money, 25, "after boss blind win: expected $25");
 
     // Leave boss shop → ante advances to 2.
     gs.leave_shop().unwrap();
@@ -170,14 +172,14 @@ fn run_pack_opening_and_consumable_chain() {
     // ── Win Small blind ──────────────────────────────────────────
     gs.select_blind().unwrap();
     force_win(&mut gs);
-    // money = 4+3+1 = 8
+    // money = $4 + $3 reward + $4 unused hands + $0 interest = $11
 
     // ── Shop: buy Celestial pack with known contents ─────────────
     // Replace shop offers entirely so buy_pack(0) is deterministic.
     gs.shop_offers = vec![ShopOffer::new(ShopItem::Pack(PackKind::CelestialPack), 4)];
 
     gs.buy_pack(0).unwrap();
-    assert_eq!(gs.money, 4, "after buying CelestialPack ($4) from $8: expected $4");
+    assert_eq!(gs.money, 7, "after buying CelestialPack ($4) from $11: expected $7");
     assert!(matches!(gs.state, GameStateKind::BoosterPack));
 
     // Override pack contents: exactly one Mercury, one pick.

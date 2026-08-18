@@ -437,3 +437,169 @@ fn test_the_psychic_only_applies_during_its_own_blind() {
     let r = gs.play_hand().unwrap();
     assert!(r.final_score > 0.0, "The Psychic only applies during its own Boss blind");
 }
+
+// =========================================================
+// Shortcut — gaps of one rank, as many as you like
+// =========================================================
+// `get_straight` clears `skipped_rank` every time it finds a rank (misc_functions.lua:570-580),
+// so a hand may bridge several single-rank gaps. Only *consecutive* gaps break the run.
+
+fn straight_with_shortcut(ranks: [Rank; 5]) -> bool {
+    let cards: Vec<CardInstance> = ranks
+        .into_iter()
+        .enumerate()
+        .map(|(i, r)| card(i as u64, r, Suit::Spades))
+        .collect();
+    evaluate_hand(&cards, false, true, false, false)
+        .contained
+        .contains(HandType::Straight)
+}
+
+#[test]
+fn test_shortcut_bridges_more_than_one_gap() {
+    use Rank::*;
+    assert!(straight_with_shortcut([Two, Four, Six, Eight, Ten]),
+        "2-4-6-8-10 is a Straight with Shortcut — four single-rank gaps");
+    assert!(straight_with_shortcut([Ace, Three, Five, Seven, Nine]),
+        "A-3-5-7-9 is a Straight with Shortcut, the Ace counting low");
+    assert!(straight_with_shortcut([Three, Four, Six, Seven, Eight]),
+        "one gap in the middle is still a Straight");
+}
+
+#[test]
+fn test_shortcut_will_not_bridge_two_gaps_in_a_row() {
+    use Rank::*;
+    assert!(!straight_with_shortcut([Two, Five, Eight, Jack, King]),
+        "gaps of two ranks are beyond Shortcut");
+}
+
+#[test]
+fn test_shortcut_is_needed_for_any_gap_at_all() {
+    use Rank::*;
+    let cards: Vec<CardInstance> = [Two, Four, Six, Eight, Ten]
+        .into_iter()
+        .enumerate()
+        .map(|(i, r)| card(i as u64, r, Suit::Spades))
+        .collect();
+    assert!(!evaluate_hand(&cards, false, false, false, false)
+        .contained
+        .contains(HandType::Straight));
+}
+
+// =========================================================
+// Four Fingers — the flush-and-something hands
+// =========================================================
+// `evaluate_poker_hand` asks only whether *a* flush exists before naming a Flush House or a
+// Straight Flush; it never re-derives the rank groups from the flush's own cards
+// (misc_functions.lua:404-442).
+
+#[test]
+fn test_four_fingers_lets_a_four_card_flush_make_a_flush_house() {
+    // Four Spades plus an off-suit Heart: a full house, and a flush by Four Fingers' reckoning.
+    let cards = vec![
+        card(0, Rank::Seven, Suit::Spades),
+        card(1, Rank::Seven, Suit::Spades),
+        card(2, Rank::Seven, Suit::Spades),
+        card(3, Rank::Four, Suit::Spades),
+        card(4, Rank::Four, Suit::Hearts),
+    ];
+    let plain = evaluate_hand(&cards, false, false, false, false);
+    assert_eq!(plain.hand_type, HandType::FullHouse, "without Four Fingers it is a Full House");
+
+    let ff = evaluate_hand(&cards, true, false, false, false);
+    assert_eq!(ff.hand_type, HandType::FlushHouse);
+    assert_eq!(ff.scoring_indices.len(), 5, "all five cards score");
+}
+
+#[test]
+fn test_straight_flush_scores_the_union_of_the_two_hands() {
+    // Four Spades in sequence plus a Heart that extends the straight. The flush is the four
+    // Spades, the straight is all five, and Balatro scores every card in either.
+    let cards = vec![
+        card(0, Rank::Five, Suit::Spades),
+        card(1, Rank::Six, Suit::Spades),
+        card(2, Rank::Seven, Suit::Spades),
+        card(3, Rank::Eight, Suit::Spades),
+        card(4, Rank::Nine, Suit::Hearts),
+    ];
+    let ff = evaluate_hand(&cards, true, false, false, false);
+    assert_eq!(ff.hand_type, HandType::StraightFlush);
+    assert_eq!(
+        ff.scoring_indices, vec![0, 1, 2, 3, 4],
+        "the off-suit card that completes the straight scores too"
+    );
+}
+
+#[test]
+fn test_a_paired_straight_scores_both_cards_of_the_shared_rank() {
+    // `get_straight` appends every card of a matched rank, so with Four Fingers the second Five
+    // rides along (misc_functions.lua:574).
+    let cards = vec![
+        card(0, Rank::Five, Suit::Spades),
+        card(1, Rank::Five, Suit::Hearts),
+        card(2, Rank::Six, Suit::Clubs),
+        card(3, Rank::Seven, Suit::Diamonds),
+        card(4, Rank::Eight, Suit::Spades),
+    ];
+    let ff = evaluate_hand(&cards, true, false, false, false);
+    assert_eq!(ff.hand_type, HandType::Straight);
+    assert_eq!(ff.scoring_indices, vec![0, 1, 2, 3, 4]);
+}
+
+// =========================================================
+// Stone cards have no rank
+// =========================================================
+// `Card:get_id` hands a Stone card a fresh random negative every call (card.lua:957), so it
+// matches no rank-based joker — even one made from a card that still shows a King.
+
+fn stone(id: u64, rank: Rank) -> CardInstance {
+    let mut c = card(id, rank, Suit::Spades);
+    c.enhancement = Enhancement::Stone;
+    c
+}
+
+#[test]
+fn test_a_stone_card_matches_no_rank_joker() {
+    // A Stone Ace scores its 50 chips and nothing else: Scholar wants an Ace and finds none.
+    let played = vec![stone(0, Rank::Ace)];
+    let with_scholar = score(&played, &[], &[joker(1, JokerKind::Scholar)]);
+    let bare = score(&played, &[], &[]);
+    assert_eq!(with_scholar.final_score, bare.final_score,
+        "Scholar must not read the Ace printed on a Stone card");
+}
+
+#[test]
+fn test_a_stone_card_is_not_a_face_card() {
+    let played = vec![stone(0, Rank::King)];
+    let with_scary = score(&played, &[], &[joker(1, JokerKind::ScaryFace)]);
+    let bare = score(&played, &[], &[]);
+    assert_eq!(with_scary.final_score, bare.final_score,
+        "Scary Face must not read the King printed on a Stone card");
+}
+
+#[test]
+fn test_pareidolia_still_makes_a_stone_card_a_face() {
+    // `is_face` tests the id first but falls through to Pareidolia, which answers for everything
+    // (card.lua:967).
+    let played = vec![stone(0, Rank::Two)];
+    let with_both = score(&played, &[], &[
+        joker(1, JokerKind::ScaryFace),
+        joker(2, JokerKind::Pareidolia),
+    ]);
+    let bare = score(&played, &[], &[joker(2, JokerKind::Pareidolia)]);
+    assert!(with_both.final_score > bare.final_score,
+        "under Pareidolia even a Stone card is a face card");
+}
+
+#[test]
+fn test_a_stone_card_never_joins_a_rank_group() {
+    // Three real Kings and a Stone card that reads King: still Three of a Kind, not Four.
+    let cards = vec![
+        card(0, Rank::King, Suit::Spades),
+        card(1, Rank::King, Suit::Hearts),
+        card(2, Rank::King, Suit::Clubs),
+        stone(3, Rank::King),
+    ];
+    assert_eq!(evaluate_hand(&cards, false, false, false, false).hand_type,
+        HandType::ThreeOfAKind);
+}

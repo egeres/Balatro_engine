@@ -158,7 +158,7 @@ pub(crate) fn count_retriggers(
                 retriggers += 1;
             }
             JokerKind::Hack => {
-                if matches!(card.rank, Rank::Two | Rank::Three | Rank::Four | Rank::Five) {
+                if card.rank_is(|r| matches!(r, Rank::Two | Rank::Three | Rank::Four | Rank::Five)) {
                     retriggers += 1;
                 }
             }
@@ -173,10 +173,8 @@ pub(crate) fn count_retriggers(
                     retriggers += 2;
                 }
             }
-            JokerKind::Seltzer => {
-                if joker.get_counter_i64("hands") > 0 {
-                    retriggers += 1;
-                }
+            JokerKind::Seltzer if joker.get_counter_i64("hands") > 0 => {
+                retriggers += 1;
             }
             _ => {}
         }
@@ -209,134 +207,158 @@ pub(crate) fn count_hand_retriggers(card: &CardInstance, jokers: &[JokerInstance
 // Phase 2 — per scoring-card effects
 // ---------------------------------------------------------------------------
 
+/// Everything the per-card joker pass needs that is fixed for the whole hand.
+///
+/// Bundled because `calc_joker_individual` is called once per joker per trigger per scoring card
+/// — passing these six separately meant a ten-argument signature repeated at every call site,
+/// including its own recursion.
+pub(crate) struct CardContext<'a> {
+    pub jokers: &'a [JokerInstance],
+    pub scoring_indices: &'a [usize],
+    /// The hand as it is being scored, which is not the same as the hand that was played: Hiker
+    /// and Vampire have already edited it by this point.
+    pub played_cards: &'a [CardInstance],
+    pub pareidolia: bool,
+    pub smeared: bool,
+    pub targets: RoundTargets,
+}
+
+// Every arm below reads `Kind => { if <condition> { <effect> } }`. Clippy would rather the last
+// one before the catch-all became a match guard, but breaking the shape for a single arm costs
+// more in readability than the lint saves.
+#[allow(clippy::collapsible_match)]
 pub(crate) fn calc_joker_individual(
     joker: &JokerInstance,
     joker_idx: usize,
-    all_jokers: &[JokerInstance],
     card_idx: usize,
     card: &CardInstance,
-    scoring_indices: &[usize],
-    played_cards: &[CardInstance],
-    pareidolia: bool,
-    smeared: bool,
-    targets: RoundTargets,
+    ctx: &CardContext,
 ) -> JokerEffect {
     // Blueprint / Brainstorm copy every context, not just joker_main, so a copy joker sitting
     // next to Greedy Joker or Photograph fires here too.
     if is_copy_joker(joker.kind) {
-        return match copy_target(all_jokers, joker_idx) {
-            Some(t) => calc_joker_individual(
-                &all_jokers[t], t, all_jokers, card_idx, card, scoring_indices, played_cards,
-                pareidolia, smeared, targets,
-            ),
+        return match copy_target(ctx.jokers, joker_idx) {
+            Some(t) => calc_joker_individual(&ctx.jokers[t], t, card_idx, card, ctx),
             None => JokerEffect::new(),
         };
     }
 
     let mut effect = JokerEffect::new();
-    let is_scoring = scoring_indices.contains(&card_idx);
+    // `context.individual` with `cardarea == G.play` only ever reaches cards in the scoring hand
+    // (state_events.lua:695). Checked once here rather than in every arm below.
+    if !ctx.scoring_indices.contains(&card_idx) {
+        return effect;
+    }
 
     match joker.kind {
         JokerKind::GreedyJoker => {
-            if is_scoring && card.is_suit(Suit::Diamonds, smeared) {
+            if card.is_suit(Suit::Diamonds, ctx.smeared) {
                 effect.mult += 3;
             }
         }
         JokerKind::LustyJoker => {
-            if is_scoring && card.is_suit(Suit::Hearts, smeared) {
+            if card.is_suit(Suit::Hearts, ctx.smeared) {
                 effect.mult += 3;
             }
         }
         JokerKind::WrathfulJoker => {
-            if is_scoring && card.is_suit(Suit::Spades, smeared) {
+            if card.is_suit(Suit::Spades, ctx.smeared) {
                 effect.mult += 3;
             }
         }
         JokerKind::GluttonousJoker => {
-            if is_scoring && card.is_suit(Suit::Clubs, smeared) {
+            if card.is_suit(Suit::Clubs, ctx.smeared) {
                 effect.mult += 3;
             }
         }
         JokerKind::ScaryFace => {
-            if is_scoring && card.is_face(pareidolia) {
+            if card.is_face(ctx.pareidolia) {
                 effect.chips += 30;
             }
         }
         JokerKind::Fibonacci => {
-            if is_scoring && card.rank.is_fibonacci() {
+            if card.rank_is(Rank::is_fibonacci) {
                 effect.mult += 8;
             }
         }
         JokerKind::EvenSteven => {
-            if is_scoring && card.rank.is_even() {
+            if card.rank_is(Rank::is_even) {
                 effect.mult += 4;
             }
         }
         JokerKind::OddTodd => {
-            if is_scoring && card.rank.is_odd() {
+            if card.rank_is(Rank::is_odd) {
                 effect.chips += 31;
             }
         }
         JokerKind::Scholar => {
-            if is_scoring && card.rank == Rank::Ace {
+            if card.has_rank(Rank::Ace) {
                 effect.chips += 20;
                 effect.mult += 4;
             }
         }
         JokerKind::Photograph => {
-            if is_scoring && card.is_face(pareidolia) {
-                let first_face = scoring_indices
+            // `Card:is_face()` with no bypass answers no for a debuffed card (card.lua:965), so
+            // a debuffed face is skipped over when looking for the first one.
+            if card.is_face(ctx.pareidolia) {
+                let first_face = ctx.scoring_indices
                     .iter()
-                    .find(|&&i| played_cards[i].is_face(pareidolia));
+                    .find(|&&i| !ctx.played_cards[i].debuffed && ctx.played_cards[i].is_face(ctx.pareidolia));
                 if first_face == Some(&card_idx) {
                     effect.x_mult = 2.0;
                 }
             }
         }
         JokerKind::WalkieTalkie => {
-            if is_scoring && (card.rank == Rank::Ten || card.rank == Rank::Four) {
+            if card.has_rank(Rank::Ten) || card.has_rank(Rank::Four) {
                 effect.chips += 10;
                 effect.mult += 4;
             }
         }
         JokerKind::SmileyFace => {
-            if is_scoring && card.is_face(pareidolia) {
+            if card.is_face(ctx.pareidolia) {
                 effect.mult += 5;
             }
         }
         // Hiker adds no chips directly. It writes perma_bonus onto the card (card.lua:3067),
         // which score_hand applies between triggers and reports back to the caller.
         JokerKind::Arrowhead => {
-            if is_scoring && card.is_suit(Suit::Spades, smeared) {
+            if card.is_suit(Suit::Spades, ctx.smeared) {
                 effect.chips += 50;
             }
         }
         JokerKind::OnyxAgate => {
-            if is_scoring && card.is_suit(Suit::Clubs, smeared) {
+            if card.is_suit(Suit::Clubs, ctx.smeared) {
                 effect.mult += 7;
             }
         }
         JokerKind::Bloodstone => {
             // Pre-rolled in round.rs: extra_x_mult set to 1.5 on 1/2 chance
-            if is_scoring && card.is_suit(Suit::Hearts, smeared) && card.extra_x_mult > 1.0 {
+            if card.is_suit(Suit::Hearts, ctx.smeared) && card.extra_x_mult > 1.0 {
                 effect.x_mult = card.extra_x_mult;
             }
         }
         JokerKind::RoughGem => {
-            if is_scoring && card.is_suit(Suit::Diamonds, smeared) {
+            if card.is_suit(Suit::Diamonds, ctx.smeared) {
                 effect.dollars += 1;
             }
         }
+        JokerKind::GoldenTicket => {
+            // `context.individual` (card.lua:3150), so it pays per scoring Gold card *per
+            // trigger* — Hack, Sock and Buskin, a Red Seal and friends all multiply the payout.
+            if card.enhancement == Enhancement::Gold {
+                effect.dollars += 4;
+            }
+        }
         JokerKind::Triboulet => {
-            if is_scoring && (card.rank == Rank::King || card.rank == Rank::Queen) {
+            if card.has_rank(Rank::King) || card.has_rank(Rank::Queen) {
                 effect.x_mult = 2.0;
             }
         }
         JokerKind::TheIdol => {
             // Target is the round-wide idol card, re-rolled each round (card.lua:3127).
-            if is_scoring
-                && card.rank == targets.idol_rank
-                && card.is_suit(targets.idol_suit, smeared)
+            if card.has_rank(ctx.targets.idol_rank)
+                && card.is_suit(ctx.targets.idol_suit, ctx.smeared)
             {
                 effect.x_mult = 2.0;
             }
@@ -367,12 +389,12 @@ pub(crate) fn calc_joker_hand_card(
     let mut effect = JokerEffect::new();
     match joker.kind {
         JokerKind::Baron => {
-            if card.rank == Rank::King && !card.debuffed {
+            if card.has_rank(Rank::King) && !card.debuffed {
                 effect.x_mult = 1.5;
             }
         }
         JokerKind::ShootTheMoon => {
-            if card.rank == Rank::Queen && !card.debuffed {
+            if card.has_rank(Rank::Queen) && !card.debuffed {
                 effect.mult += 13;
             }
         }
@@ -555,16 +577,25 @@ pub(crate) fn calc_joker_main(
             if ctx.enhanced_count_in_deck >= 16 { effect.x_mult = 3.0; }
         }
         JokerKind::CardSharp => {
+            // `played_this_round > 1` (card.lua:4040) — the counter already includes the hand
+            // being scored, so two means "this hand type has come up before this round".
             let played_this_round = ctx.hand_levels
                 .get(&hand_type)
                 .map(|h| h.played_this_round)
                 .unwrap_or(0);
-            if played_this_round > 0 { effect.x_mult = 3.0; }
+            if played_this_round > 1 { effect.x_mult = 3.0; }
         }
         JokerKind::LoyaltyCard => {
-            // Counts hands since this joker was acquired, not hands played this run.
-            let hands = joker.get_counter_i64("hands");
-            if hands > 0 && hands % 6 == 0 {
+            // `loyalty_remaining = (every - 1 - hands_since_acquired) % (every + 1)` with
+            // `every = 5`, and the X4 lands when that reads **5** (card.lua:3645). Reading 0 is
+            // not the payout — that branch only juices the card, as a one-hand warning that the
+            // next one pays (card.lua:3642).
+            //
+            // Balatro's `hands_played` has not counted the hand being scored yet while this
+            // counter has, hence the -1. It works out to every 6th hand since the joker was
+            // acquired, which is what the card claims.
+            let hands_since = joker.get_counter_i64("hands") - 1;
+            if (4 - hands_since).rem_euclid(6) == 5 {
                 effect.x_mult = 4.0;
             }
         }
@@ -652,12 +683,6 @@ pub(crate) fn calc_joker_main(
         JokerKind::Throwback => {
             let skips = joker.get_counter_i64("skips");
             if skips > 0 { effect.x_mult = 1.0 + 0.25 * skips as f64; }
-        }
-        JokerKind::GoldenTicket => {
-            let gold = scoring_cards.iter()
-                .filter(|&&i| played[i].enhancement == Enhancement::Gold)
-                .count();
-            effect.dollars += gold as i32 * 4;
         }
         JokerKind::ToDoList => {
             let target = joker

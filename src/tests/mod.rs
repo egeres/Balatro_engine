@@ -178,6 +178,9 @@ pub fn setup_round(gs: &mut GameState, deck_cards: Vec<CardInstance>, hand_size:
     // Start at a full complement so "first hand of the round" checks (DNA, Sixth Sense) behave.
     gs.hands_remaining = gs.effective_max_hands();
     gs.discards_remaining = gs.effective_max_discards();
+    // The Ox names the hand it punishes when the round begins, and this stands in for
+    // `begin_round`, so callers that pre-load play counts get the boss they set up.
+    gs.ox_target_hand = Some(gs.most_played_hand());
     gs.selected_indices.clear();
     gs.hand.clear();
     gs.draw_pile.clear();

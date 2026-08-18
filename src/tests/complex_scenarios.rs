@@ -889,7 +889,8 @@ fn test_scenario_five_of_a_kind_lvl3_nine_jokers_zero_discards() {
     // Ramen starts at x2.0 by default — no explicit set needed
     let ramen = joker(6, JokerKind::Ramen);
 
-    // CardSharp fires ×3 because FiveOfAKind already played this round (played_this_round = 1)
+    // CardSharp fires ×3 because FiveOfAKind already came up this round (played_this_round = 2:
+    // one earlier hand, plus the one being scored)
     let cardsharp = joker(7, JokerKind::CardSharp);
 
     let jokers = vec![
@@ -899,7 +900,7 @@ fn test_scenario_five_of_a_kind_lvl3_nine_jokers_zero_discards() {
     ];
 
     let mut levels = levels_with(HandType::FiveOfAKind, 3);
-    levels.get_mut(&HandType::FiveOfAKind).unwrap().played_this_round = 1; // CardSharp fires
+    levels.get_mut(&HandType::FiveOfAKind).unwrap().played_this_round = 2; // CardSharp fires
     let r = {
         let mut si = ScoreInputs::new(&played, &played, &jokers, &levels);
         si.hands_remaining = 3;

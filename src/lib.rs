@@ -1,9 +1,13 @@
-mod card;
-mod game;
-mod hand_eval;
-mod rng;
-mod scoring;
-mod types;
+// Public because the crate is built as an `rlib` as well as the Python extension module
+// (Cargo.toml `crate-type`). Keeping the modules private made every `pub` item unreachable from
+// outside, so anything only the test suite called — `joker_sell_value`, `get_base_blind_amount`,
+// the sticker-compatibility checks — was reported as dead code.
+pub mod card;
+pub mod game;
+pub mod hand_eval;
+pub mod rng;
+pub mod scoring;
+pub mod types;
 #[cfg(test)]
 mod tests;
 
@@ -143,7 +147,7 @@ fn gamestate_to_json(gs: &GameState) -> Value {
         "boss_blind": gs.boss_blind.map(|b| format!("{:?}", b)),
         "vouchers": gs.vouchers.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>(),
         "tags": tags_json(&gs.tags),
-        "pending_free_pack": gs.pending_free_pack.map(|p| format!("{:?}", p)),
+        "pending_free_packs": gs.pending_free_packs.iter().map(|p| format!("{:?}", p)).collect::<Vec<_>>(),
     })
 }
 
@@ -179,17 +183,24 @@ fn round_info_json(gs: &GameState) -> Value {
         .iter()
         .enumerate()
         .map(|(i, j)| {
+            // Amber Acorn turns the row face down and shuffles it. Hiding what a face-down joker
+            // *is* — its kind, its edition, its accumulated counters — is the entire effect; the
+            // shuffle costs nothing if the row can still be read. The stickers stay visible
+            // because they gate which actions are legal, and the row can still be reordered and
+            // sold by index.
+            let hidden = |v: Value| if j.face_down { Value::Null } else { v };
             serde_json::json!({
                 "index": i,
                 "id": j.id,
-                "kind": format!("{:?}", j.kind),
-                "edition": format!("{:?}", j.edition),
+                "face_down": j.face_down,
+                "kind": hidden(format!("{:?}", j.kind).into()),
+                "edition": hidden(format!("{:?}", j.edition).into()),
                 "eternal": j.eternal,
                 "perishable": j.perishable,
                 "perishable_rounds_left": j.perishable_rounds_left,
                 "rental": j.rental,
                 "active": j.active,
-                "counters": j.counters,
+                "counters": hidden(serde_json::to_value(&j.counters).unwrap_or(Value::Null)),
             })
         })
         .collect();
@@ -327,13 +338,21 @@ fn run_info_json(gs: &GameState) -> Value {
         "stake": format!("{:?}", gs.stake),
         "seed": gs.seed,
         "state": format!("{:?}", gs.state),
-        "jokers": gs.jokers.iter().map(|j| format!("{:?}", j.kind)).collect::<Vec<_>>(),
+        // A face-down joker (Amber Acorn) reports no identity; see `round_info_json`.
+        "jokers": gs.jokers.iter()
+            .map(|j| match j.face_down {
+                true => Value::Null,
+                false => format!("{:?}", j.kind).into(),
+            })
+            .collect::<Vec<_>>(),
         "vouchers": gs.vouchers.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>(),
         "tags": tags_json(&gs.tags),
-        "pending_free_pack": gs.pending_free_pack.map(|p| format!("{:?}", p)),
+        "pending_free_packs": gs.pending_free_packs.iter().map(|p| format!("{:?}", p)).collect::<Vec<_>>(),
         // The tag you would get for skipping the blind currently up. Balatro shows this before
         // you commit, so it is observable state rather than a surprise roll.
         "tag_on_offer": gs.tag_on_offer().as_ref().map(tag_json),
+        // An Orbital Tag names its hand when it is drawn, so it is readable before you skip.
+        "orbital_hand_on_offer": gs.orbital_hand_on_offer().map(|h| h.display_name()),
         "blind_tags": {
             "small": gs.blind_tags[0].display_name(),
             "big": gs.blind_tags[1].display_name(),
@@ -395,7 +414,10 @@ fn available_actions_json(gs: &GameState) -> Value {
                 actions.push(serde_json::json!({
                     "action": "SellJoker",
                     "index": i,
-                    "kind": format!("{:?}", j.kind),
+                    "kind": match j.face_down {
+                        true => Value::Null,
+                        false => format!("{:?}", j.kind).into(),
+                    },
                     "sell_value": j.sell_value(gs.discount_percent()),
                 }));
             }
@@ -409,9 +431,10 @@ fn available_actions_json(gs: &GameState) -> Value {
                 actions.push(serde_json::json!({
                     "action": "SkipBlind",
                     "tag": gs.tag_on_offer().map(|t| t.display_name()),
+                    "orbital_hand": gs.orbital_hand_on_offer().map(|h| h.display_name()),
                 }));
             }
-            if gs.pending_free_pack.is_some() {
+            if !gs.pending_free_packs.is_empty() {
                 actions.push(serde_json::json!({ "action": "OpenPendingFreePack" }));
             }
             // Director's Cut / Retcon put a Boss reroll on this screen.

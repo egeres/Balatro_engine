@@ -199,12 +199,35 @@ fn test_pack_tags_queue_a_free_booster() {
         let mut gs = game_at_ante(2, "PACKTAG");
         gs.tags.push(tag);
         gs.apply_blind_select_tags();
-        assert_eq!(gs.pending_free_pack, Some(expected), "{:?}", tag);
+        assert_eq!(gs.pending_free_packs, vec![expected], "{:?}", tag);
 
         gs.open_pending_free_pack().unwrap();
         assert!(gs.current_pack.is_some());
-        assert!(gs.pending_free_pack.is_none());
+        assert!(gs.pending_free_packs.is_empty());
     }
+}
+
+/// Two pack tags waiting at once are opened one after the other, not collapsed into one.
+#[test]
+fn test_pack_tags_stack_up_and_open_in_turn() {
+    let mut gs = game_at_ante(2, "PACKTAG2");
+    gs.tags.push(TagKind::Charm);
+    gs.tags.push(TagKind::Meteor);
+    gs.apply_blind_select_tags();
+    assert_eq!(
+        gs.pending_free_packs,
+        vec![PackKind::ArcanaPackMega, PackKind::CelestialPackMega]
+    );
+
+    gs.open_pending_free_pack().unwrap();
+    assert_eq!(gs.current_pack.as_ref().unwrap().kind, PackKind::ArcanaPackMega);
+    gs.skip_pack().unwrap();
+
+    gs.open_pending_free_pack().unwrap();
+    assert_eq!(gs.current_pack.as_ref().unwrap().kind, PackKind::CelestialPackMega);
+    gs.skip_pack().unwrap();
+
+    assert!(gs.pending_free_packs.is_empty());
 }
 
 #[test]

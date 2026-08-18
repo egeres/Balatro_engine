@@ -561,13 +561,13 @@ impl GameState {
             }
         }
 
-        // VerdantLeaf: first joker sold lifts the all-cards-debuffed effect
+        // VerdantLeaf: selling a joker switches the blind off outright — `G.GAME.blind:disable()`
+        // (card.lua:1615) — not merely the card debuffs it had applied. Matador stops paying out
+        // on it from here, as it would for a Chicot or a sold Luchador.
         if let Some(BossBlind::VerdantLeaf) = self.boss_blind {
-            if matches!(self.current_blind, BlindKind::Boss) && !self.verdant_leaf_joker_sold {
+            if matches!(self.current_blind, BlindKind::Boss) {
                 self.verdant_leaf_joker_sold = true;
-                for card in self.deck.iter_mut() {
-                    card.debuffed = false;
-                }
+                self.disable_boss_blind();
             }
         }
 
@@ -652,7 +652,8 @@ impl GameState {
                 // Celestial packs show 1 extra card — handled in generate_pack_contents
             }
             VoucherKind::Observatory => {
-                // Planet cards used give +0.5 Xmult — handled in apply_planet
+                // Each Planet card *held* in a consumable slot gives X1.5 Mult for its own hand
+                // — handled in score_hand, via `ScoreInputs::observatory_planets`.
             }
             VoucherKind::Grabber | VoucherKind::NachoTong => {
                 self.max_hands += 1;

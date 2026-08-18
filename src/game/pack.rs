@@ -193,20 +193,36 @@ impl GameState {
         pack.cards.remove(pack_index);
         pack.picks_remaining -= 1;
 
+        // Taking the last pick closes the pack, but it is not a *skip* — Balatro only broadcasts
+        // `skipping_booster` from the Skip button (button_callbacks.lua:2558), so Red Card gets
+        // nothing here.
         if pack.picks_remaining == 0 {
-            self.skip_pack()?;
+            self.close_pack();
         }
 
         Ok(())
     }
 
+    /// Walk away from the open pack, leaving whatever is still in it.
     pub fn skip_pack(&mut self) -> Result<(), BalatroError> {
         if !matches!(self.state, GameStateKind::BoosterPack) {
             return Err(BalatroError::NotInPack);
         }
+        // Red Card feeds on skipped **booster packs** — `context.skipping_booster`
+        // (card.lua:2441) — not on skipped blinds.
+        for j in self.jokers.iter_mut() {
+            if j.kind == JokerKind::RedCard && j.active {
+                j.add_counter_i64("mult", 3);
+            }
+        }
+        self.close_pack();
+        Ok(())
+    }
+
+    /// Put the pack away and return to the shop, with none of a skip's side effects.
+    fn close_pack(&mut self) {
         self.current_pack = None;
         self.state = GameStateKind::Shop;
-        Ok(())
     }
 
     // =========================================================

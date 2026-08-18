@@ -161,6 +161,15 @@ fn test_strength_increases_rank_by_one() {
     assert_eq!(gs.deck[gs.hand[0]].rank, Rank::Three);
 }
 
+/// An Ace wraps back to a Two rather than sticking at the top (card.lua:1126).
+#[test]
+fn test_strength_wraps_an_ace_round_to_a_two() {
+    let deck = vec![card(0, Rank::Ace, Suit::Spades)];
+    let gs = apply_tarot_in_round(deck, 1, TarotCard::Strength, vec![0]);
+    assert_eq!(gs.deck[gs.hand[0]].rank, Rank::Two,
+        "Strength on an Ace is a downgrade, not a no-op");
+}
+
 #[test]
 fn test_death_copies_right_card_to_left() {
     let deck = vec![
@@ -172,6 +181,21 @@ fn test_death_copies_right_card_to_left() {
     let left_card = &gs.deck[gs.hand[0]];
     assert_eq!(left_card.rank, Rank::Ace);
     assert_eq!(left_card.suit, Suit::Hearts);
+}
+
+/// The template is the rightmost card *in hand*, whichever order the two were selected in —
+/// Balatro picks it by on-screen position (card.lua:1112).
+#[test]
+fn test_death_reads_hand_order_not_selection_order() {
+    let deck = vec![
+        card(0, Rank::Two, Suit::Spades),
+        card(1, Rank::Ace, Suit::Hearts),
+    ];
+    // Right card named first: the copy must still run right-to-left.
+    let gs = apply_tarot_in_round(deck, 2, TarotCard::Death, vec![1, 0]);
+    assert_eq!(gs.deck[gs.hand[0]].rank, Rank::Ace);
+    assert_eq!(gs.deck[gs.hand[0]].suit, Suit::Hearts);
+    assert_eq!(gs.deck[gs.hand[1]].rank, Rank::Ace, "the template itself is untouched");
 }
 
 // =========================================================

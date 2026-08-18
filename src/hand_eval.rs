@@ -45,8 +45,9 @@ pub fn evaluate_hand(
     smeared: bool,
     splash: bool,
 ) -> HandEvalResult {
-    let mut result = evaluate_hand_inner(cards, four_fingers, shortcut, smeared);
-    result.contained = contained_hands(cards, four_fingers, shortcut, smeared);
+    let parts = hand_parts(cards, four_fingers, shortcut, smeared);
+    let mut result = best_hand(&parts);
+    result.contained = contained_hands(&parts, !cards.is_empty());
 
     if splash {
         // Splash makes every played card score, whatever the hand is — Balatro overwrites the
@@ -73,43 +74,241 @@ pub fn evaluate_hand(
     result
 }
 
-/// Every hand the played cards contain, following `evaluate_poker_hand` (misc_functions.lua:376).
+/// The six building blocks `evaluate_poker_hand` works from (misc_functions.lua:394-401).
 ///
-/// Two details of that function matter and are easy to get wrong. Its `get_X_same` matches an
-/// **exact** group size, so five of a kind leaves the pair/trip/quad buckets empty; the
-/// containment for those is instead granted by the cascade at the end of the function. And Two
-/// Pair needs two separate exact pairs (or one trip plus one pair), which is why five of a kind
-/// contains a Pair but not a Two Pair.
-fn contained_hands(
+/// Both answers the caller wants — the hand that gets *played*, and the set of hands the cards
+/// merely *contain* — are read off these same values, exactly as Balatro reads them off `parts`.
+/// Deriving the two separately is how they drift apart, and the hand-shape jokers care about the
+/// difference.
+struct HandParts {
+    /// Rank groups holding **exactly** five / four / three / two cards, best rank first.
+    ///
+    /// Exactness is load-bearing (`get_X_same` tests `#curr == num`): five of a kind leaves
+    /// `four`, `three` and `two` empty, and it is the cascade at the end of `evaluate_poker_hand`
+    /// that grants the smaller hands as *contained* rather than these groups.
+    five: Vec<Vec<usize>>,
+    four: Vec<Vec<usize>>,
+    three: Vec<Vec<usize>>,
+    two: Vec<Vec<usize>>,
+    flush: Option<Vec<usize>>,
+    straight: Option<Vec<usize>>,
+    /// Highest-ranked card, which is what a High Card hand scores.
+    highest: Option<usize>,
+}
+
+fn hand_parts(
     cards: &[CardInstance],
     four_fingers: bool,
     shortcut: bool,
     smeared: bool,
-) -> ContainedHands {
-    let mut out = ContainedHands::default();
-    if cards.is_empty() {
-        return out;
-    }
-
+) -> HandParts {
+    // Stone cards take no part in deciding anything: `Card:get_id` hands them a fresh random
+    // negative on every call (card.lua:957), so they can never join a rank group or a straight,
+    // and `is_suit` is false for them, so they can never join a flush. They are appended to the
+    // scoring hand afterwards as "pures" instead.
     let eval_indices: Vec<usize> = cards
         .iter()
         .enumerate()
         .filter(|(_, c)| !c.is_stone())
         .map(|(i, _)| i)
         .collect();
-    let eval_cards: Vec<&CardInstance> = eval_indices.iter().map(|&i| &cards[i]).collect();
 
+    // Four Fingers lets a flush or a straight get there with four cards instead of five.
     let threshold = if four_fingers { 4 } else { 5 };
-    let groups = get_rank_groups(&eval_cards, &eval_indices);
-    let exact = |n: usize| groups.values().filter(|v| v.len() == n).count();
-    let (n5, n4, n3, n2) = (exact(5), exact(4), exact(3), exact(2));
 
-    let flush = check_flush(&eval_cards, &eval_indices, threshold, smeared)
-        .map(|v| v.len() >= threshold)
-        .unwrap_or(false);
-    let straight = check_straight(&eval_cards, &eval_indices, threshold, shortcut)
-        .map(|v| v.len() >= threshold)
-        .unwrap_or(false);
+    // `get_highest` keeps the first card of the winning rank — it compares with a strict `>`.
+    let mut highest: Option<usize> = None;
+    for &i in &eval_indices {
+        let better = match highest {
+            Some(h) => cards[i].rank.numeric_value() > cards[h].rank.numeric_value(),
+            None => true,
+        };
+        if better {
+            highest = Some(i);
+        }
+    }
+
+    HandParts {
+        five: same_rank_groups(cards, &eval_indices, 5),
+        four: same_rank_groups(cards, &eval_indices, 4),
+        three: same_rank_groups(cards, &eval_indices, 3),
+        two: same_rank_groups(cards, &eval_indices, 2),
+        flush: get_flush(cards, &eval_indices, threshold, smeared),
+        straight: get_straight(cards, &eval_indices, threshold, shortcut),
+        highest,
+    }
+}
+
+/// `get_X_same` (misc_functions.lua:589): the rank groups holding **exactly** `n` cards, best
+/// rank first.
+fn same_rank_groups(
+    cards: &[CardInstance],
+    eval_indices: &[usize],
+    n: usize,
+) -> Vec<Vec<usize>> {
+    let mut by_rank: HashMap<Rank, Vec<usize>> = HashMap::new();
+    for &i in eval_indices {
+        by_rank.entry(cards[i].rank).or_default().push(i);
+    }
+    let mut groups: Vec<(Rank, Vec<usize>)> =
+        by_rank.into_iter().filter(|(_, v)| v.len() == n).collect();
+    groups.sort_unstable_by_key(|(rank, _)| std::cmp::Reverse(rank.numeric_value()));
+    groups.into_iter().map(|(_, v)| v).collect()
+}
+
+/// `get_flush` (misc_functions.lua:522).
+///
+/// The suits are tried in a fixed order and the **first** one to reach the threshold wins, rather
+/// than the largest. That only shows when Wild Cards are in play — they answer yes to every suit,
+/// so several suits can qualify at once and the tie has to break the same way Balatro breaks it.
+fn get_flush(
+    cards: &[CardInstance],
+    eval_indices: &[usize],
+    threshold: usize,
+    smeared: bool,
+) -> Option<Vec<usize>> {
+    Suit::ALL.into_iter().find_map(|suit| {
+        let group: Vec<usize> = eval_indices
+            .iter()
+            .copied()
+            .filter(|&i| cards[i].is_suit(suit, smeared))
+            .collect();
+        (group.len() >= threshold).then_some(group)
+    })
+}
+
+/// `get_straight` (misc_functions.lua:547), ported step for step.
+///
+/// Two details are easy to lose. The walk runs A,2,3,…,K,A, which is what lets an Ace close a
+/// straight at either end without a separate ace-low pass. And Shortcut clears `skipped_rank`
+/// every time it *does* find a rank, so a hand may bridge **several** single-rank gaps — 2,4,6,8,10
+/// is a Straight — as long as no two gaps sit next to each other.
+///
+/// Every card of a matched rank joins the run, so a paired straight (5,5,6,7,8 under Four Fingers)
+/// scores all five cards.
+fn get_straight(
+    cards: &[CardInstance],
+    eval_indices: &[usize],
+    threshold: usize,
+    shortcut: bool,
+) -> Option<Vec<usize>> {
+    let mut by_id: HashMap<u8, Vec<usize>> = HashMap::new();
+    for &i in eval_indices {
+        by_id.entry(cards[i].rank.numeric_value()).or_default().push(i);
+    }
+
+    let mut run: Vec<usize> = Vec::new();
+    let mut length = 0usize;
+    let mut straight = false;
+    let mut skipped = false;
+
+    for step in 1..=14u8 {
+        // Step 1 is the low Ace, step 14 the high one.
+        let id = if step == 1 { 14 } else { step };
+        match by_id.get(&id) {
+            Some(group) => {
+                length += 1;
+                skipped = false;
+                run.extend(group.iter().copied());
+            }
+            // A gap Shortcut can bridge. Not at the very last step, where there is nothing left
+            // to bridge to.
+            None if shortcut && !skipped && step != 14 => skipped = true,
+            None => {
+                length = 0;
+                skipped = false;
+                if straight {
+                    // The straight is already settled; anything past it is not part of it.
+                    break;
+                }
+                run.clear();
+            }
+        }
+        if length >= threshold {
+            straight = true;
+        }
+    }
+
+    straight.then_some(run)
+}
+
+/// The hand that actually gets played, in `evaluate_poker_hand`'s order (misc_functions.lua:404).
+/// The first rule to fire wins, so this sequence *is* the paytable, top to bottom.
+fn best_hand(parts: &HandParts) -> HandEvalResult {
+    let joined = |a: &[usize], b: &[usize]| -> Vec<usize> {
+        a.iter().chain(b.iter()).copied().collect()
+    };
+
+    // The flush-and-something hands ask only that *a* flush exists — they do not re-derive the
+    // rank groups from the flush's own cards. Under Four Fingers that lets a four-card flush plus
+    // a full house score as a Flush House.
+    if parts.flush.is_some() {
+        if let Some(five) = parts.five.first() {
+            return hand(HandType::FlushFive, five.clone());
+        }
+        if let (Some(three), Some(two)) = (parts.three.first(), parts.two.first()) {
+            return hand(HandType::FlushHouse, joined(three, two));
+        }
+    }
+
+    if let Some(five) = parts.five.first() {
+        return hand(HandType::FiveOfAKind, five.clone());
+    }
+
+    // A Straight Flush scores the **union** of the two: every flush card, plus any straight card
+    // not already among them (misc_functions.lua:427). There is no length test on the result —
+    // with Four Fingers the two sets need not even overlap.
+    if let (Some(flush), Some(straight)) = (parts.flush.as_ref(), parts.straight.as_ref()) {
+        let mut both = flush.clone();
+        both.extend(straight.iter().copied().filter(|i| !flush.contains(i)));
+        return hand(HandType::StraightFlush, both);
+    }
+
+    if let Some(four) = parts.four.first() {
+        return hand(HandType::FourOfAKind, four.clone());
+    }
+    if let (Some(three), Some(two)) = (parts.three.first(), parts.two.first()) {
+        return hand(HandType::FullHouse, joined(three, two));
+    }
+    if let Some(flush) = parts.flush.as_ref() {
+        return hand(HandType::Flush, flush.clone());
+    }
+    if let Some(straight) = parts.straight.as_ref() {
+        return hand(HandType::Straight, straight.clone());
+    }
+    if let Some(three) = parts.three.first() {
+        return hand(HandType::ThreeOfAKind, three.clone());
+    }
+    // Two separate exact pairs. The trip-plus-pair case that also grants Two Pair *containment*
+    // cannot reach here — Full House claimed it above.
+    if let [first, second, ..] = parts.two.as_slice() {
+        return hand(HandType::TwoPair, joined(first, second));
+    }
+    if let Some(two) = parts.two.first() {
+        return hand(HandType::Pair, two.clone());
+    }
+
+    hand(HandType::HighCard, parts.highest.into_iter().collect())
+}
+
+/// Every hand the played cards contain, following `evaluate_poker_hand` (misc_functions.lua:376).
+///
+/// Balatro's hand-shape jokers test this rather than the hand's name: Jolly Joker asks
+/// `next(context.poker_hands['Pair'])`, so a Flush that happens to hold a pair pays out.
+fn contained_hands(parts: &HandParts, any_cards: bool) -> ContainedHands {
+    let mut out = ContainedHands::default();
+    if !any_cards {
+        return out;
+    }
+
+    let flush = parts.flush.is_some();
+    let straight = parts.straight.is_some();
+    let (n5, n4, n3, n2) = (
+        parts.five.len(),
+        parts.four.len(),
+        parts.three.len(),
+        parts.two.len(),
+    );
 
     if n5 > 0 && flush { out.insert(HandType::FlushFive); }
     if n3 > 0 && n2 > 0 && flush { out.insert(HandType::FlushHouse); }
@@ -122,103 +321,19 @@ fn contained_hands(
     if n3 > 0 { out.insert(HandType::ThreeOfAKind); }
     if n2 == 2 || (n3 == 1 && n2 == 1) { out.insert(HandType::TwoPair); }
     if n2 > 0 { out.insert(HandType::Pair); }
-    // Any non-empty hand is at least a High Card, including one that is nothing but Stone
-    // cards. Testing `eval_cards` here instead would leave an all-Stone hand containing no hand
-    // at all, while `evaluate_hand_inner` still calls it a High Card — and the hand you played
-    // has to be among the hands you hold.
+    // Any non-empty hand is at least a High Card, including one that is nothing but Stone cards.
+    // Testing the evaluated cards here instead would leave an all-Stone hand containing no hand at
+    // all, while `best_hand` still calls it a High Card — and the hand you played has to be among
+    // the hands you hold.
     out.insert(HandType::HighCard);
 
-    // The cascade: a bigger same-rank group implies the smaller ones.
+    // The cascade: a bigger same-rank group implies the smaller ones. Two Pair is deliberately
+    // left out of it, which is why five of a kind contains a Pair but not a Two Pair.
     if out.contains(HandType::FiveOfAKind) { out.insert(HandType::FourOfAKind); }
     if out.contains(HandType::FourOfAKind) { out.insert(HandType::ThreeOfAKind); }
     if out.contains(HandType::ThreeOfAKind) { out.insert(HandType::Pair); }
 
     out
-}
-
-fn evaluate_hand_inner(
-    cards: &[CardInstance],
-    four_fingers: bool,
-    shortcut: bool,
-    smeared: bool,
-) -> HandEvalResult {
-    // Collect non-stone cards for hand evaluation (stone cards don't count for hand type)
-    let eval_indices: Vec<usize> = cards
-        .iter()
-        .enumerate()
-        .filter(|(_, c)| c.enhancement != crate::types::Enhancement::Stone)
-        .map(|(i, _)| i)
-        .collect();
-
-    let eval_cards: Vec<&CardInstance> = eval_indices.iter().map(|&i| &cards[i]).collect();
-
-    // Four Fingers lets a flush or a straight get there with four cards instead of five.
-    let threshold = if four_fingers { 4 } else { 5 };
-
-    let flush = check_flush(&eval_cards, &eval_indices, threshold, smeared);
-    let straight = check_straight(&eval_cards, &eval_indices, threshold, shortcut);
-    let groups = get_rank_groups(&eval_cards, &eval_indices);
-
-    // The hands, best first. The first rule to fire wins, so this ordering *is* the hand
-    // ranking — the sequence below should read as the paytable, top to bottom.
-
-    // The two flush-and-something hands share a prerequisite, so they are tested together.
-    if let Some(flush_idxs) = flush.as_ref().filter(|v| v.len() >= 5) {
-        let flush_cards: Vec<&CardInstance> = flush_idxs.iter().map(|&i| &cards[i]).collect();
-        if let Some(five) = find_five_of_kind(&flush_cards, flush_idxs).filter(|v| v.len() >= 5) {
-            return hand(HandType::FlushFive, five);
-        }
-        if let Some(full) = find_full_house(&flush_cards, flush_idxs).filter(|v| v.len() >= 5) {
-            return hand(HandType::FlushHouse, full);
-        }
-    }
-
-    if let Some(five) = find_five_of_kind(&eval_cards, &eval_indices).filter(|v| v.len() >= 5) {
-        return hand(HandType::FiveOfAKind, five);
-    }
-
-    // Straight Flush scores the cards that are in both the straight and the flush.
-    if let (Some(flush_idxs), Some(straight_idxs)) = (&flush, &straight) {
-        let both: Vec<usize> = straight_idxs
-            .iter()
-            .copied()
-            .filter(|i| flush_idxs.contains(i))
-            .collect();
-        if both.len() >= threshold {
-            return hand(HandType::StraightFlush, both);
-        }
-    }
-
-    if let Some((four, _kicker)) = find_four_of_kind(&groups) {
-        return hand(HandType::FourOfAKind, four);
-    }
-    if let Some(full) = find_full_house(&eval_cards, &eval_indices) {
-        return hand(HandType::FullHouse, full);
-    }
-    if let Some(flush_idxs) = flush.filter(|v| v.len() >= threshold) {
-        return hand(HandType::Flush, flush_idxs);
-    }
-    if let Some(straight_idxs) = straight.filter(|v| v.len() >= threshold) {
-        return hand(HandType::Straight, straight_idxs);
-    }
-    if let Some((trips, _kicker)) = find_three_of_kind(&groups) {
-        return hand(HandType::ThreeOfAKind, trips);
-    }
-    if let Some(two_pair) = find_two_pair(&groups) {
-        return hand(HandType::TwoPair, two_pair);
-    }
-    if let Some((pair, _kicker)) = find_pair(&groups) {
-        return hand(HandType::Pair, pair);
-    }
-
-    // Nothing else matched: the single highest card scores.
-    let best_idx = eval_indices
-        .iter()
-        .enumerate()
-        .max_by_key(|&(p, _)| eval_cards[p].rank.numeric_value())
-        .map(|(_, &i)| i)
-        .unwrap_or(0);
-    hand(HandType::HighCard, vec![best_idx])
 }
 
 /// A decided hand: its name and the cards that score for it.
@@ -231,260 +346,6 @@ fn hand(hand_type: HandType, scoring_indices: Vec<usize>) -> HandEvalResult {
         scoring_indices,
         contained: ContainedHands::default(),
     }
-}
-
-fn check_flush(
-    cards: &[&CardInstance],
-    indices: &[usize],
-    threshold: usize,
-    smeared: bool,
-) -> Option<Vec<usize>> {
-    if cards.is_empty() {
-        return None;
-    }
-
-    // Count suits (handling wild cards)
-    // For flush: need enough cards of same suit (or wild)
-    let suit_fn = |s: Suit| -> Suit {
-        if smeared {
-            match s {
-                Suit::Hearts | Suit::Diamonds => Suit::Hearts,
-                Suit::Spades | Suit::Clubs => Suit::Spades,
-            }
-        } else {
-            s
-        }
-    };
-
-    // Group cards by effective suit
-    let mut suit_groups: HashMap<Suit, Vec<usize>> = HashMap::new();
-    let mut wild_indices: Vec<usize> = Vec::new();
-
-    for (&card, &orig_idx) in cards.iter().zip(indices.iter()) {
-        if card.enhancement == crate::types::Enhancement::Wild {
-            wild_indices.push(orig_idx);
-        } else {
-            suit_groups.entry(suit_fn(card.suit)).or_default().push(orig_idx);
-        }
-    }
-
-    // Find the suit with the most cards
-    let best_suit_idxs: Option<Vec<usize>> = suit_groups
-        .into_values()
-        .max_by_key(|v| v.len())
-        .filter(|v| v.len() + wild_indices.len() >= threshold);
-
-    best_suit_idxs.map(|mut v| {
-        v.extend(wild_indices.iter().copied());
-        v
-    })
-}
-
-fn check_straight(
-    cards: &[&CardInstance],
-    indices: &[usize],
-    threshold: usize,
-    shortcut: bool,
-) -> Option<Vec<usize>> {
-    if cards.len() < threshold {
-        return None;
-    }
-
-    // Get unique ranks (excluding stone cards, which have no rank for this purpose)
-    // Pair each rank with its original index
-    let mut rank_idx: Vec<(u8, usize)> = cards
-        .iter()
-        .zip(indices.iter())
-        .filter(|(c, _)| c.enhancement != crate::types::Enhancement::Stone)
-        .map(|(c, &i)| (c.rank.numeric_value(), i))
-        .collect();
-
-    // Deduplicate by rank (take lowest index for each unique rank)
-    rank_idx.sort_by_key(|&(r, _)| r);
-    let mut unique: Vec<(u8, usize)> = Vec::new();
-    for item in &rank_idx {
-        if unique.last().map(|(r, _)| *r) != Some(item.0) {
-            unique.push(*item);
-        }
-    }
-
-    // Try with Ace = 1 as well
-    let mut results = Vec::new();
-    for use_ace_low in [false, true] {
-        let mut vals: Vec<(u8, usize)> = unique.clone();
-        if use_ace_low {
-            // Replace Ace (14) with 1
-            for (rank, _) in vals.iter_mut() {
-                if *rank == 14 {
-                    *rank = 1;
-                }
-            }
-            vals.sort_by_key(|&(r, _)| r);
-        }
-
-        // Find longest consecutive run
-        let best = find_consecutive_run(&vals, threshold, shortcut);
-        if let Some(run) = best {
-            results.push(run);
-        }
-    }
-
-    results.into_iter().max_by_key(|v| v.len())
-}
-
-fn find_consecutive_run(
-    vals: &[(u8, usize)],
-    threshold: usize,
-    shortcut: bool,
-) -> Option<Vec<usize>> {
-    if vals.len() < threshold {
-        return None;
-    }
-
-    // Try sliding window of 5 (or threshold) consecutive values
-    // shortcut: allows one gap
-    let n = vals.len();
-    let mut best: Option<Vec<usize>> = None;
-
-    for start in 0..n {
-        let mut run = vec![vals[start].1];
-        let mut last_val = vals[start].0;
-        let mut gaps_used = 0;
-        let max_gaps = if shortcut { 1 } else { 0 };
-
-        for pos in (start + 1)..n {
-            let diff = vals[pos].0 as i32 - last_val as i32;
-            if diff == 1 {
-                run.push(vals[pos].1);
-                last_val = vals[pos].0;
-            } else if diff == 2 && gaps_used < max_gaps {
-                // Allow one gap for shortcut
-                run.push(vals[pos].1);
-                last_val = vals[pos].0;
-                gaps_used += 1;
-            } else if diff > 2 || (diff == 2 && gaps_used >= max_gaps) {
-                break;
-            }
-            // diff == 0 means duplicate rank, skip
-        }
-
-        if run.len() >= threshold {
-            if best.as_ref().map(|b| b.len()).unwrap_or(0) < run.len() {
-                best = Some(run);
-            }
-        }
-    }
-
-    best
-}
-
-/// Returns rank → list of card indices
-fn get_rank_groups(
-    cards: &[&CardInstance],
-    indices: &[usize],
-) -> HashMap<Rank, Vec<usize>> {
-    let mut groups: HashMap<Rank, Vec<usize>> = HashMap::new();
-    for (&card, &idx) in cards.iter().zip(indices.iter()) {
-        if card.enhancement != crate::types::Enhancement::Stone {
-            groups.entry(card.rank).or_default().push(idx);
-        }
-    }
-    groups
-}
-
-fn find_five_of_kind(cards: &[&CardInstance], indices: &[usize]) -> Option<Vec<usize>> {
-    let groups = get_rank_groups(cards, indices);
-    groups
-        .values()
-        .find(|v| v.len() >= 5)
-        .cloned()
-}
-
-fn find_four_of_kind(
-    groups: &HashMap<Rank, Vec<usize>>,
-) -> Option<(Vec<usize>, Vec<usize>)> {
-    let four = groups.values().find(|v| v.len() >= 4)?;
-    let kicker: Vec<usize> = groups
-        .values()
-        .filter(|v| v.len() < 4)
-        .flat_map(|v| v.iter().copied())
-        .collect();
-    Some((four.clone(), kicker))
-}
-
-fn find_three_of_kind(
-    groups: &HashMap<Rank, Vec<usize>>,
-) -> Option<(Vec<usize>, Vec<usize>)> {
-    let trip = groups.values().find(|v| v.len() >= 3)?;
-    let kicker: Vec<usize> = groups
-        .values()
-        .filter(|v| v.as_ptr() != trip.as_ptr() && v.len() < 3)
-        .flat_map(|v| v.iter().copied())
-        .collect();
-    Some((trip.clone(), kicker))
-}
-
-fn find_full_house(cards: &[&CardInstance], indices: &[usize]) -> Option<Vec<usize>> {
-    let groups = get_rank_groups(cards, indices);
-    let mut trips: Vec<&Vec<usize>> = groups.values().filter(|v| v.len() >= 3).collect();
-    let pairs: Vec<&Vec<usize>> = groups.values().filter(|v| v.len() == 2).collect();
-
-    // Need either trip + pair, or two trips (take 3 from one, 2 from other)
-    if trips.len() >= 2 {
-        trips.sort_by_key(|v| std::cmp::Reverse(v.len()));
-        let mut result: Vec<usize> = trips[0].iter().take(3).copied().collect();
-        result.extend(trips[1].iter().take(2).copied());
-        return Some(result);
-    }
-
-    if trips.len() == 1 && !pairs.is_empty() {
-        let mut result: Vec<usize> = trips[0].iter().take(3).copied().collect();
-        result.extend(pairs[0].iter().copied());
-        return Some(result);
-    }
-
-    None
-}
-
-fn find_two_pair(
-    groups: &HashMap<Rank, Vec<usize>>,
-) -> Option<Vec<usize>> {
-    let pairs: Vec<&Vec<usize>> = groups.values().filter(|v| v.len() >= 2).collect();
-    if pairs.len() < 2 {
-        return None;
-    }
-    // Take the two highest pairs
-    let mut sorted_pairs: Vec<(&Rank, &Vec<usize>)> = groups
-        .iter()
-        .filter(|(_, v)| v.len() >= 2)
-        .collect();
-    sorted_pairs.sort_by_key(|(r, _)| std::cmp::Reverse(r.numeric_value()));
-
-    let mut result: Vec<usize> = sorted_pairs[0].1.iter().take(2).copied().collect();
-    result.extend(sorted_pairs[1].1.iter().take(2).copied());
-    Some(result)
-}
-
-fn find_pair(
-    groups: &HashMap<Rank, Vec<usize>>,
-) -> Option<(Vec<usize>, Vec<usize>)> {
-    let mut pairs: Vec<(&Rank, &Vec<usize>)> = groups
-        .iter()
-        .filter(|(_, v)| v.len() >= 2)
-        .collect();
-    if pairs.is_empty() {
-        return None;
-    }
-    pairs.sort_by_key(|(r, _)| std::cmp::Reverse(r.numeric_value()));
-    let pair = pairs[0].1.iter().take(2).copied().collect::<Vec<_>>();
-    let kicker: Vec<usize> = groups
-        .values()
-        .filter(|v| {
-            !v.iter().any(|i| pair.contains(i))
-        })
-        .flat_map(|v| v.iter().copied())
-        .collect();
-    Some((pair, kicker))
 }
 
 #[cfg(test)]

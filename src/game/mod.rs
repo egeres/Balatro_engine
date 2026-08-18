@@ -33,6 +33,9 @@ pub struct GameState {
     /// (`round_resets.blind_tags`, game.lua:2179), so skipping is an informed choice rather than
     /// a blind roll. Redrawn when the Boss falls (button_callbacks.lua:2951).
     pub blind_tags: [TagKind; 2],
+    /// The hand each slot's Orbital Tag would level, drawn with the tag itself so it can be read
+    /// off the blind-select screen. Meaningless unless that slot's tag *is* an Orbital Tag.
+    pub blind_tag_orbital_hands: [HandType; 2],
     pub score_goal: f64,
     pub skipped_blinds: Vec<(u32, u32)>, // (ante, round) of skipped blinds
     pub blind_defeated_this_ante: [bool; 3],
@@ -117,8 +120,10 @@ pub struct GameState {
     pub shop_is_free: bool,
     /// Set by D6 Tag: rerolls in the next shop start at $0.
     pub shop_rerolls_free: bool,
-    /// Pending free booster pack from a Charm/Meteor/Standard/Buffoon/Ethereal Tag.
-    pub pending_free_pack: Option<PackKind>,
+    /// Free booster packs waiting to be opened, from Charm/Meteor/Standard/Buffoon/Ethereal
+    /// Tags. Balatro queues them one behind the other rather than dropping all but one, so
+    /// skipping both blinds of an ante for two pack tags really does give you two packs.
+    pub pending_free_packs: Vec<PackKind>,
     /// Extra hand size granted by Juggle Tag, for the current round only.
     pub juggle_hand_size: u32,
 
@@ -157,6 +162,13 @@ pub struct GameState {
     /// The Fish only hides the cards drawn right after a hand is *played* (`self.prepped`,
     /// blind.lua:487), not the ones drawn after a discard.
     pub fish_prepped: bool,
+
+    /// The single hand type The Ox punishes, fixed when the Boss round begins
+    /// (`G.GAME.current_round.most_played_poker_hand`, state_events.lua:137).
+    ///
+    /// Pinned rather than recomputed per hand: under Balatro's rule you can play a *different*
+    /// hand into a tie for most-played all round and The Ox will not notice.
+    pub ox_target_hand: Option<HandType>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -217,6 +229,7 @@ impl GameState {
             current_blind: BlindKind::Small,
             boss_blind: None,
             blind_tags: [TagKind::Uncommon; 2],
+            blind_tag_orbital_hands: [HandType::HighCard; 2],
             score_goal: 0.0,
             skipped_blinds: Vec::new(),
             blind_defeated_this_ante: [false; 3],
@@ -259,7 +272,7 @@ impl GameState {
             skips_this_run: 0,
             shop_is_free: false,
             shop_rerolls_free: false,
-            pending_free_pack: None,
+            pending_free_packs: Vec::new(),
             juggle_hand_size: 0,
             joker_rate: 20.0,
             tarot_rate: 4.0,
@@ -272,6 +285,7 @@ impl GameState {
             boss_rerolled_this_ante: false,
             played_card_ids_this_ante: Vec::new(),
             fish_prepped: false,
+            ox_target_hand: None,
         };
 
         // Apply deck-type modifications
@@ -470,14 +484,12 @@ impl GameState {
             .collect()
     }
 
-    /// The multiplier Oops! All 6s puts on every *listed* probability (card.lua:1450). Each copy
-    /// doubles again in Balatro; this mirrors the single-copy behaviour the engine implements.
+    /// The multiplier Oops! All 6s puts on every *listed* probability.
+    ///
+    /// Each copy doubles the table again on the way in and halves it on the way out
+    /// (card.lua:608, :665), so two copies quadruple and three multiply by eight.
     fn probability_mult(&self) -> f64 {
-        if self.has_joker(JokerKind::OopsAll6s) {
-            2.0
-        } else {
-            1.0
-        }
+        2f64.powi(self.count_joker(JokerKind::OopsAll6s) as i32)
     }
 
     /// Roll one of Balatro's listed probabilities — "1 in 4 chance to…" and friends — from the
@@ -611,6 +623,12 @@ impl GameState {
 
         self.boss_blind_manually_disabled = true;
 
+        // Amber Acorn's jokers are turned back over (blind.lua:358). This one is worth doing even
+        // outside a round — a Luchador sold in the shop still reveals the row.
+        for j in self.jokers.iter_mut() {
+            j.face_down = false;
+        }
+
         // Nothing else to undo outside a round — selling Luchador in the shop still latches the
         // blind off, but there is no hand to redraw or requirement to restate.
         if !matches!(self.state, GameStateKind::Round) {
@@ -638,16 +656,43 @@ impl GameState {
 
     /// Draw the tags for the ante about to start. Called at run start and once the Boss falls.
     pub(crate) fn reroll_blind_tags(&mut self) {
-        self.blind_tags = [self.random_tag(), self.random_tag()];
+        let ante = self.ante;
+        self.draw_blind_tags_for_ante(ante);
+    }
+
+    /// Draw both blind tags for `ante`, along with the hand an Orbital Tag among them would
+    /// level — Balatro settles that when the tag is drawn, not when it is redeemed
+    /// (`G.GAME.orbital_choices`, tag.lua:104).
+    pub(crate) fn draw_blind_tags_for_ante(&mut self, ante: u32) {
+        self.blind_tags = [
+            self.random_tag_for_ante(ante),
+            self.random_tag_for_ante(ante),
+        ];
+        self.blind_tag_orbital_hands = [self.random_orbital_hand(), self.random_orbital_hand()];
     }
 
     /// The tag on offer for skipping the blind currently up, if it can be skipped at all.
     pub fn tag_on_offer(&self) -> Option<TagKind> {
+        self.blind_tag_slot().map(|slot| self.blind_tags[slot])
+    }
+
+    /// Which of the two `blind_tags` slots the blind currently up draws from — `None` for a Boss,
+    /// which cannot be skipped.
+    pub(crate) fn blind_tag_slot(&self) -> Option<usize> {
         match self.current_blind {
-            BlindKind::Small => Some(self.blind_tags[0]),
-            BlindKind::Big => Some(self.blind_tags[1]),
+            BlindKind::Small => Some(0),
+            BlindKind::Big => Some(1),
             BlindKind::Boss => None,
         }
+    }
+
+    /// The hand type an Orbital Tag on offer would level, if that is the tag on offer.
+    ///
+    /// Balatro fixes this when the tag is drawn and prints it on the blind-select screen
+    /// (`G.GAME.orbital_choices`, tag.lua:104), so skipping for it is an informed choice.
+    pub fn orbital_hand_on_offer(&self) -> Option<HandType> {
+        let slot = self.blind_tag_slot()?;
+        (self.blind_tags[slot] == TagKind::Orbital).then(|| self.blind_tag_orbital_hands[slot])
     }
 
     /// The shop discount in force, as a percentage (`G.GAME.discount_percent`). It reaches sell
@@ -768,8 +813,15 @@ impl GameState {
     }
 }
 
-/// The next rank up, as Strength gives it. An Ace cannot go higher and stays put.
+/// The next rank up, as Strength gives it.
+///
+/// An Ace wraps back round to a Two rather than sticking — `card.base.id == 14 and 2 or
+/// math.min(id+1, 14)` (card.lua:1126). Strength on a hand of Aces is a downgrade, and that is
+/// the intended trap.
 pub(crate) fn rank_up(rank: Rank) -> Rank {
+    if rank == Rank::Ace {
+        return Rank::Two;
+    }
     let pos = Rank::ALL.iter().position(|&r| r == rank).unwrap_or(0);
     Rank::ALL.get(pos + 1).copied().unwrap_or(Rank::Ace)
 }

@@ -144,6 +144,14 @@ pub struct ScoreInputs<'a> {
     /// The shop discount in force. Swashbuckler adds up sell values, which move with it.
     pub discount_percent: f64,
 
+    /// The Planet cards sitting in the consumable slots, by the hand each one levels.
+    ///
+    /// Observatory pays X1.5 Mult for every Planet *held* whose hand is the one being scored
+    /// (card.lua:2293) — it is a held effect, not something a spent Planet leaves behind, so
+    /// stockpiling Saturns is the play and using them is not. Left empty unless the voucher has
+    /// been redeemed, which keeps `score_hand` out of the voucher's business.
+    pub observatory_planets: &'a [HandType],
+
     /// The hand type and scoring cards, decided *before* any joker touched the cards.
     ///
     /// Balatro calls `get_poker_hand_info` at the top of `evaluate_play` (state_events.lua:572),
@@ -180,6 +188,7 @@ impl<'a> ScoreInputs<'a> {
             enhanced_count_in_deck: 0,
             round_targets: RoundTargets::default(),
             discount_percent: 0.0,
+            observatory_planets: &[],
             eval: None,
         }
     }
@@ -235,9 +244,6 @@ pub fn score_hand(inputs: ScoreInputs) -> ScoreResult {
 
     let mut chips: f64 = level_data.chips(hand_type) as f64;
     let mut mult:  f64 = level_data.mult(hand_type)  as f64;
-    if level_data.observatory_x_mult != 1.0 {
-        mult *= level_data.observatory_x_mult;
-    }
 
     let mut dollars_earned: i32 = 0;
     let mut events: Vec<ScoreEvent> = Vec::new();
@@ -317,11 +323,16 @@ pub fn score_hand(inputs: ScoreInputs) -> ScoreResult {
             }
 
             // Per-card joker effects
+            let card_ctx = CardContext {
+                jokers,
+                scoring_indices: &scoring_indices,
+                played_cards: &played,
+                pareidolia: has_pareidolia,
+                smeared: has_smeared,
+                targets: inputs.round_targets,
+            };
             for (j_idx, joker) in jokers.iter().enumerate().filter(|(_, j)| j.active) {
-                let effect = calc_joker_individual(
-                    joker, j_idx, jokers, card_idx, &card, &scoring_indices, &played,
-                    has_pareidolia, has_smeared, inputs.round_targets,
-                );
+                let effect = calc_joker_individual(joker, j_idx, card_idx, &card, &card_ctx);
                 chips += effect.chips as f64;
                 mult  += effect.mult  as f64;
                 mult  *= effect.x_mult;
@@ -432,6 +443,21 @@ pub fn score_hand(inputs: ScoreInputs) -> ScoreResult {
         mult *= joker.edition_x_mult();
     }
 
+    // ── PHASE 4: Observatory ──────────────────────────────────────────────
+    // Balatro walks the consumable slots in the very same pass as the jokers, straight after
+    // them (`for i = 1, #G.jokers.cards + #G.consumeables.cards`, state_events.lua:877), so a
+    // held Planet's X1.5 lands after every joker has had its say.
+    for planet_hand in inputs.observatory_planets {
+        if *planet_hand == hand_type {
+            mult *= 1.5;
+            events.push(ScoreEvent {
+                source: "Observatory".to_string(),
+                kind: ScoreEventKind::XMult,
+                value: 1.5,
+            });
+        }
+    }
+
     let final_score = chips * mult;
 
     ScoreResult {
@@ -452,6 +478,6 @@ pub fn score_hand(inputs: ScoreInputs) -> ScoreResult {
 
 pub(crate) mod joker_effects;
 pub(crate) use joker_effects::{
-    JokerEffect, calc_joker_individual, calc_joker_hand_card, calc_joker_main,
+    CardContext, JokerEffect, calc_joker_individual, calc_joker_hand_card, calc_joker_main,
     count_effective_jokers, count_hand_retriggers, count_retriggers,
 };

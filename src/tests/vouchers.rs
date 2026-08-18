@@ -1,7 +1,7 @@
 /// Tests for voucher effects via GameState.
 ///
 /// Also covers related card-enhancement and joker behaviors that require GameState round flow:
-///   - Observatory voucher: X1.5 Mult per planet card used, stacks per use
+///   - Observatory voucher: X1.5 Mult per *held* planet card of the scored hand
 ///   - Gold Card enhancement: $3 per Gold card held in hand at end of round
 ///   - Campfire joker: resets x_mult to X1 when Boss Blind is defeated
 
@@ -173,104 +173,96 @@ fn test_grabber_and_nacho_tong_stack() {
 }
 
 // =========================================================
-// Observatory voucher — X1.5 Mult per planet use for that hand
+// Observatory voucher — X1.5 Mult per *held* Planet card of the scored hand
 // =========================================================
+// The voucher pays for Planets you are still holding, not for Planets you have spent
+// (card.lua:2293 reads `self.ability.consumeable.hand_type` off a card sitting in the consumable
+// area). Using the card levels the hand and takes the X1.5 away with it.
 
-/// Using a planet card with Observatory sets observatory_x_mult to X1.5.
+/// A held Jupiter multiplies a Flush by X1.5 once Observatory is redeemed.
 #[test]
-fn test_observatory_sets_x_mult_on_planet_use() {
-    use crate::types::{PlanetCard, HandType};
-    let mut gs = apply_voucher_to_game(VoucherKind::Observatory);
-    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter).into());
-    gs.use_consumable(0, vec![]).unwrap();
-    let flush_level = gs.hand_levels.get(&HandType::Flush).unwrap();
-    assert!(
-        (flush_level.observatory_x_mult - 1.5).abs() < 0.001,
-        "Observatory: first planet use must set x_mult to 1.5, got {}",
-        flush_level.observatory_x_mult
-    );
-}
-
-/// Using two planet cards with Observatory stacks to X2.25 (1.5²).
-#[test]
-fn test_observatory_stacks_per_planet_use() {
-    use crate::types::{PlanetCard, HandType};
-    let mut gs = apply_voucher_to_game(VoucherKind::Observatory);
-    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter).into());
-    gs.use_consumable(0, vec![]).unwrap();
-    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter).into());
-    gs.use_consumable(0, vec![]).unwrap();
-    let flush_level = gs.hand_levels.get(&HandType::Flush).unwrap();
-    assert!(
-        (flush_level.observatory_x_mult - 2.25).abs() < 0.001,
-        "Observatory: two planet uses must give x_mult 2.25, got {}",
-        flush_level.observatory_x_mult
-    );
-}
-
-/// Without Observatory, planet use does not change observatory_x_mult.
-#[test]
-fn test_no_observatory_planet_does_not_set_x_mult() {
-    use crate::types::{PlanetCard, HandType};
-    let mut gs = make_game();
-    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter).into());
-    gs.use_consumable(0, vec![]).unwrap();
-    let flush_level = gs.hand_levels.get(&HandType::Flush).unwrap();
-    assert!(
-        (flush_level.observatory_x_mult - 1.0).abs() < 0.001,
-        "Without Observatory, observatory_x_mult must stay 1.0"
-    );
-}
-
-/// Observatory X1.5 actually increases Flush score during scoring.
-#[test]
-fn test_observatory_increases_flush_score() {
+fn test_observatory_x_mult_comes_from_a_held_planet() {
     use crate::types::PlanetCard;
-    // Jupiter levels Flush from L1→L2: chips = 35+15=50, mult = 4+2=6
-    // Observatory X1.5 applied: mult = 6×1.5 = 9
-    // 5 Spades 2-3-4-5-7: card chips = 2+3+4+5+7 = 21 → total chips = 71
-    // score = 71 × 9 = 639
-    //
-    // Without Observatory (same planet used): mult = 6, score = 71 × 6 = 426
-    let played = vec![
+    // Flush L1: chips 35, mult 4. 5 Spades 2-3-4-5-7 add 21 chips → 56 chips.
+    // Held Jupiter under Observatory: mult 4 × 1.5 = 6 → 336.
+    let played = flush_2_3_4_5_7();
+
+    let mut gs = apply_voucher_to_game(VoucherKind::Observatory);
+    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter).into());
+    assert_eq!(score_with_held_planets(&gs, &played).final_score as i64, 336);
+
+    // Without the voucher the same held card does nothing.
+    let mut plain = make_game();
+    plain.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter).into());
+    assert_eq!(score_with_held_planets(&plain, &played).final_score as i64, 224,
+        "a held Planet pays nothing without Observatory");
+}
+
+/// Two held Jupiters stack to X2.25.
+#[test]
+fn test_observatory_stacks_per_held_planet() {
+    use crate::types::PlanetCard;
+    let played = flush_2_3_4_5_7();
+    let mut gs = apply_voucher_to_game(VoucherKind::Observatory);
+    for _ in 0..2 {
+        gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter).into());
+    }
+    // 56 chips × (4 × 1.5 × 1.5 = 9) = 504
+    assert_eq!(score_with_held_planets(&gs, &played).final_score as i64, 504);
+}
+
+/// A held Planet only pays for its own hand type.
+#[test]
+fn test_observatory_ignores_a_planet_for_another_hand() {
+    use crate::types::PlanetCard;
+    let played = flush_2_3_4_5_7();
+    let mut gs = apply_voucher_to_game(VoucherKind::Observatory);
+    // Mercury levels Pair, not Flush.
+    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Mercury).into());
+    assert_eq!(score_with_held_planets(&gs, &played).final_score as i64, 224);
+}
+
+/// Spending the Planet levels the hand and gives the X1.5 up.
+#[test]
+fn test_observatory_x_mult_is_lost_when_the_planet_is_used() {
+    use crate::types::PlanetCard;
+    let played = flush_2_3_4_5_7();
+    let mut gs = apply_voucher_to_game(VoucherKind::Observatory);
+    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter).into());
+    gs.use_consumable(0, vec![]).unwrap();
+    assert!(gs.consumables.is_empty());
+    // Flush is now L2 (chips 50, mult 6) and nothing is held: 71 × 6 = 426.
+    assert_eq!(score_with_held_planets(&gs, &played).final_score as i64, 426,
+        "a spent Planet leaves a level behind, not a multiplier");
+}
+
+/// A plain 2-3-4-5-7 of Spades — 56 chips at Flush level 1.
+fn flush_2_3_4_5_7() -> Vec<CardInstance> {
+    vec![
         card(0, Rank::Two,   Suit::Spades),
         card(1, Rank::Three, Suit::Spades),
         card(2, Rank::Four,  Suit::Spades),
         card(3, Rank::Five,  Suit::Spades),
         card(4, Rank::Seven, Suit::Spades),
-    ];
+    ]
+}
 
-    // Without Observatory: Jupiter just levels up (L2), score = 71×6 = 426
-    let mut gs_no_obs = make_game();
-    gs_no_obs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter).into());
-    gs_no_obs.use_consumable(0, vec![]).unwrap();
-    let result_no_obs = {
-        let jokers = [];
-        let mut si = ScoreInputs::new(&played, &[], &jokers, &gs_no_obs.hand_levels);
-        si.hands_remaining = 3;
-        si.discards_remaining = 3;
-        si.deck_cards_remaining = 40;
-        score_hand(si)
+/// Score `played` against the game's hand levels and whatever Planets it is holding.
+fn score_with_held_planets(gs: &GameState, played: &[CardInstance]) -> crate::scoring::ScoreResult {
+    let observatory: Vec<HandType> = match gs.has_voucher(VoucherKind::Observatory) {
+        true => gs.consumables.iter().filter_map(|c| match c.card {
+            crate::card::ConsumableCard::Planet(p) => Some(p.hand_type()),
+            _ => None,
+        }).collect(),
+        false => Vec::new(),
     };
-    assert_eq!(result_no_obs.final_score as i64, 426,
-        "Without Observatory: L2 Flush score should be 426");
-
-    // With Observatory: same planet use also gives X1.5, score = 71×9 = 639
-    let mut gs = apply_voucher_to_game(VoucherKind::Observatory);
-    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter).into());
-    gs.use_consumable(0, vec![]).unwrap();
-    let result = {
-        let jokers = [];
-        let mut si = ScoreInputs::new(&played, &[], &jokers, &gs.hand_levels);
-        si.hands_remaining = 3;
-        si.discards_remaining = 3;
-        si.deck_cards_remaining = 40;
-        score_hand(si)
-    };
-    assert_eq!(result.final_score as i64, 639,
-        "Observatory should give X1.5 on Flush: expected 639, got {}",
-        result.final_score as i64
-    );
+    let jokers = [];
+    let mut si = ScoreInputs::new(played, &[], &jokers, &gs.hand_levels);
+    si.hands_remaining = 3;
+    si.discards_remaining = 3;
+    si.deck_cards_remaining = 40;
+    si.observatory_planets = &observatory;
+    score_hand(si)
 }
 
 // =========================================================
@@ -306,21 +298,28 @@ fn test_gold_card_enhancement_pays_3_dollars_at_round_end() {
 /// Gold Card enhancement does NOT pay if the card is debuffed.
 #[test]
 fn test_gold_card_debuffed_does_not_pay() {
-    let mut gs = make_game();
-    let mut gold = card(1, Rank::Ace, Suit::Spades);
-    gold.enhancement = Enhancement::Gold;
-    gold.debuffed = true;
-    let trigger = card(2, Rank::Two, Suit::Spades);
-    setup_round(&mut gs, vec![gold, trigger], 2);
-    gs.score_goal = 1.0;
-    gs.select_card(1).unwrap(); // play the normal card
-    let money_before = gs.money;
-    gs.play_hand().unwrap();
-    // Delta should NOT include $3 from the debuffed Gold card
-    // Blind reward ($3 White Small) + interest (4+3)/5 = 1 → delta = 4
-    // If Gold paid despite debuff, delta would be 7
-    let delta = gs.money - money_before;
-    assert!(delta < 7, "Debuffed Gold card must not pay $3; got delta {}", delta);
+    // The same round twice, differing only in whether the card left in hand carries a debuffed
+    // Gold enhancement. Comparing the two deltas keeps the test about Gold rather than about
+    // whatever the blind reward and interest happen to come to.
+    let round_delta = |gold: bool| {
+        let mut gs = make_game();
+        let mut held = card(1, Rank::Ace, Suit::Spades);
+        if gold {
+            held.enhancement = Enhancement::Gold;
+            held.debuffed = true;
+        }
+        let trigger = card(2, Rank::Two, Suit::Spades);
+        setup_round(&mut gs, vec![held, trigger], 2);
+        gs.score_goal = 1.0;
+        gs.select_card(1).unwrap(); // play the plain card, keep the Gold one in hand
+        let money_before = gs.money;
+        gs.play_hand().unwrap();
+        gs.money - money_before
+    };
+    assert_eq!(
+        round_delta(true), round_delta(false),
+        "a debuffed Gold card held at end of round must pay nothing"
+    );
 }
 
 // =========================================================

@@ -140,10 +140,6 @@ impl GameState {
         let hand_type = planet.hand_type();
         if let Some(level) = self.hand_levels.get_mut(&hand_type) {
             level.level += 1;
-            // Observatory: each planet use gives X1.5 Mult for this hand type
-            if self.vouchers.contains(&VoucherKind::Observatory) {
-                level.observatory_x_mult *= 1.5;
-            }
         }
         self.last_consumable_used = Some(LastConsumable::Planet(planet));
         self.log_event(
@@ -207,20 +203,28 @@ impl GameState {
                 self.money += total.min(50) as i32;
             }
             TarotCard::Death => {
-                // Select 2 cards: the LEFT card becomes a full copy of the RIGHT card
-                // (copies rank, suit, enhancement, edition, seal — only id stays)
-                if targets.len() == 2 {
-                    let left_hi = targets[0];
-                    let right_hi = targets[1];
-                    if left_hi < self.hand.len() && right_hi < self.hand.len() {
-                        let left_deck_idx = self.hand[left_hi];
-                        let right_deck_idx = self.hand[right_hi];
-                        let right_card = self.deck[right_deck_idx].clone();
-                        self.deck[left_deck_idx].rank = right_card.rank;
-                        self.deck[left_deck_idx].suit = right_card.suit;
-                        self.deck[left_deck_idx].enhancement = right_card.enhancement;
-                        self.deck[left_deck_idx].edition = right_card.edition;
-                        self.deck[left_deck_idx].seal = right_card.seal;
+                // The **rightmost** selected card is the template and every other selected card
+                // becomes a full copy of it — rank, suit, enhancement, edition and seal, keeping
+                // only its own id. Balatro picks the template by on-screen position
+                // (card.lua:1112-1113), which is hand order, so the order the caller listed its
+                // two targets in does not matter.
+                let mut chosen: Vec<usize> = targets
+                    .iter()
+                    .copied()
+                    .take(2)
+                    .filter(|&hand_idx| hand_idx < self.hand.len())
+                    .collect();
+                chosen.sort_unstable();
+                chosen.dedup();
+                if let Some((&rightmost, rest)) = chosen.split_last() {
+                    let template = self.deck[self.hand[rightmost]].clone();
+                    for &hand_idx in rest {
+                        let card = &mut self.deck[self.hand[hand_idx]];
+                        card.rank = template.rank;
+                        card.suit = template.suit;
+                        card.enhancement = template.enhancement;
+                        card.edition = template.edition;
+                        card.seal = template.seal;
                     }
                 }
             }
