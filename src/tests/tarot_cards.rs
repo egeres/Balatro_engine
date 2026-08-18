@@ -201,6 +201,29 @@ fn test_the_hermit_caps_gain_at_20() {
 }
 
 #[test]
+fn test_the_hermit_does_not_double_a_debt() {
+    // A Credit Card lets the balance go below zero. Doubling from there would *take* money,
+    // which no tarot does — the gain floors at nothing.
+    let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    gs.jokers.push(joker(1, JokerKind::CreditCard));
+    gs.money = -10;
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheHermit).into());
+    gs.use_consumable(0, vec![]).unwrap();
+    assert_eq!(gs.money, -10, "TheHermit must not deepen a debt");
+}
+
+#[test]
+fn test_the_hermit_on_zero_money_is_a_no_op() {
+    let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
+    gs.money = 0;
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheHermit).into());
+    gs.use_consumable(0, vec![]).unwrap();
+    assert_eq!(gs.money, 0);
+}
+
+#[test]
 fn test_temperance_gives_money_from_joker_sell_values() {
     let mut gs = make_game();
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);

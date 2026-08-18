@@ -195,8 +195,10 @@ impl GameState {
                 }
             }
             TarotCard::TheHermit => {
-                // Double money (up to $20 gain)
-                self.money += self.money.min(20);
+                // Double money, gaining at most $20. Clamped at zero as well as at 20: a Credit
+                // Card lets the balance go negative, and doubling a debt is not what "doubles
+                // your money" means — the tarot can never cost you money.
+                self.money += self.money.clamp(0, 20);
             }
             TarotCard::Temperance => {
                 // Give money equal to sum of joker sell values (up to $50)
