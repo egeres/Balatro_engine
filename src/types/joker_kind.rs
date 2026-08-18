@@ -168,7 +168,7 @@ const JOKERS: [JokerData; 150] = [
     JokerData { kind: JokerKind::Perkeo,               name: "Perkeo",                cost: 20, rarity: 4 },
 ];
 
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum JokerKind {
     Joker,

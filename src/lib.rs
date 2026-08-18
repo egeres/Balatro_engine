@@ -10,7 +10,8 @@ mod tests;
 use game::{BalatroError, GameState};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyList};
+use pyo3::IntoPyObjectExt;
 use serde_json::Value;
 use types::*;
 
@@ -56,33 +57,29 @@ fn balatro_err_to_py(err: BalatroError) -> PyErr {
 // Helper: convert serde_json::Value to a Python object
 // ============================================================
 
-fn json_to_py(py: Python<'_>, val: &Value) -> PyResult<PyObject> {
+fn json_to_py<'py>(py: Python<'py>, val: &Value) -> PyResult<Bound<'py, PyAny>> {
     match val {
-        Value::Null => Ok(py.None()),
-        Value::Bool(b) => Ok(b.into_py(py)),
-        Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Ok(i.into_py(py))
-            } else if let Some(f) = n.as_f64() {
-                Ok(f.into_py(py))
-            } else {
-                Ok(py.None())
-            }
-        }
-        Value::String(s) => Ok(s.clone().into_py(py)),
+        Value::Null => py.None().into_bound_py_any(py),
+        Value::Bool(b) => b.into_bound_py_any(py),
+        Value::Number(n) => match (n.as_i64(), n.as_f64()) {
+            (Some(i), _) => i.into_bound_py_any(py),
+            (None, Some(f)) => f.into_bound_py_any(py),
+            _ => py.None().into_bound_py_any(py),
+        },
+        Value::String(s) => s.as_str().into_bound_py_any(py),
         Value::Array(arr) => {
-            let list = pyo3::types::PyList::empty_bound(py);
+            let list = PyList::empty(py);
             for item in arr {
                 list.append(json_to_py(py, item)?)?;
             }
-            Ok(list.into())
+            list.into_bound_py_any(py)
         }
         Value::Object(map) => {
-            let dict = PyDict::new_bound(py);
+            let dict = PyDict::new(py);
             for (k, v) in map {
                 dict.set_item(k, json_to_py(py, v)?)?;
             }
-            Ok(dict.into())
+            dict.into_bound_py_any(py)
         }
     }
 }
@@ -546,31 +543,31 @@ impl BalatroEngine {
         format!("{:?}", self.gs.state)
     }
 
-    fn run_info(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn run_info<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         json_to_py(py, &run_info_json(&self.gs))
     }
 
-    fn round_info(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn round_info<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         json_to_py(py, &round_info_json(&self.gs))
     }
 
-    fn shop_info(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn shop_info<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         json_to_py(py, &shop_info_json(&self.gs))
     }
 
-    fn pack_info(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn pack_info<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         json_to_py(py, &pack_info_json(&self.gs))
     }
 
-    fn full_state(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn full_state<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         json_to_py(py, &gamestate_to_json(&self.gs))
     }
 
-    fn history(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn history<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         json_to_py(py, &history_json(&self.gs))
     }
 
-    fn available_actions(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn available_actions<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         json_to_py(py, &available_actions_json(&self.gs))
     }
 
@@ -602,7 +599,7 @@ impl BalatroEngine {
         self.gs.select_cards_by_rank(rank).map_err(balatro_err_to_py)
     }
 
-    fn play_hand(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+    fn play_hand<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let result = self.gs.play_hand().map_err(balatro_err_to_py)?;
         let v = serde_json::json!({
             "hand_type": result.hand_name,
@@ -705,16 +702,10 @@ fn _engine(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // the same tables `DeckType::from_u8` / `Stake::from_u8` read, so a new deck or stake gets
     // its constant automatically and the numbering cannot drift out of sync.
     for (value, deck) in DeckType::ALL.iter().enumerate() {
-        m.add(
-            pyo3::types::PyString::new_bound(m.py(), &format!("DECK_{deck:?}").to_uppercase()),
-            value as u8,
-        )?;
+        m.add(&*format!("DECK_{deck:?}").to_uppercase(), value as u8)?;
     }
     for (value, stake) in Stake::ALL.iter().enumerate() {
-        m.add(
-            pyo3::types::PyString::new_bound(m.py(), &format!("STAKE_{stake:?}").to_uppercase()),
-            value as u8,
-        )?;
+        m.add(&*format!("STAKE_{stake:?}").to_uppercase(), value as u8)?;
     }
 
     Ok(())

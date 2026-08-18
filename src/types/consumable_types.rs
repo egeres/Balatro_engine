@@ -4,7 +4,7 @@ use super::{Edition, HandType};
 
 super::debug_repr!(TarotCard, SpectralCard, VoucherKind);
 
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TarotCard {
     TheFool,
@@ -44,7 +44,7 @@ impl TarotCard {
     ];
 }
 
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PlanetCard {
     Mercury,  // Pair
@@ -96,7 +96,7 @@ impl PlanetCard {
     }
 }
 
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SpectralCard {
     Familiar,
@@ -119,7 +119,7 @@ pub enum SpectralCard {
     BlackHole,
 }
 
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VoucherKind {
     // Pair 1: shop card count
@@ -185,7 +185,7 @@ impl VoucherKind {
     ];
 }
 
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PackKind {
     ArcanaPackSmall,
@@ -268,7 +268,7 @@ impl PackKind {
     }
 }
 
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TagKind {
     Uncommon,
