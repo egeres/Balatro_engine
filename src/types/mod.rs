@@ -290,62 +290,11 @@ impl HandType {
 }
 
 impl HandType {
-    /// True if this hand type contains at least one pair (same rank × 2+).
-    pub fn contains_pair(&self) -> bool {
-        matches!(
-            self,
-            HandType::Pair
-                | HandType::TwoPair
-                | HandType::ThreeOfAKind
-                | HandType::FullHouse
-                | HandType::FourOfAKind
-                | HandType::FiveOfAKind
-                | HandType::FlushHouse
-                | HandType::FlushFive
-        )
-    }
-
-    /// True if this hand type contains two distinct same-rank pairs.
-    pub fn contains_two_pair(&self) -> bool {
-        matches!(
-            self,
-            HandType::TwoPair | HandType::FullHouse | HandType::FlushHouse
-        )
-    }
-
-    /// True if this hand type contains a three-of-a-kind (same rank × 3+).
-    pub fn contains_three_of_a_kind(&self) -> bool {
-        matches!(
-            self,
-            HandType::ThreeOfAKind
-                | HandType::FullHouse
-                | HandType::FourOfAKind
-                | HandType::FiveOfAKind
-                | HandType::FlushHouse
-                | HandType::FlushFive
-        )
-    }
-
-    /// True if this hand type contains a four-of-a-kind (same rank × 4+).
-    pub fn contains_four_of_a_kind(&self) -> bool {
-        matches!(
-            self,
-            HandType::FourOfAKind | HandType::FiveOfAKind | HandType::FlushFive
-        )
-    }
-
-    /// True if this hand type contains a straight (consecutive ranks).
-    pub fn contains_straight(&self) -> bool {
-        matches!(self, HandType::Straight | HandType::StraightFlush)
-    }
-
-    /// True if this hand type contains a flush (all same suit).
-    pub fn contains_flush(&self) -> bool {
-        matches!(
-            self,
-            HandType::Flush | HandType::StraightFlush | HandType::FlushHouse | HandType::FlushFive
-        )
-    }
+    // There used to be `contains_pair()` / `contains_flush()` / … helpers here, deriving what a
+    // hand holds from its *name*. That is not how Balatro asks the question: the hand-shape
+    // jokers read `context.poker_hands`, built from the played cards themselves
+    // (misc_functions.lua:376), so a Flush that happens to hold a pair pays Jolly Joker. Use
+    // `HandEvalResult::contained` — the name alone cannot answer it.
 
     pub fn display_name(&self) -> &'static str {
         match self {

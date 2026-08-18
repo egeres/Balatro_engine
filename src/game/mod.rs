@@ -521,6 +521,18 @@ impl GameState {
         self.joker_slots as usize + negatives
     }
 
+    /// Whether Pareidolia is out. `Card:is_face` answers yes to every card while it is
+    /// (card.lua:964), so this gates every face-card check in the game, not just the scoring ones.
+    pub(crate) fn has_pareidolia(&self) -> bool {
+        self.jokers.iter().any(|j| j.kind == JokerKind::Pareidolia && j.active)
+    }
+
+    /// Whether Smeared Joker is out. It lives inside `Card:is_suit` (card.lua:4084), so it merges
+    /// Hearts with Diamonds and Spades with Clubs for *every* suit check, not only flushes.
+    pub(crate) fn has_smeared(&self) -> bool {
+        self.jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active)
+    }
+
     /// Hand back the consumable slots Negative consumables were holding open, now that the
     /// consumables have been spent. Called after anything leaves `consumables`.
     pub(crate) fn release_negative_consumable_slots(&mut self) {
@@ -566,7 +578,7 @@ impl GameState {
     ///   `shattered` flag, which `Card:shatter()` sets for every Glass card that is removed
     ///   (`state_events.lua:988`, `:413`), so "destroyed Glass card" is the right rule.
     pub(crate) fn notify_card_destroyed(&mut self, card: &CardInstance) {
-        let is_face = card.rank.is_face();
+        let is_face = card.is_face(self.has_pareidolia());
         let is_glass = card.enhancement == Enhancement::Glass;
         if !is_face && !is_glass {
             return;

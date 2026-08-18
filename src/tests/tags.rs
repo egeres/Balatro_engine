@@ -155,6 +155,9 @@ fn test_investment_tag_pays_after_the_boss_is_beaten() {
     let mut gs = game_at_ante(1, "INVEST");
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
     gs.current_blind = crate::game::BlindKind::Boss;
+    // Which boss got rolled is irrelevant here, and some of them (The Psychic) would refuse a
+    // one-card hand.
+    gs.boss_blind = None;
     gs.money = 0;
     gs.tags.push(TagKind::Investment);
     gs.score_goal = 1.0;

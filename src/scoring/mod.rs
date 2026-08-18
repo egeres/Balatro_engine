@@ -1,5 +1,5 @@
 use crate::card::{CardInstance, HandLevelData, JokerInstance};
-use crate::hand_eval::{evaluate_hand, HandEvalResult};
+use crate::hand_eval::{evaluate_hand, ContainedHands, HandEvalResult};
 use crate::types::*;
 use std::collections::HashMap;
 
@@ -7,6 +7,8 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct ScoreResult {
     pub hand_type: HandType,
+    /// Every hand the played cards contained, for the callers that scale jokers afterwards.
+    pub contained: ContainedHands,
     pub hand_name: String,
     pub scoring_card_indices: Vec<usize>,
     pub base_chips: i64,
@@ -71,6 +73,9 @@ impl Default for RoundTargets {
 /// Context passed to the joker evaluators in the main joker phase
 pub struct ScoringContext<'a> {
     pub hand_type: HandType,
+    /// Every hand the played cards contain. The hand-shape jokers read this rather than
+    /// `hand_type`, so a Flush holding a pair still pays Jolly Joker.
+    pub contained: ContainedHands,
     pub scoring_cards: &'a [usize],
     pub played_cards: &'a [CardInstance],
     pub hand_cards: &'a [CardInstance],
@@ -223,7 +228,9 @@ pub fn score_hand(inputs: ScoreInputs) -> ScoreResult {
         }
     };
     let hand_type = eval.hand_type;
+    let contained = eval.contained;
     let scoring_indices = eval.scoring_indices.clone();
+    let has_smeared = jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active);
 
     // Hiker writes a permanent bonus onto the cards it scores, and a retriggered card sees that
     // bonus on its later triggers (card.lua:3067). Work on a local copy so the growth is visible
@@ -266,7 +273,7 @@ pub fn score_hand(inputs: ScoreInputs) -> ScoreResult {
         }
 
         let retriggers = count_retriggers(
-            card_idx, &played[card_idx], jokers, &scoring_indices, hands_remaining,
+            card_idx, &played[card_idx], jokers, &scoring_indices, hands_remaining, has_pareidolia,
         );
 
         for _trigger in 0..=retriggers {
@@ -324,7 +331,7 @@ pub fn score_hand(inputs: ScoreInputs) -> ScoreResult {
             for (j_idx, joker) in jokers.iter().enumerate().filter(|(_, j)| j.active) {
                 let effect = calc_joker_individual(
                     joker, j_idx, jokers, card_idx, &card, &scoring_indices, &played,
-                    has_pareidolia, round_targets,
+                    has_pareidolia, has_smeared, round_targets,
                 );
                 chips += effect.chips as f64;
                 mult  += effect.mult  as f64;
@@ -395,6 +402,7 @@ pub fn score_hand(inputs: ScoreInputs) -> ScoreResult {
     // ── PHASE 3: main joker effects, in joker order (once per joker) ──────
     let ctx = ScoringContext {
         hand_type,
+        contained,
         scoring_cards: &scoring_indices,
         played_cards: &played,
         hand_cards,
@@ -439,6 +447,7 @@ pub fn score_hand(inputs: ScoreInputs) -> ScoreResult {
 
     ScoreResult {
         hand_type,
+        contained,
         hand_name: hand_type.display_name().to_string(),
         scoring_card_indices: scoring_indices,
         base_chips: level_data.chips(hand_type),

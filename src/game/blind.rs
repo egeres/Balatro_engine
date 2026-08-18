@@ -439,10 +439,12 @@ impl GameState {
                         }
                     }
                     Some(BossBlind::TheMark) => {
-                        // Face cards are hidden, not disabled (blind.lua:614).
+                        // Face cards are hidden, not disabled (blind.lua:614). It calls
+                        // `is_face(true)`, so Pareidolia hides the whole hand.
+                        let pareidolia = self.has_pareidolia();
                         for hand_idx in newly_drawn {
                             let card_idx = self.hand[hand_idx];
-                            if self.deck[card_idx].rank.is_face() {
+                            if self.deck[card_idx].is_face(pareidolia) {
                                 self.deck[card_idx].face_down = true;
                             }
                         }
@@ -487,38 +489,27 @@ impl GameState {
             return;
         }
 
+        // `Blind:debuff_card` goes through `is_suit` / `is_face` (blind.lua:626), so a Wild Card
+        // is caught by every suit blind, a Stone card by none, Smeared Joker widens the net to
+        // the whole colour, and Pareidolia hands The Plant the entire deck.
+        let smeared = self.has_smeared();
+        let pareidolia = self.has_pareidolia();
+        let debuff_suit = |gs: &mut Self, suit: Suit| {
+            for card in gs.deck.iter_mut() {
+                if card.is_suit(suit, smeared) {
+                    card.debuffed = true;
+                }
+            }
+        };
+
         match boss {
-            BossBlind::TheClub => {
-                for card in self.deck.iter_mut() {
-                    if card.suit == Suit::Clubs {
-                        card.debuffed = true;
-                    }
-                }
-            }
-            BossBlind::TheGoad => {
-                for card in self.deck.iter_mut() {
-                    if card.suit == Suit::Spades {
-                        card.debuffed = true;
-                    }
-                }
-            }
-            BossBlind::TheHead => {
-                for card in self.deck.iter_mut() {
-                    if card.suit == Suit::Hearts {
-                        card.debuffed = true;
-                    }
-                }
-            }
-            BossBlind::TheWindow => {
-                for card in self.deck.iter_mut() {
-                    if card.suit == Suit::Diamonds {
-                        card.debuffed = true;
-                    }
-                }
-            }
+            BossBlind::TheClub => debuff_suit(self, Suit::Clubs),
+            BossBlind::TheGoad => debuff_suit(self, Suit::Spades),
+            BossBlind::TheHead => debuff_suit(self, Suit::Hearts),
+            BossBlind::TheWindow => debuff_suit(self, Suit::Diamonds),
             BossBlind::ThePlant => {
                 for card in self.deck.iter_mut() {
-                    if card.rank.is_face() {
+                    if card.is_face(pareidolia) {
                         card.debuffed = true;
                     }
                 }

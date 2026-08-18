@@ -21,6 +21,12 @@ pub struct CardInstance {
     pub extra_x_mult: f64,
 }
 
+/// Hearts and Diamonds are the red pair, Spades and Clubs the black one. Smeared Joker treats
+/// the two members of a pair as the same suit (card.lua:4084).
+pub fn is_red(suit: Suit) -> bool {
+    matches!(suit, Suit::Hearts | Suit::Diamonds)
+}
+
 impl CardInstance {
     pub fn new(id: u64, rank: Rank, suit: Suit) -> Self {
         Self {
@@ -96,8 +102,32 @@ impl CardInstance {
         }
     }
 
-    /// Effective suit (Wild counts as all suits)
+    /// Whether this card counts as `suit`, mirroring `Card:is_suit` (card.lua:4064).
+    ///
+    /// Three rules ride on this, and they apply to *every* suit check in the game, not just
+    /// flush detection: a Stone card has no suit at all, a Wild Card counts as all four, and
+    /// Smeared Joker merges Hearts with Diamonds and Spades with Clubs.
+    ///
+    /// Debuff is deliberately not considered here — Balatro's `bypass_debuff` argument varies
+    /// per caller, so each call site decides for itself.
+    pub fn is_suit(&self, suit: Suit, smeared: bool) -> bool {
+        if self.is_stone() {
+            return false;
+        }
+        if self.enhancement == Enhancement::Wild {
+            return true;
+        }
+        if smeared {
+            return is_red(self.suit) == is_red(suit);
+        }
+        self.suit == suit
+    }
+
+    /// Effective suit (Wild counts as all suits, Stone counts as none)
     pub fn effective_suits(&self) -> Vec<Suit> {
+        if self.is_stone() {
+            return Vec::new();
+        }
         match self.enhancement {
             Enhancement::Wild => vec![Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds],
             _ => vec![self.suit],

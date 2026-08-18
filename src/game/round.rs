@@ -6,6 +6,25 @@ use crate::hand_eval::evaluate_hand;
 use std::collections::HashMap;
 use super::{GameState, GameStateKind, BlindKind, BalatroError, HistoryEvent, LastConsumable};
 
+/// The result of a hand the Boss blind refused to score. The hand still counts as played and
+/// still costs a hand — it simply produces nothing (state_events.lua:614).
+fn zero_score(eval: &crate::hand_eval::HandEvalResult) -> ScoreResult {
+    ScoreResult {
+        hand_type: eval.hand_type,
+        contained: eval.contained,
+        hand_name: eval.hand_type.display_name().to_string(),
+        scoring_card_indices: Vec::new(),
+        base_chips: 0,
+        base_mult: 0,
+        final_chips: 0.0,
+        final_mult: 0.0,
+        final_score: 0.0,
+        dollars_earned: 0,
+        perma_chip_bonuses: Vec::new(),
+        events: Vec::new(),
+    }
+}
+
 impl GameState {
     /// Evaluate a set of cards with the current jokers' hand-shape modifiers applied
     /// (Four Fingers, Shortcut, Smeared Joker, Splash).
@@ -74,6 +93,7 @@ impl GameState {
     ) {
         let hand_type = eval.hand_type;
         let scoring = &eval.scoring_indices;
+        let pareidolia = self.has_pareidolia();
         let oops_mult = if self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active) {
             2.0_f64
         } else {
@@ -117,6 +137,7 @@ impl GameState {
                                 &self.jokers,
                                 scoring,
                                 self.hands_remaining.saturating_sub(1),
+                                pareidolia,
                             )
                         })
                         .sum();
@@ -126,7 +147,8 @@ impl GameState {
                     }
                 }
                 JokerKind::Runner => {
-                    if hand_type.contains_straight() {
+                    // `next(context.poker_hands['Straight'])` — contained, not the hand's name.
+                    if eval.contained.contains(HandType::Straight) {
                         let cur = self.jokers[i].get_counter_i64("chips");
                         self.jokers[i].set_counter_i64("chips", cur + 15);
                     }
@@ -136,13 +158,13 @@ impl GameState {
                     self.jokers[i].set_counter_i64("mult", cur + 1);
                 }
                 JokerKind::SpareTrousers => {
-                    if hand_type.contains_two_pair() {
+                    if eval.contained.contains(HandType::TwoPair) {
                         let cur = self.jokers[i].get_counter_i64("mult");
                         self.jokers[i].set_counter_i64("mult", cur + 2);
                     }
                 }
                 JokerKind::RideTheBus => {
-                    let has_face = scoring.iter().any(|&s| played[s].rank.is_face());
+                    let has_face = scoring.iter().any(|&s| played[s].is_face(pareidolia));
                     if has_face {
                         self.jokers[i].set_counter_i64("mult", 0);
                     } else {
@@ -193,7 +215,7 @@ impl GameState {
                 }
                 JokerKind::MidasMask => {
                     for &s in scoring {
-                        if played[s].rank.is_face() {
+                        if played[s].is_face(pareidolia) {
                             let id = played[s].id;
                             played[s].enhancement = Enhancement::Gold;
                             if let Some(c) = self.deck.iter_mut().find(|c| c.id == id) {
@@ -379,14 +401,27 @@ impl GameState {
         // hand it to the `before` pass.
         let pre_eval = self.preview_hand(&played_cards);
         let boss_ability_triggered = self.boss_ability_triggers(&pre_eval, &played_cards);
-        self.pre_score_joker_updates(&mut played_cards, &pre_eval);
+
+        // The Psychic rejects any hand of fewer than 5 cards (`debuff = {h_size_ge = 5}`,
+        // game.lua:280). A rejected hand is not blocked — it is played and simply scores nothing,
+        // burning the hand, because `evaluate_play` skips its whole scoring block when
+        // `Blind:debuff_hand` returns true (state_events.lua:614).
+        let hand_debuffed = matches!(self.current_blind, BlindKind::Boss)
+            && matches!(self.boss_blind, Some(BossBlind::ThePsychic))
+            && !self.boss_blind_disabled()
+            && played_cards.len() < 5;
+
+        if !hand_debuffed {
+            self.pre_score_joker_updates(&mut played_cards, &pre_eval);
+        }
 
         // OopsAll6s: doubles all listed probabilities when active
         let oops_active = self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active);
         let oops_mult = if oops_active { 2.0_f64 } else { 1.0_f64 };
 
         // Bloodstone: pre-roll 1/2 chance x1.5 per scoring Hearts card
-        let has_bloodstone = self.jokers.iter().any(|j| j.kind == JokerKind::Bloodstone && j.active);
+        let has_bloodstone = !hand_debuffed
+            && self.jokers.iter().any(|j| j.kind == JokerKind::Bloodstone && j.active);
         if has_bloodstone {
             let has_four_fingers = self.jokers.iter().any(|j| j.kind == JokerKind::FourFingers && j.active);
             let has_shortcut = self.jokers.iter().any(|j| j.kind == JokerKind::Shortcut && j.active);
@@ -395,7 +430,7 @@ impl GameState {
             let pre_eval = crate::hand_eval::evaluate_hand(&played_cards, has_four_fingers, has_shortcut, has_smeared, has_splash);
             for &idx in &pre_eval.scoring_indices {
                 let card = &mut played_cards[idx];
-                if !card.debuffed && card.effective_suits().contains(&Suit::Hearts) {
+                if !card.debuffed && card.is_suit(Suit::Hearts, has_smeared) {
                     if self.rng.next_bool_prob("bloodstone", (0.5 * oops_mult).min(1.0)) {
                         card.extra_x_mult = 1.5;
                     }
@@ -408,7 +443,7 @@ impl GameState {
         // $20 on 1/15 (counted here, paid out after scoring).
         let mut lucky_dollar_count: i32 = 0;
         for card in played_cards.iter_mut() {
-            if card.enhancement == Enhancement::Lucky && !card.debuffed {
+            if !hand_debuffed && card.enhancement == Enhancement::Lucky && !card.debuffed {
                 if self.rng.next_bool_prob("lucky_mult", (1.0 / 5.0) * oops_mult) {
                     card.extra_mult += 20;
                 }
@@ -516,7 +551,11 @@ impl GameState {
         // (Vampire eating a Wild Card's enhancement) cannot change what is being scored.
         inputs.eval = Some(&pre_eval);
 
-        let result = score_hand(inputs);
+        let result = if hand_debuffed {
+            zero_score(&pre_eval)
+        } else {
+            score_hand(inputs)
+        };
 
         // Hiker's permanent chip bonuses, applied to the real deck cards.
         for (card_id, gain) in &result.perma_chip_bonuses {
@@ -577,11 +616,13 @@ impl GameState {
         self.hands_remaining -= 1;
         self.hands_played_this_run += 1;
 
-        // Post-scoring joker updates
-        self.post_play_joker_updates(&result, &played_cards, &hand_cards);
+        // Post-scoring joker updates. A debuffed hand never reaches the joker phase at all.
+        if !hand_debuffed {
+            self.post_play_joker_updates(&result, &played_cards, &hand_cards);
+        }
 
         // Vagabond: create a tarot if money <= $4 when playing a hand
-        if self.money <= 4 {
+        if !hand_debuffed && self.money <= 4 {
             if self.jokers.iter().any(|j| j.kind == JokerKind::Vagabond && j.active) {
                 if self.consumables.len() < self.consumable_slots as usize {
                     let tarot = self.random_tarot();
@@ -596,7 +637,7 @@ impl GameState {
         self.money += lucky_dollar_count * 20;
 
         // BusinessCard: 1/2 chance to earn $2 per scoring face card (doubled to 1.0 with OopsAll6s)
-        if self.jokers.iter().any(|j| j.kind == JokerKind::BusinessCard && j.active) {
+        if !hand_debuffed && self.jokers.iter().any(|j| j.kind == JokerKind::BusinessCard && j.active) {
             let pareidolia = self.jokers.iter().any(|j| j.kind == JokerKind::Pareidolia && j.active);
             for &idx in &result.scoring_card_indices {
                 let card = &played_cards[idx];
@@ -609,9 +650,10 @@ impl GameState {
         }
 
         // ReservedParking: 1/2 chance to earn $1 per face card held in hand (doubled to 1.0 with OopsAll6s)
-        if self.jokers.iter().any(|j| j.kind == JokerKind::ReservedParking && j.active) {
+        if !hand_debuffed && self.jokers.iter().any(|j| j.kind == JokerKind::ReservedParking && j.active) {
+            let pareidolia = self.has_pareidolia();
             for card in &hand_cards {
-                if card.rank.is_face() && !card.debuffed {
+                if card.is_face(pareidolia) && !card.debuffed {
                     if self.rng.next_bool_prob("parking", (0.5 * oops_mult).min(1.0)) {
                         self.money += 1;
                     }
@@ -642,7 +684,7 @@ impl GameState {
         // Only *scoring*, non-debuffed glass cards can break (state_events.lua:961).
         for &sci in &result.scoring_card_indices {
             let card = &played_cards[sci];
-            if card.enhancement == Enhancement::Glass && !card.debuffed {
+            if !hand_debuffed && card.enhancement == Enhancement::Glass && !card.debuffed {
                 // 1/4 chance to break (1/2 with OopsAll6s)
                 if self.rng.next_bool_prob("glass", (0.25 * oops_mult).min(1.0)) {
                     // Notify jokers first — Glass Joker and Canio read the card before it goes.
@@ -807,7 +849,7 @@ impl GameState {
                                 JokerKind::Seance => {
                     // Straight Flush only. A Flush Five is five of the same rank, which is not a
                     // straight, so `poker_hands['Straight Flush']` stays empty for it.
-                    if matches!(result.hand_type, HandType::StraightFlush) {
+                    if result.contained.contains(HandType::StraightFlush) {
                         if self.consumables.len() < self.consumable_slots as usize {
                             let spectrals = [
                                 SpectralCard::Familiar, SpectralCard::Grim, SpectralCard::Incantation,
@@ -824,7 +866,7 @@ impl GameState {
                     // Ace + Straight → create a tarot card
                     let has_ace = result.scoring_card_indices.iter()
                         .any(|&idx| played[idx].rank == Rank::Ace);
-                    if has_ace && matches!(result.hand_type, HandType::Straight | HandType::StraightFlush) {
+                    if has_ace && result.contained.contains(HandType::Straight) {
                         if self.consumables.len() < self.consumable_slots as usize {
                             let tarot = self.random_tarot();
                             self.consumables.push(ConsumableCard::Tarot(tarot));
@@ -909,7 +951,8 @@ impl GameState {
         self.discards_remaining -= 1;
 
         // FacelessJoker: $5 if 3+ face cards were discarded
-        if discarded_cards.iter().filter(|c| c.rank.is_face()).count() >= 3 {
+        let pareidolia = self.has_pareidolia();
+        if discarded_cards.iter().filter(|c| c.is_face(pareidolia)).count() >= 3 {
             let count = self.jokers.iter().filter(|j| j.kind == JokerKind::FacelessJoker && j.active).count();
             self.money += 5 * count as i32;
         }

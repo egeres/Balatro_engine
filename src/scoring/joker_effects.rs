@@ -78,6 +78,7 @@ fn covered_suits(
     played: &[CardInstance],
     wild_priority: [Suit; 4],
     count_debuffed: bool,
+    smeared: bool,
 ) -> std::collections::HashSet<Suit> {
     let mut present = std::collections::HashSet::new();
 
@@ -87,7 +88,11 @@ fn covered_suits(
         if c.enhancement == Enhancement::Wild || (!count_debuffed && c.debuffed) {
             continue;
         }
-        present.insert(c.suit);
+        // Balatro tests the suits in order and stops at the first match, so under Smeared Joker
+        // a red card only ever fills the first red slot.
+        if let Some(&s) = wild_priority.iter().find(|&&s| c.is_suit(s, smeared)) {
+            present.insert(s);
+        }
     }
 
     // Pass 2: each Wild claims the first suit still missing.
@@ -134,6 +139,7 @@ pub(crate) fn count_retriggers(
     jokers: &[JokerInstance],
     scoring_indices: &[usize],
     hands_remaining: u32,
+    pareidolia: bool,
 ) -> usize {
     let mut retriggers = 0usize;
 
@@ -162,7 +168,8 @@ pub(crate) fn count_retriggers(
                 }
             }
             JokerKind::SockAndBuskin => {
-                if card.rank.is_face() {
+                // `Card:is_face` answers yes to everything while Pareidolia is out (card.lua:964).
+                if card.is_face(pareidolia) {
                     retriggers += 1;
                 }
             }
@@ -223,6 +230,7 @@ pub(crate) fn calc_joker_individual(
     scoring_indices: &[usize],
     played_cards: &[CardInstance],
     pareidolia: bool,
+    smeared: bool,
     targets: RoundTargets,
 ) -> JokerEffect {
     // Blueprint / Brainstorm copy every context, not just joker_main, so a copy joker sitting
@@ -231,7 +239,7 @@ pub(crate) fn calc_joker_individual(
         return match copy_target(all_jokers, joker_idx) {
             Some(t) => calc_joker_individual(
                 &all_jokers[t], t, all_jokers, card_idx, card, scoring_indices, played_cards,
-                pareidolia, targets,
+                pareidolia, smeared, targets,
             ),
             None => JokerEffect::new(),
         };
@@ -242,22 +250,22 @@ pub(crate) fn calc_joker_individual(
 
     match joker.kind {
         JokerKind::GreedyJoker => {
-            if is_scoring && card.effective_suits().contains(&Suit::Diamonds) {
+            if is_scoring && card.is_suit(Suit::Diamonds, smeared) {
                 effect.mult += 3;
             }
         }
         JokerKind::LustyJoker => {
-            if is_scoring && card.effective_suits().contains(&Suit::Hearts) {
+            if is_scoring && card.is_suit(Suit::Hearts, smeared) {
                 effect.mult += 3;
             }
         }
         JokerKind::WrathfulJoker => {
-            if is_scoring && card.effective_suits().contains(&Suit::Spades) {
+            if is_scoring && card.is_suit(Suit::Spades, smeared) {
                 effect.mult += 3;
             }
         }
         JokerKind::GluttonousJoker => {
-            if is_scoring && card.effective_suits().contains(&Suit::Clubs) {
+            if is_scoring && card.is_suit(Suit::Clubs, smeared) {
                 effect.mult += 3;
             }
         }
@@ -311,23 +319,23 @@ pub(crate) fn calc_joker_individual(
         // Hiker adds no chips directly. It writes perma_bonus onto the card (card.lua:3067),
         // which score_hand applies between triggers and reports back to the caller.
         JokerKind::Arrowhead => {
-            if is_scoring && card.effective_suits().contains(&Suit::Spades) {
+            if is_scoring && card.is_suit(Suit::Spades, smeared) {
                 effect.chips += 50;
             }
         }
         JokerKind::OnyxAgate => {
-            if is_scoring && card.effective_suits().contains(&Suit::Clubs) {
+            if is_scoring && card.is_suit(Suit::Clubs, smeared) {
                 effect.mult += 7;
             }
         }
         JokerKind::Bloodstone => {
             // Pre-rolled in round.rs: extra_x_mult set to 1.5 on 1/2 chance
-            if is_scoring && card.effective_suits().contains(&Suit::Hearts) && card.extra_x_mult > 1.0 {
+            if is_scoring && card.is_suit(Suit::Hearts, smeared) && card.extra_x_mult > 1.0 {
                 effect.x_mult = card.extra_x_mult;
             }
         }
         JokerKind::RoughGem => {
-            if is_scoring && card.effective_suits().contains(&Suit::Diamonds) {
+            if is_scoring && card.is_suit(Suit::Diamonds, smeared) {
                 effect.dollars += 1;
             }
         }
@@ -340,7 +348,7 @@ pub(crate) fn calc_joker_individual(
             // Target is the round-wide idol card, re-rolled each round (card.lua:3127).
             if is_scoring
                 && card.rank == targets.idol_rank
-                && card.effective_suits().contains(&targets.idol_suit)
+                && card.is_suit(targets.idol_suit, smeared)
             {
                 effect.x_mult = 2.0;
             }
@@ -432,21 +440,25 @@ pub(crate) fn calc_joker_main(
     let scoring_cards = ctx.scoring_cards;
     let played = ctx.played_cards;
     let hand = ctx.hand_cards;
+    let smeared = ctx.jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active);
+    // The hand-shape jokers ask whether the played cards *contain* the shape, not whether it is
+    // the hand's name (card.lua:3653/3660/3666 read `context.poker_hands[type]`).
+    let holds = |h: HandType| ctx.contained.contains(h);
 
     match joker.kind {
         // ── Hand-type effects (t_mult / t_chips, card.lua:3660) ───────────
         // These live in `joker_main` like every other joker effect, so they land *after* card
         // scoring. Applying them earlier would let a card's X-mult multiply them.
-        JokerKind::JollyJoker   if hand_type.contains_pair()            => { effect.mult  +=   8; }
-        JokerKind::ZanyJoker    if hand_type.contains_three_of_a_kind() => { effect.mult  +=  12; }
-        JokerKind::MadJoker     if hand_type.contains_two_pair()        => { effect.mult  +=  10; }
-        JokerKind::CrazyJoker   if hand_type.contains_straight()        => { effect.mult  +=  12; }
-        JokerKind::DrollJoker   if hand_type.contains_flush()           => { effect.mult  +=  10; }
-        JokerKind::SlyJoker     if hand_type.contains_pair()            => { effect.chips +=  50; }
-        JokerKind::WilyJoker    if hand_type.contains_three_of_a_kind() => { effect.chips += 100; }
-        JokerKind::CleverJoker  if hand_type.contains_two_pair()        => { effect.chips +=  80; }
-        JokerKind::DeviousJoker if hand_type.contains_straight()        => { effect.chips += 100; }
-        JokerKind::CraftyJoker  if hand_type.contains_flush()           => { effect.chips +=  80; }
+        JokerKind::JollyJoker   if holds(HandType::Pair)          => { effect.mult  +=   8; }
+        JokerKind::ZanyJoker    if holds(HandType::ThreeOfAKind) => { effect.mult  +=  12; }
+        JokerKind::MadJoker     if holds(HandType::TwoPair)       => { effect.mult  +=  10; }
+        JokerKind::CrazyJoker   if holds(HandType::Straight)      => { effect.mult  +=  12; }
+        JokerKind::DrollJoker   if holds(HandType::Flush)         => { effect.mult  +=  10; }
+        JokerKind::SlyJoker     if holds(HandType::Pair)          => { effect.chips +=  50; }
+        JokerKind::WilyJoker    if holds(HandType::ThreeOfAKind) => { effect.chips += 100; }
+        JokerKind::CleverJoker  if holds(HandType::TwoPair)       => { effect.chips +=  80; }
+        JokerKind::DeviousJoker if holds(HandType::Straight)      => { effect.chips += 100; }
+        JokerKind::CraftyJoker  if holds(HandType::Flush)         => { effect.chips +=  80; }
 
         // ── Fixed numeric effects ─────────────────────────────────────────
         JokerKind::Joker      => { effect.mult  +=  4; }
@@ -534,11 +546,11 @@ pub(crate) fn calc_joker_main(
             if played.len() <= 3 { effect.mult += 20; }
         }
         JokerKind::Cavendish => { effect.x_mult = 3.0; }
-        JokerKind::TheDuo    if hand_type.contains_pair()           => { effect.x_mult = 2.0; }
-        JokerKind::TheTrio   if hand_type.contains_three_of_a_kind() => { effect.x_mult = 3.0; }
-        JokerKind::TheFamily if hand_type.contains_four_of_a_kind() => { effect.x_mult = 4.0; }
-        JokerKind::TheOrder  if hand_type.contains_straight()       => { effect.x_mult = 3.0; }
-        JokerKind::TheTribe  if hand_type.contains_flush()          => { effect.x_mult = 2.0; }
+        JokerKind::TheDuo    if holds(HandType::Pair)           => { effect.x_mult = 2.0; }
+        JokerKind::TheTrio   if holds(HandType::ThreeOfAKind)   => { effect.x_mult = 3.0; }
+        JokerKind::TheFamily if holds(HandType::FourOfAKind)    => { effect.x_mult = 4.0; }
+        JokerKind::TheOrder  if holds(HandType::Straight)       => { effect.x_mult = 3.0; }
+        JokerKind::TheTribe  if holds(HandType::Flush)          => { effect.x_mult = 2.0; }
         JokerKind::Acrobat => {
             if ctx.hands_remaining == 0 { effect.x_mult = 3.0; }
         }
@@ -562,9 +574,10 @@ pub(crate) fn calc_joker_main(
 
         // ── Suit / card-set conditions ────────────────────────────────────
         JokerKind::Blackboard => {
-            let all_dark = hand.iter().all(|c| {
-                c.effective_suits().iter().any(|s| matches!(s, Suit::Spades | Suit::Clubs))
-            });
+            // `is_suit` is false for a Stone card, so one in hand breaks Blackboard.
+            let all_dark = hand
+                .iter()
+                .all(|c| c.is_suit(Suit::Spades, smeared) || c.is_suit(Suit::Clubs, smeared));
             if all_dark { effect.x_mult = 3.0; }
         }
         JokerKind::SeeingDouble => {
@@ -575,6 +588,7 @@ pub(crate) fn calc_joker_main(
                 played,
                 [Suit::Clubs, Suit::Diamonds, Suit::Spades, Suit::Hearts],
                 false,
+                smeared,
             );
             let has_other = [Suit::Hearts, Suit::Diamonds, Suit::Spades]
                 .iter()
@@ -591,6 +605,7 @@ pub(crate) fn calc_joker_main(
                 played,
                 [Suit::Hearts, Suit::Diamonds, Suit::Spades, Suit::Clubs],
                 true,
+                smeared,
             );
             if suits.len() == 4 {
                 effect.x_mult = 3.0;
@@ -600,7 +615,7 @@ pub(crate) fn calc_joker_main(
             // Target suit is re-rolled every round (card.lua:3255).
             let target = ctx.round_targets.ancient_suit;
             for &idx in scoring_cards {
-                if played[idx].effective_suits().contains(&target) {
+                if played[idx].is_suit(target, smeared) {
                     effect.x_mult *= 1.5;
                 }
             }
