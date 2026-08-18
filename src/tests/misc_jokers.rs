@@ -572,11 +572,11 @@ fn test_egg_gains_sell_value_at_end_of_round() {
     gs.jokers.push(joker(1, JokerKind::Egg));
     gs.score_goal = 1.0;
 
-    let sell_before = gs.jokers[0].sell_value();
+    let sell_before = gs.jokers[0].sell_value(0.0);
     gs.select_card(0).unwrap();
     gs.play_hand().unwrap();
 
-    assert_eq!(gs.jokers[0].sell_value(), sell_before + 3,
+    assert_eq!(gs.jokers[0].sell_value(0.0), sell_before + 3,
         "Egg gains $3 of sell value at the end of the round");
 }
 
@@ -589,11 +589,11 @@ fn test_egg_does_not_gain_sell_value_per_reroll() {
     gs.generate_shop();
     gs.money = 100;
 
-    let sell_before = gs.jokers[0].sell_value();
+    let sell_before = gs.jokers[0].sell_value(0.0);
     gs.reroll_shop().unwrap();
     gs.reroll_shop().unwrap();
 
-    assert_eq!(gs.jokers[0].sell_value(), sell_before,
+    assert_eq!(gs.jokers[0].sell_value(0.0), sell_before,
         "rerolling the shop must not feed Egg");
 }
 
@@ -711,11 +711,11 @@ fn test_gift_card_increases_other_joker_sell_values() {
     gs.jokers.push(joker(2, JokerKind::Joker));
     gs.score_goal = 1.0;
 
-    let joker_sell_before = gs.jokers[1].sell_value();
+    let joker_sell_before = gs.jokers[1].sell_value(0.0);
     gs.select_card(0).unwrap();
     gs.play_hand().unwrap();
 
-    assert_eq!(gs.jokers[1].sell_value(), joker_sell_before + 1,
+    assert_eq!(gs.jokers[1].sell_value(0.0), joker_sell_before + 1,
         "GiftCard adds $1 of sell value at the end of the round");
 }
 
@@ -726,11 +726,11 @@ fn test_gift_card_does_not_increase_own_sell_value() {
     gs.jokers.push(joker(1, JokerKind::GiftCard));
     gs.score_goal = 1.0;
 
-    let own_sell_before = gs.jokers[0].sell_value();
+    let own_sell_before = gs.jokers[0].sell_value(0.0);
     gs.select_card(0).unwrap();
     gs.play_hand().unwrap();
 
-    assert_eq!(gs.jokers[0].sell_value(), own_sell_before,
+    assert_eq!(gs.jokers[0].sell_value(0.0), own_sell_before,
         "GiftCard should not increase its own sell value");
 }
 

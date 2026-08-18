@@ -532,6 +532,7 @@ impl GameState {
         inputs.stone_count_in_deck = stone_count_in_deck;
         inputs.enhanced_count_in_deck = enhanced_count_in_deck;
         inputs.round_targets = self.round_targets;
+        inputs.discount_percent = self.discount_percent();
         // The hand was locked in before the `before` pass ran, so a joker that mutated the cards
         // (Vampire eating a Wild Card's enhancement) cannot change what is being scored.
         inputs.eval = Some(&pre_eval);

@@ -208,7 +208,7 @@ fn test_temperance_gives_money_from_joker_sell_values() {
     // Add a Joker (base cost 2 → sell value 1) and an AbstractJoker (cost 4 → sell value 2)
     gs.jokers.push(joker(10, JokerKind::Joker)); // sell value 1
     gs.jokers.push(joker(11, JokerKind::AbstractJoker)); // sell value ~3
-    let expected_total = gs.jokers.iter().map(|j| j.sell_value() as i32).sum::<i32>();
+    let expected_total = gs.jokers.iter().map(|j| j.sell_value(0.0) as i32).sum::<i32>();
     let capped = expected_total.min(50);
     gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::Temperance).into());
     gs.use_consumable(0, vec![]).unwrap();

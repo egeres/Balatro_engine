@@ -388,3 +388,75 @@ fn test_buying_clearance_sale_reprices_what_is_still_on_the_shelf() {
 
     assert_eq!(gs.offer_price(0), Some(7), "prices follow the discount live");
 }
+
+// =========================================================
+// Sell value follows the shop price, not the bare base cost
+// =========================================================
+
+#[test]
+fn test_an_edition_raises_what_a_joker_sells_for() {
+    // sell_cost is floor(cost/2), and cost includes the edition surcharge (card.lua:382).
+    let plain = joker(1, JokerKind::Joker);
+    let mut poly = joker(2, JokerKind::Joker);
+    poly.edition = Edition::Polychrome;
+
+    assert_eq!(plain.sell_value(0.0), 1, "floor(2.5) = 2, halved");
+    assert_eq!(poly.sell_value(0.0), 3, "floor(2 + 5 + 0.5) = 7, halved");
+}
+
+#[test]
+fn test_a_discount_lowers_what_your_board_is_worth() {
+    let blueprint = joker(1, JokerKind::Blueprint); // base $10
+    assert_eq!(blueprint.sell_value(0.0), 5);
+    assert_eq!(blueprint.sell_value(25.0), 3, "floor(10.5 * 0.75) = 7, halved");
+    assert_eq!(blueprint.sell_value(50.0), 2, "floor(10.5 * 0.5) = 5, halved");
+}
+
+#[test]
+fn test_a_rental_sells_for_a_dollar() {
+    let mut rented = joker(1, JokerKind::Blueprint);
+    rented.rental = true;
+    assert_eq!(rented.sell_value(0.0), 1, "a rental costs $1, so it sells for $1");
+}
+
+#[test]
+fn test_the_egg_bonus_is_added_after_the_halving() {
+    let mut egg = joker(1, JokerKind::Egg); // base $4 -> sells for 2
+    assert_eq!(egg.sell_value(0.0), 2);
+    egg.set_counter_i64("sell_bonus", 6);
+    assert_eq!(egg.sell_value(0.0), 8, "extra_value is outside the max/floor");
+}
+
+#[test]
+fn test_selling_pays_the_discounted_value() {
+    let mut gs = make_game();
+    gs.state = GameStateKind::Shop;
+    gs.vouchers.push(VoucherKind::Liquidation);
+    gs.jokers.push(joker(1, JokerKind::Blueprint));
+    gs.money = 0;
+
+    assert_eq!(gs.joker_sell_value(0), Some(2));
+    gs.sell_joker(0).unwrap();
+    assert_eq!(gs.money, 2, "Liquidation halves what the board is worth too");
+}
+
+#[test]
+fn test_swashbuckler_reads_the_discounted_sell_values() {
+    let played = vec![card(0, Rank::Ace, Suit::Spades)];
+    let jokers = vec![
+        joker(0, JokerKind::Swashbuckler),
+        joker(1, JokerKind::Blueprint), // sells for 5, or 2 under Liquidation
+    ];
+    let levels = default_hand_levels();
+
+    let mut plain = crate::scoring::ScoreInputs::new(&played, &[], &jokers, &levels);
+    plain.discount_percent = 0.0;
+    let plain = crate::scoring::score_hand(plain);
+
+    let mut cheap = crate::scoring::ScoreInputs::new(&played, &[], &jokers, &levels);
+    cheap.discount_percent = 50.0;
+    let cheap = crate::scoring::score_hand(cheap);
+
+    assert_eq!(plain.final_mult - cheap.final_mult, 3.0,
+        "Swashbuckler is worth less when the board is worth less");
+}

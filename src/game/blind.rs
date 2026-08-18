@@ -576,6 +576,7 @@ impl GameState {
     /// Runs before the other setting-blind effects because a sliced joker must not get to fire
     /// its own effect — Balatro guards those with `not self.getting_sliced`.
     fn apply_ceremonial_daggers(&mut self) {
+        let discount = self.discount_percent();
         let mut sliced: Vec<u64> = Vec::new();
         for i in 0..self.jokers.len() {
             if self.jokers[i].kind != JokerKind::CeremonialDagger || !self.jokers[i].active {
@@ -585,7 +586,7 @@ impl GameState {
             if target.eternal || sliced.contains(&target.id) {
                 continue;
             }
-            let gained = target.sell_value() as i64 * 2;
+            let gained = target.sell_value(discount) as i64 * 2;
             sliced.push(target.id);
             let cur = self.jokers[i].get_counter_i64("mult");
             self.jokers[i].set_counter_i64("mult", cur + gained);

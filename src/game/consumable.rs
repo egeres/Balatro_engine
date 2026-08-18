@@ -111,7 +111,8 @@ impl GameState {
             }
             TarotCard::Temperance => {
                 // Give money equal to sum of joker sell values (up to $50)
-                let total: u32 = self.jokers.iter().map(|j| j.sell_value()).sum();
+                let discount = self.discount_percent();
+                let total: u32 = self.jokers.iter().map(|j| j.sell_value(discount)).sum();
                 let gain = total.min(50);
                 self.money += gain as i32;
             }

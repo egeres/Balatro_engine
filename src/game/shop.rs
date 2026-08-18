@@ -562,7 +562,7 @@ impl GameState {
             return Err(BalatroError::EternalCard);
         }
 
-        let sell_value = self.jokers[joker_index].sell_value();
+        let sell_value = self.jokers[joker_index].sell_value(self.discount_percent());
         self.money += sell_value as i32;
 
         self.notify_card_sold(Some(self.jokers[joker_index].id));
@@ -807,22 +807,7 @@ impl GameState {
         astronomer_free: bool,
         couponed: bool,
     ) -> u32 {
-        let extra = match edition {
-            Edition::Foil => 2.0,
-            Edition::Holographic => 3.0,
-            Edition::Polychrome => 5.0,
-            Edition::Negative => 5.0,
-            Edition::None => 0.0,
-        };
-        let discount_percent = if self.has_voucher(VoucherKind::Liquidation) {
-            50.0
-        } else if self.has_voucher(VoucherKind::ClearanceSale) {
-            25.0
-        } else {
-            0.0
-        };
-        let cost = ((base_cost as f64 + extra + 0.5) * (100.0 - discount_percent) / 100.0).floor();
-        let mut cost = cost.max(1.0) as u32;
+        let mut cost = card_shop_cost(base_cost, edition, false, self.discount_percent());
 
         if astronomer_free {
             cost = 0;
@@ -867,6 +852,11 @@ impl GameState {
     /// Test hook for the pricing rule.
     pub fn debug_joker_price(&self, joker: &JokerInstance) -> u32 {
         self.price_card(joker.kind.base_cost(), joker.edition, joker.rental, false, false)
+    }
+
+    /// What selling joker `index` pays right now.
+    pub fn joker_sell_value(&self, index: usize) -> Option<u32> {
+        Some(self.jokers.get(index)?.sell_value(self.discount_percent()))
     }
 
     pub fn reroll_shop(&mut self) -> Result<(), BalatroError> {

@@ -100,6 +100,8 @@ pub struct ScoringContext<'a> {
     pub stone_count_in_deck: usize,
     pub enhanced_count_in_deck: usize,
     pub round_targets: RoundTargets,
+    /// The shop discount in force. Swashbuckler adds up sell values, which move with it.
+    pub discount_percent: f64,
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +143,8 @@ pub struct ScoreInputs<'a> {
     pub stone_count_in_deck: usize,
     pub enhanced_count_in_deck: usize,
     pub round_targets: RoundTargets,
+    /// The shop discount in force. Swashbuckler adds up sell values, which move with it.
+    pub discount_percent: f64,
 
     /// The hand type and scoring cards, decided *before* any joker touched the cards.
     ///
@@ -177,6 +181,7 @@ impl<'a> ScoreInputs<'a> {
             stone_count_in_deck: 0,
             enhanced_count_in_deck: 0,
             round_targets: RoundTargets::default(),
+            discount_percent: 0.0,
             eval: None,
         }
     }
@@ -206,6 +211,7 @@ pub fn score_hand(inputs: ScoreInputs) -> ScoreResult {
         stone_count_in_deck,
         enhanced_count_in_deck,
         round_targets,
+        discount_percent,
         eval,
     } = inputs;
 
@@ -423,6 +429,7 @@ pub fn score_hand(inputs: ScoreInputs) -> ScoreResult {
         stone_count_in_deck,
         enhanced_count_in_deck,
         round_targets,
+        discount_percent,
     };
 
     for (joker_idx, joker) in jokers.iter().enumerate() {

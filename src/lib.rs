@@ -408,7 +408,7 @@ fn available_actions_json(gs: &GameState) -> Value {
                     "action": "SellJoker",
                     "index": i,
                     "kind": format!("{:?}", j.kind),
-                    "sell_value": j.sell_value(),
+                    "sell_value": j.sell_value(gs.discount_percent()),
                 }));
             }
         }

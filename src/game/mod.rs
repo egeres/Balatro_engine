@@ -624,6 +624,18 @@ impl GameState {
         }
     }
 
+    /// The shop discount in force, as a percentage (`G.GAME.discount_percent`). It reaches sell
+    /// values as well as prices, so it is not purely a shop concern.
+    pub fn discount_percent(&self) -> f64 {
+        if self.has_voucher(VoucherKind::Liquidation) {
+            50.0
+        } else if self.has_voucher(VoucherKind::ClearanceSale) {
+            25.0
+        } else {
+            0.0
+        }
+    }
+
     /// Whether Pareidolia is out. `Card:is_face` answers yes to every card while it is
     /// (card.lua:964), so this gates every face-card check in the game, not just the scoring ones.
     pub(crate) fn has_pareidolia(&self) -> bool {

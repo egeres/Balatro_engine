@@ -484,7 +484,7 @@ pub(crate) fn calc_joker_main(
                 .iter()
                 .enumerate()
                 .filter(|(idx, _)| *idx != joker_idx)
-                .map(|(_, j)| j.sell_value() as i64)
+                .map(|(_, j)| j.sell_value(ctx.discount_percent) as i64)
                 .sum::<i64>();
         }
 

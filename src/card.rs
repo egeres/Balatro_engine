@@ -21,6 +21,26 @@ pub struct CardInstance {
     pub extra_x_mult: f64,
 }
 
+/// `Card:set_cost` up to and including the rental override (card.lua:375-381).
+///
+/// The edition surcharge rides on the base cost, the run's discount applies once, and a rental
+/// is a flat dollar. Astronomer and Coupon land after this and are the shop's business — sell
+/// value is derived from *this* number, which is why a couponed card still sells for its worth.
+pub fn card_shop_cost(base_cost: u32, edition: Edition, rental: bool, discount_percent: f64) -> u32 {
+    if rental {
+        return 1;
+    }
+    let extra = match edition {
+        Edition::Foil => 2.0,
+        Edition::Holographic => 3.0,
+        Edition::Polychrome => 5.0,
+        Edition::Negative => 5.0,
+        Edition::None => 0.0,
+    };
+    let cost = ((base_cost as f64 + extra + 0.5) * (100.0 - discount_percent) / 100.0).floor();
+    cost.max(1.0) as u32
+}
+
 /// Hearts and Diamonds are the red pair, Spades and Clubs the black one. Smeared Joker treats
 /// the two members of a pair as the same suit (card.lua:4084).
 pub fn is_red(suit: Suit) -> bool {
@@ -303,11 +323,20 @@ impl JokerInstance {
         !self.perishable || self.kind.perishable_compat()
     }
 
-    pub fn sell_value(&self) -> u32 {
-        // Balatro uses floor(buy_cost / 2), minimum $1
-        let base = (self.kind.base_cost() / 2).max(1);
-        let bonus = self.get_counter_i64("sell_bonus") as u32;
-        base + bonus
+    /// `sell_cost = max(1, floor(cost/2)) + extra_value` (card.lua:382), where `cost` is the
+    /// joker's *shop* price rather than its bare base cost.
+    ///
+    /// Two consequences that are easy to miss: an edition raises what a joker sells for, because
+    /// its surcharge is part of that price, and a shop discount lowers it — under Liquidation
+    /// your board is worth half as much. A rental sells for a dollar.
+    pub fn sell_value(&self, discount_percent: f64) -> u32 {
+        let cost = card_shop_cost(
+            self.kind.base_cost(),
+            self.edition,
+            self.rental,
+            discount_percent,
+        );
+        (cost / 2).max(1) + self.get_counter_i64("sell_bonus") as u32
     }
 
     /// Edition chip bonus (foil joker: +50 chips)
