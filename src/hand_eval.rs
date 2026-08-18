@@ -122,7 +122,11 @@ fn contained_hands(
     if n3 > 0 { out.insert(HandType::ThreeOfAKind); }
     if n2 == 2 || (n3 == 1 && n2 == 1) { out.insert(HandType::TwoPair); }
     if n2 > 0 { out.insert(HandType::Pair); }
-    if !eval_cards.is_empty() { out.insert(HandType::HighCard); }
+    // Any non-empty hand is at least a High Card, including one that is nothing but Stone
+    // cards. Testing `eval_cards` here instead would leave an all-Stone hand containing no hand
+    // at all, while `evaluate_hand_inner` still calls it a High Card — and the hand you played
+    // has to be among the hands you hold.
+    out.insert(HandType::HighCard);
 
     // The cascade: a bigger same-rank group implies the smaller ones.
     if out.contains(HandType::FiveOfAKind) { out.insert(HandType::FourOfAKind); }

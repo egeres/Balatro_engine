@@ -239,3 +239,29 @@ fn test_photograph_fires_on_the_leftmost_face_card() {
     // Pair: 10 + 10 + 10 = 30 chips, mult 2 x2 (one Photograph trigger) = 4 → 120
     assert_eq!(r.final_score as i64, 120);
 }
+
+/// A hand of nothing but Stone cards is still a High Card, and `contained` has to say so.
+///
+/// Stone cards take no part in deciding the hand type, so an all-Stone hand leaves the
+/// evaluator with nothing to read — but it still names the hand High Card, and the hand that
+/// was played must be among the hands the cards contain. The two are computed by separate
+/// functions, which is exactly how they came to disagree.
+#[test]
+fn test_an_all_stone_hand_contains_the_high_card_it_reports() {
+    let mut played = vec![
+        card(0, Rank::Two, Suit::Spades),
+        card(1, Rank::Seven, Suit::Hearts),
+        card(2, Rank::King, Suit::Clubs),
+    ];
+    for c in played.iter_mut() {
+        c.enhancement = Enhancement::Stone;
+    }
+    let r = crate::hand_eval::evaluate_hand(&played, false, false, false, false);
+    assert_eq!(r.hand_type, HandType::HighCard);
+    assert!(
+        r.contained.contains(HandType::HighCard),
+        "an all-Stone hand reported High Card but contained no hand at all"
+    );
+    // Every Stone card still scores.
+    assert_eq!(r.scoring_indices, vec![0, 1, 2]);
+}
