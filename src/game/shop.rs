@@ -564,7 +564,7 @@ impl GameState {
         let sell_value = self.jokers[joker_index].sell_value();
         self.money += sell_value as i32;
 
-        self.notify_card_sold();
+        self.notify_card_sold(Some(self.jokers[joker_index].id));
 
         // Luchador: selling it disables the current Boss blind's ability for the rest of the round
         if self.jokers[joker_index].kind == JokerKind::Luchador

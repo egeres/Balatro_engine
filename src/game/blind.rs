@@ -72,8 +72,9 @@ impl GameState {
         self.skipped_blinds.push((self.ante, self.round));
         self.skips_this_run += 1;
 
-        // Skipping a blind is the only source of tags.
-        let tag = self.random_tag();
+        // The tag was decided when the ante started and has been visible on the blind-select
+        // screen ever since — skipping does not roll a fresh one.
+        let tag = self.tag_on_offer().unwrap_or_else(|| self.random_tag());
         self.gain_tag(tag);
         for j in self.jokers.iter_mut() {
             match j.kind {
@@ -97,10 +98,16 @@ impl GameState {
 
     /// A random tag eligible at the current ante (`min_ante`, game.lua:225).
     pub(crate) fn random_tag(&mut self) -> TagKind {
+        self.random_tag_for_ante(self.ante)
+    }
+
+    /// As above, for an ante that has not been stepped into yet — the tags for the next ante are
+    /// drawn while the counter still reads the old one.
+    pub(crate) fn random_tag_for_ante(&mut self, ante: u32) -> TagKind {
         let pool: Vec<TagKind> = TagKind::ALL
             .iter()
             .copied()
-            .filter(|t| t.min_ante() <= self.ante)
+            .filter(|t| t.min_ante() <= ante)
             .collect();
         pool[self.rng.range_usize("tag", 0, pool.len() - 1)]
     }

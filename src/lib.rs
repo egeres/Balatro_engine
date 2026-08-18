@@ -339,6 +339,18 @@ fn run_info_json(gs: &GameState) -> Value {
             "trigger": format!("{:?}", t.trigger()),
         })).collect::<Vec<_>>(),
         "pending_free_pack": gs.pending_free_pack.map(|p| format!("{:?}", p)),
+        // The tag you would get for skipping the blind currently up. Balatro shows this before
+        // you commit, so it is observable state rather than a surprise roll.
+        "tag_on_offer": gs.tag_on_offer().map(|t| serde_json::json!({
+            "kind": format!("{:?}", t),
+            "name": t.display_name(),
+            "trigger": format!("{:?}", t.trigger()),
+        })),
+        "blind_tags": {
+            "small": gs.blind_tags[0].display_name(),
+            "big": gs.blind_tags[1].display_name(),
+        },
+        "shop_voucher": gs.shop_voucher.map(|v| format!("{:?}", v)),
         "history_len": gs.history.len(),
         "boss_blind": gs.boss_blind.map(|b| b.display_name()),
     })

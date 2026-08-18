@@ -1272,6 +1272,13 @@ impl GameState {
         // the ante, and one you skip is still there next shop.
         if matches!(self.current_blind, BlindKind::Boss) {
             self.shop_voucher = Some(self.random_voucher());
+            // The next ante's tags are drawn here too, and eligibility is judged against the
+            // ante about to begin (button_callbacks.lua:2951).
+            let next_ante = self.ante + 1;
+            self.blind_tags = [
+                self.random_tag_for_ante(next_ante),
+                self.random_tag_for_ante(next_ante),
+            ];
         }
 
         // Mark blind as defeated

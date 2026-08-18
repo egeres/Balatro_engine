@@ -27,6 +27,12 @@ pub struct GameState {
     // Blind state
     pub current_blind: BlindKind,
     pub boss_blind: Option<BossBlind>,
+    /// The tag sitting on each skippable blind this ante — `[Small, Big]`.
+    ///
+    /// Balatro draws both when the ante starts and shows them on the blind-select screen
+    /// (`round_resets.blind_tags`, game.lua:2179), so skipping is an informed choice rather than
+    /// a blind roll. Redrawn when the Boss falls (button_callbacks.lua:2951).
+    pub blind_tags: [TagKind; 2],
     pub score_goal: f64,
     pub skipped_blinds: Vec<(u32, u32)>, // (ante, round) of skipped blinds
     pub blind_defeated_this_ante: [bool; 3],
@@ -219,6 +225,7 @@ impl GameState {
             planet_types_used: std::collections::HashSet::new(),
             current_blind: BlindKind::Small,
             boss_blind: None,
+            blind_tags: [TagKind::Uncommon; 2],
             score_goal: 0.0,
             skipped_blinds: Vec::new(),
             blind_defeated_this_ante: [false; 3],
@@ -285,8 +292,9 @@ impl GameState {
         // Pick boss blind for ante 1
         gs.boss_blind = gs.pick_boss_blind();
 
-        // The first ante's voucher (game.lua:2178).
+        // The first ante's voucher and blind tags (game.lua:2178-2180).
         gs.shop_voucher = Some(gs.random_voucher());
+        gs.reroll_blind_tags();
 
         gs
     }
@@ -546,12 +554,33 @@ impl GameState {
 
     /// Jokers that react to any card being sold (`context.selling_card`, card.lua:2394).
     /// Consumables count, not just jokers.
-    pub(crate) fn notify_card_sold(&mut self) {
+    ///
+    /// `sold_joker_id` is the joker being sold, if it is one: Balatro skips it when broadcasting
+    /// (`if G.jokers.cards[i] ~= card`, button_callbacks.lua:2322), so selling a Campfire does
+    /// not let it upgrade itself on the way out.
+    pub(crate) fn notify_card_sold(&mut self, sold_joker_id: Option<u64>) {
         for j in self.jokers.iter_mut() {
+            if Some(j.id) == sold_joker_id {
+                continue;
+            }
             if j.kind == JokerKind::Campfire {
                 let cur = j.get_counter_f64("x_mult");
                 j.set_counter_f64("x_mult", cur + 0.25);
             }
+        }
+    }
+
+    /// Draw the tags for the ante about to start. Called at run start and once the Boss falls.
+    pub(crate) fn reroll_blind_tags(&mut self) {
+        self.blind_tags = [self.random_tag(), self.random_tag()];
+    }
+
+    /// The tag on offer for skipping the blind currently up, if it can be skipped at all.
+    pub fn tag_on_offer(&self) -> Option<TagKind> {
+        match self.current_blind {
+            BlindKind::Small => Some(self.blind_tags[0]),
+            BlindKind::Big => Some(self.blind_tags[1]),
+            BlindKind::Boss => None,
         }
     }
 

@@ -46,7 +46,7 @@ impl GameState {
         self.consumables.remove(consumable_index);
 
         // Campfire counts every card sold, consumables included (card.lua:2394).
-        self.notify_card_sold();
+        self.notify_card_sold(None);
         Ok(())
     }
 

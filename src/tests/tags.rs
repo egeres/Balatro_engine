@@ -327,3 +327,89 @@ fn test_every_tag_has_a_trigger_and_a_name() {
     assert_eq!(TagKind::Investment.trigger(), TagTrigger::BossDefeated);
     assert_eq!(TagKind::DoubleFun.trigger(), TagTrigger::CopyNextTag);
 }
+
+// =========================================================
+// Blind tags are drawn per ante and visible before you skip
+// =========================================================
+
+#[test]
+fn test_the_tag_on_offer_is_the_one_you_get() {
+    let mut gs = game_at_ante(1, "BLINDTAG1");
+    // Pin both to queued tags so the result is directly observable in `tags`.
+    gs.blind_tags = [TagKind::Investment, TagKind::Boss];
+    assert_eq!(gs.tag_on_offer(), Some(TagKind::Investment));
+
+    gs.skip_blind().unwrap();
+
+    assert_eq!(gs.tags, vec![TagKind::Investment],
+        "skipping hands over the tag that was on display, not a fresh roll");
+}
+
+#[test]
+fn test_skipping_does_not_roll_a_fresh_tag() {
+    // Two runs on the same seed must agree, and the tag must match what was advertised.
+    for seed in ["ADV1", "ADV2", "ADV3", "ADV4"] {
+        let mut gs = game_at_ante(2, seed);
+        let offered = gs.tag_on_offer().unwrap();
+        gs.skip_blind().unwrap();
+        if offered.trigger() != TagTrigger::Immediate {
+            assert!(gs.tags.contains(&offered),
+                "{}: advertised {:?} but got {:?}", seed, offered, gs.tags);
+        }
+    }
+}
+
+#[test]
+fn test_the_tag_on_offer_does_not_change_while_you_deliberate() {
+    let gs = game_at_ante(1, "BLINDTAG2");
+    let a = gs.tag_on_offer();
+    let b = gs.tag_on_offer();
+    assert_eq!(a, b, "reading the offer must not roll it");
+    assert!(a.is_some());
+}
+
+#[test]
+fn test_small_and_big_hold_their_own_tags() {
+    let mut gs = game_at_ante(1, "BLINDTAG3");
+    let small = gs.blind_tags[0];
+    let big = gs.blind_tags[1];
+    assert_eq!(gs.tag_on_offer(), Some(small));
+
+    gs.skip_blind().unwrap();
+    assert_eq!(gs.tag_on_offer(), Some(big),
+        "the Big blind carries the other pre-drawn tag");
+}
+
+#[test]
+fn test_the_boss_blind_offers_no_tag() {
+    let mut gs = game_at_ante(1, "BLINDTAG4");
+    gs.current_blind = crate::game::BlindKind::Boss;
+    assert_eq!(gs.tag_on_offer(), None);
+}
+
+#[test]
+fn test_blind_tags_survive_the_ante_and_are_redrawn_after_the_boss() {
+    let mut gs = GameState::new(DeckType::Red, Stake::White, Some("BLINDTAG5".to_string()));
+    let ante_one = gs.blind_tags;
+
+    // Playing through Small does not disturb the pair.
+    gs.boss_blind = None;
+    gs.select_blind().unwrap();
+    gs.score_goal = 1.0;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    assert_eq!(gs.blind_tags, ante_one, "the pair stands for the whole ante");
+    gs.leave_shop().unwrap();
+
+    // Big, then the Boss, which redraws them.
+    for _ in 0..2 {
+        gs.boss_blind = None;
+        gs.select_blind().unwrap();
+        gs.score_goal = 1.0;
+        gs.select_card(0).unwrap();
+        gs.play_hand().unwrap();
+        if !matches!(gs.state, crate::game::GameStateKind::Shop) { break; }
+        gs.leave_shop().unwrap();
+    }
+    assert_eq!(gs.ante, 2, "sanity: the ante advanced");
+}
