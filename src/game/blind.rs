@@ -1,4 +1,5 @@
 use crate::card::*;
+use crate::rng::keyed;
 use crate::types::*;
 use std::collections::HashMap;
 use super::{GameState, GameStateKind, BlindKind, BalatroError, HistoryEvent};
@@ -40,7 +41,7 @@ impl GameState {
             .filter(|b| self.bosses_used.get(b).copied().unwrap_or(0) == min_use)
             .collect();
 
-        let pick = pool[self.rng.range_usize(0, pool.len() - 1)];
+        let pick = pool[self.rng.range_usize("boss", 0, pool.len() - 1)];
         *self.bosses_used.entry(pick).or_insert(0) += 1;
         Some(pick)
     }
@@ -101,7 +102,7 @@ impl GameState {
             .copied()
             .filter(|t| t.min_ante() <= self.ante)
             .collect();
-        pool[self.rng.range_usize(0, pool.len() - 1)]
+        pool[self.rng.range_usize("tag", 0, pool.len() - 1)]
     }
 
     /// Acquire a tag: immediate ones pay out at once, the rest queue up for their trigger.
@@ -149,7 +150,7 @@ impl GameState {
             TagKind::Orbital => {
                 // +3 levels to a random hand type.
                 let hand_types: Vec<HandType> = self.hand_levels.keys().copied().collect();
-                let pick = hand_types[self.rng.range_usize(0, hand_types.len() - 1)];
+                let pick = hand_types[self.rng.range_usize("orbital", 0, hand_types.len() - 1)];
                 if let Some(level) = self.hand_levels.get_mut(&pick) {
                     level.level += 3;
                 }
@@ -168,7 +169,7 @@ impl GameState {
                     if pool.is_empty() {
                         break;
                     }
-                    let kind = pool[self.rng.range_usize(0, pool.len() - 1)];
+                    let kind = pool[self.rng.range_usize("top", 0, pool.len() - 1)];
                     let id = self.next_id();
                     self.jokers.push(JokerInstance::new(id, kind, Edition::None));
                 }
@@ -240,7 +241,7 @@ impl GameState {
 
         // Reset draw pile
         self.draw_pile = (0..self.deck.len()).collect();
-        self.rng.shuffle(&mut self.draw_pile);
+        self.rng.shuffle("shuffle", &mut self.draw_pile);
 
         // Reset face-down state for all cards
         for card in self.deck.iter_mut() {
@@ -254,7 +255,7 @@ impl GameState {
         if let Some(BossBlind::AmberAcorn) = self.boss_blind {
             if matches!(self.current_blind, BlindKind::Boss) {
                 if !self.boss_blind_disabled() {
-                    self.rng.shuffle(&mut self.jokers);
+                    self.rng.shuffle("amber_acorn", &mut self.jokers);
                 }
             }
         }
@@ -276,6 +277,8 @@ impl GameState {
     /// it always changes. Defaults (Ace of Spades / Spades / Ace) stand in if the deck has no
     /// eligible card, matching `common_events.lua:2272`.
     fn reroll_round_targets(&mut self) {
+        // Keyed per ante, as Balatro does (`pseudoseed('idol'..ante)`).
+        let ante = self.ante;
         let eligible: Vec<usize> = self
             .deck
             .iter()
@@ -287,14 +290,14 @@ impl GameState {
         let mut targets = crate::scoring::RoundTargets::default();
 
         if !eligible.is_empty() {
-            let idol = self.deck[eligible[self.rng.range_usize(0, eligible.len() - 1)]].clone();
+            let idol = self.deck[eligible[self.rng.range_usize(&keyed("idol", ante), 0, eligible.len() - 1)]].clone();
             targets.idol_rank = idol.rank;
             targets.idol_suit = idol.suit;
 
-            let mail = self.deck[eligible[self.rng.range_usize(0, eligible.len() - 1)]].clone();
+            let mail = self.deck[eligible[self.rng.range_usize(&keyed("mail", ante), 0, eligible.len() - 1)]].clone();
             targets.mail_rank = mail.rank;
 
-            let castle = self.deck[eligible[self.rng.range_usize(0, eligible.len() - 1)]].clone();
+            let castle = self.deck[eligible[self.rng.range_usize(&keyed("cas", ante), 0, eligible.len() - 1)]].clone();
             targets.castle_suit = castle.suit;
         }
 
@@ -303,7 +306,7 @@ impl GameState {
             .into_iter()
             .filter(|s| *s != self.round_targets.ancient_suit)
             .collect();
-        targets.ancient_suit = others[self.rng.range_usize(0, others.len() - 1)];
+        targets.ancient_suit = others[self.rng.range_usize(&keyed("anc", ante), 0, others.len() - 1)];
 
         self.round_targets = targets;
     }
@@ -416,7 +419,7 @@ impl GameState {
                     Some(BossBlind::TheWheel) => {
                         // 1-in-7 chance per newly drawn card
                         for hand_idx in newly_drawn {
-                            if self.rng.range_usize(0, 6) == 0 {
+                            if self.rng.range_usize("wheel", 0, 6) == 0 {
                                 let card_idx = self.hand[hand_idx];
                                 self.deck[card_idx].face_down = true;
                             }
@@ -454,7 +457,7 @@ impl GameState {
                 if !self.boss_blind_disabled() {
                     let newly_drawn_count = self.hand.len() - start_hand_len;
                     if newly_drawn_count > 0 {
-                        let offset = self.rng.range_usize(0, newly_drawn_count - 1);
+                        let offset = self.rng.range_usize("cerulean_bell", 0, newly_drawn_count - 1);
                         let forced_hand_idx = start_hand_len + offset;
                         let card_deck_idx = self.hand[forced_hand_idx];
                         self.cerulean_forced_card_id = Some(self.deck[card_deck_idx].id);
@@ -594,7 +597,7 @@ impl GameState {
                         .map(|(i, _)| i)
                         .collect();
                     if !destroyable.is_empty() {
-                        let pick = self.rng.range_usize(0, destroyable.len() - 1);
+                        let pick = self.rng.range_usize("madness", 0, destroyable.len() - 1);
                         let idx = destroyable[pick];
                         self.jokers.remove(idx);
                     }
@@ -608,9 +611,9 @@ impl GameState {
                         Rank::Jack, Rank::Queen, Rank::King, Rank::Ace,
                     ];
                     let seals = [Seal::Gold, Seal::Red, Seal::Blue, Seal::Purple];
-                    let suit_idx = self.rng.range_usize(0, 3);
-                    let rank_idx = self.rng.range_usize(0, 12);
-                    let seal_idx = self.rng.range_usize(0, seals.len() - 1);
+                    let suit_idx = self.rng.range_usize("cert_fr", 0, 3);
+                    let rank_idx = self.rng.range_usize("cert_fr", 0, 12);
+                    let seal_idx = self.rng.range_usize("certsl", 0, seals.len() - 1);
                     let new_id = self.next_id();
                     let mut new_card = CardInstance::new(new_id, ranks[rank_idx], suits[suit_idx]);
                     new_card.seal = seals[seal_idx];
@@ -648,7 +651,7 @@ impl GameState {
                         "HighCard", "Pair", "TwoPair", "ThreeOfAKind", "Straight",
                         "Flush", "FullHouse", "FourOfAKind", "StraightFlush",
                     ];
-                    let idx = self.rng.range_usize(0, hand_types.len() - 1);
+                    let idx = self.rng.range_usize("to_do", 0, hand_types.len() - 1);
                     if let Some(pos) = self.jokers.iter().position(|j| j.kind == JokerKind::ToDoList) {
                         self.jokers[pos].counters.insert(
                             "hand_type".to_string(),

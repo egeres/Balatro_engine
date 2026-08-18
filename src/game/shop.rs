@@ -29,13 +29,13 @@ impl GameState {
         (PackKind::SpectralPackMega, 0.07),
     ];
 
-    /// Pick one entry from `(item, weight)` pairs.
-    fn weighted_pick<T: Copy>(&mut self, pool: &[(T, f64)]) -> Option<T> {
+    /// Pick one entry from `(item, weight)` pairs, drawing from the named stream.
+    fn weighted_pick<T: Copy>(&mut self, key: &str, pool: &[(T, f64)]) -> Option<T> {
         let total: f64 = pool.iter().map(|(_, w)| *w).sum();
         if total <= 0.0 {
             return None;
         }
-        let mut roll = self.rng.next_f64() * total;
+        let mut roll = self.rng.next_f64(key) * total;
         for (item, weight) in pool {
             roll -= *weight;
             if roll <= 0.0 {
@@ -62,7 +62,7 @@ impl GameState {
             (Slot::Spectral, self.spectral_rate),
             (Slot::PlayingCard, self.playing_card_rate),
         ];
-        match self.weighted_pick(&pool)? {
+        match self.weighted_pick("shop_slot", &pool)? {
             Slot::Joker => self.generate_random_joker().map(ShopItem::Joker),
             Slot::Tarot => {
                 let t = self.random_tarot();
@@ -91,20 +91,20 @@ impl GameState {
             Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six, Rank::Seven,
             Rank::Eight, Rank::Nine, Rank::Ten, Rank::Jack, Rank::Queen, Rank::King, Rank::Ace,
         ];
-        let suit = suits[self.rng.range_usize(0, 3)];
-        let rank = ranks[self.rng.range_usize(0, 12)];
+        let suit = suits[self.rng.range_usize("front", 0, 3)];
+        let rank = ranks[self.rng.range_usize("front", 0, 12)];
         let id = self.next_id();
         let mut card = CardInstance::new(id, rank, suit);
 
-        if self.has_voucher(VoucherKind::Illusion) && self.rng.next_f64() > 0.6 {
+        if self.has_voucher(VoucherKind::Illusion) && self.rng.next_f64("illusion") > 0.6 {
             let enhancements = [
                 Enhancement::Bonus, Enhancement::Mult, Enhancement::Wild, Enhancement::Glass,
                 Enhancement::Steel, Enhancement::Stone, Enhancement::Gold, Enhancement::Lucky,
             ];
-            card.enhancement = enhancements[self.rng.range_usize(0, enhancements.len() - 1)];
+            card.enhancement = enhancements[self.rng.range_usize("illusion", 0, enhancements.len() - 1)];
             card.edition = self.poll_edition(false);
             let seals = [Seal::None, Seal::Gold, Seal::Red, Seal::Blue, Seal::Purple];
-            card.seal = seals[self.rng.range_usize(0, seals.len() - 1)];
+            card.seal = seals[self.rng.range_usize("illusion", 0, seals.len() - 1)];
         }
         card
     }
@@ -119,7 +119,7 @@ impl GameState {
     /// Poll an edition at an explicit rate. Standard packs use a fixed 2 rather than the run's
     /// `edition_rate` (card.lua:1761).
     pub(crate) fn poll_edition_at_rate(&mut self, rate: f64, allow_negative: bool) -> Edition {
-        let roll = self.rng.next_f64();
+        let roll = self.rng.next_f64("edition_generic");
         if allow_negative && roll > 1.0 - 0.003 {
             Edition::Negative
         } else if roll > 1.0 - 0.006 * rate {
@@ -143,7 +143,7 @@ impl GameState {
             SpectralCard::Hex, SpectralCard::Trance, SpectralCard::Medium,
             SpectralCard::Cryptid,
         ];
-        POOL[self.rng.range_usize(0, POOL.len() - 1)]
+        POOL[self.rng.range_usize("spe_card", 0, POOL.len() - 1)]
     }
 
     /// Consume the tags that act on a shop (tag.lua:344, :382, :393, :447).
@@ -223,7 +223,7 @@ impl GameState {
         if pool.is_empty() {
             return;
         }
-        let kind = pool[self.rng.range_usize(0, pool.len() - 1)];
+        let kind = pool[self.rng.range_usize("tag_joker", 0, pool.len() - 1)];
         let id = self.next_id();
         let mut joker = JokerInstance::new(id, kind, edition.unwrap_or(Edition::None));
         joker.edition = edition.unwrap_or(Edition::None);
@@ -264,7 +264,7 @@ impl GameState {
 
         // Two booster pack slots, drawn from the full weighted pool.
         for _ in 0..2 {
-            if let Some(pack) = self.weighted_pick(&Self::PACK_POOL) {
+            if let Some(pack) = self.weighted_pick("booster_pool", &Self::PACK_POOL) {
                 let price = pack.base_cost();
                 self.shop_offers.push(ShopOffer {
                     kind: ShopItem::Pack(pack),
@@ -357,7 +357,7 @@ impl GameState {
     pub(crate) fn generate_random_joker(&mut self) -> Option<JokerInstance> {
         // Rarity is rolled first, then a joker is drawn uniformly from that tier:
         // 70% Common / 25% Uncommon / 5% Rare. Legendaries only come from The Soul.
-        let roll = self.rng.next_f64();
+        let roll = self.rng.next_f64("rarity");
         let rarity: u8 = if roll < 0.70 {
             1
         } else if roll < 0.95 {
@@ -383,12 +383,12 @@ impl GameState {
             return None;
         }
 
-        let idx = self.rng.range_usize(0, pool.len() - 1);
+        let idx = self.rng.range_usize("joker_pool", 0, pool.len() - 1);
         let kind = pool[idx];
         let id = self.next_id();
 
         // Random edition
-        let edition_roll = self.rng.next_f64();
+        let edition_roll = self.rng.next_f64("edition_deck");
         let edition = if edition_roll < 0.003 {
             Edition::Negative
         } else if edition_roll < 0.006 {
@@ -411,16 +411,16 @@ impl GameState {
         let stake_level = self.stake as u8;
         if stake_level >= Stake::Black as u8
             && kind.eternal_compat()
-            && self.rng.next_bool_prob(0.30)
+            && self.rng.next_bool_prob("eternal", 0.30)
         {
             joker.eternal = true;
         } else if stake_level >= Stake::Orange as u8
             && kind.perishable_compat()
-            && self.rng.next_bool_prob(0.30)
+            && self.rng.next_bool_prob("perishable", 0.30)
         {
             joker.perishable = true;
         }
-        if stake_level >= Stake::Gold as u8 && self.rng.next_bool_prob(0.30) {
+        if stake_level >= Stake::Gold as u8 && self.rng.next_bool_prob("rental", 0.30) {
             joker.rental = true;
         }
 
@@ -464,7 +464,7 @@ impl GameState {
         if available.is_empty() {
             return VoucherKind::Overstock;
         }
-        let idx = self.rng.range_usize(0, available.len() - 1);
+        let idx = self.rng.range_usize("voucher", 0, available.len() - 1);
         available[idx]
     }
 
@@ -493,7 +493,7 @@ impl GameState {
             TarotCard::Judgement,
             TarotCard::TheWorld,
         ];
-        let idx = self.rng.range_usize(0, tarots.len() - 1);
+        let idx = self.rng.range_usize("tarot", 0, tarots.len() - 1);
         tarots[idx]
     }
 
@@ -519,7 +519,7 @@ impl GameState {
         if self.hand_levels.get(&HandType::FlushFive).map(|h| h.played > 0).unwrap_or(false) {
             planets.push(PlanetCard::Eris);
         }
-        let idx = self.rng.range_usize(0, planets.len() - 1);
+        let idx = self.rng.range_usize("planet", 0, planets.len() - 1);
         planets[idx]
     }
 
@@ -603,7 +603,7 @@ impl GameState {
                 .filter(|&j| self.jokers[j].active && self.jokers[j].kind != JokerKind::InvisibleJoker)
                 .collect();
             if !candidates.is_empty() {
-                let pick = self.rng.range_usize(0, candidates.len() - 1);
+                let pick = self.rng.range_usize("invisible", 0, candidates.len() - 1);
                 let dup = self.jokers[candidates[pick]].clone();
                 self.jokers.push(dup);
             }
@@ -967,7 +967,7 @@ impl GameState {
         if self.jokers.iter().any(|j| j.kind == JokerKind::Perkeo && j.active)
             && !self.consumables.is_empty()
         {
-            let idx = self.rng.range_usize(0, self.consumables.len() - 1);
+            let idx = self.rng.range_usize("perkeo", 0, self.consumables.len() - 1);
             let mut copy = self.consumables[idx].clone();
             // The copy is "Negative" — represented by expanding consumable slots and adding it
             self.consumable_slots += 1;

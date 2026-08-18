@@ -404,9 +404,9 @@ impl GameState {
 
                 // Erratic deck: randomize rank and suit
                 if self.deck_type == DeckType::Erratic {
-                    let new_rank_idx = self.rng.range_u32(0, 12) as usize;
+                    let new_rank_idx = self.rng.range_u32("erratic", 0, 12) as usize;
                     card.rank = ranks[new_rank_idx];
-                    let new_suit_idx = self.rng.range_u32(0, 3) as usize;
+                    let new_suit_idx = self.rng.range_u32("erratic", 0, 3) as usize;
                     card.suit = suits[new_suit_idx];
                 }
 
@@ -415,7 +415,7 @@ impl GameState {
         }
 
         // Shuffle
-        self.rng.shuffle(&mut cards);
+        self.rng.shuffle("shuffle", &mut cards);
         self.deck = cards;
         self.starting_deck_size = self.deck.len();
         self.draw_pile = (0..self.deck.len()).collect();

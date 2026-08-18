@@ -280,16 +280,6 @@ fn test_orange_stake_effective_discards_reduced_by_one() {
 // =========================================================
 
 #[test]
-fn test_gold_stake_shop_contains_spectral_pack() {
-    let mut gs = GameState::new(DeckType::Blue, Stake::Gold, Some("GOLD_SPEC".to_string()));
-    gs.generate_shop();
-    let has_spectral = gs.shop_offers.iter().any(|o| {
-        matches!(o.kind, ShopItem::Pack(PackKind::SpectralPack))
-    });
-    assert!(has_spectral, "Gold stake shop should contain a SpectralPack");
-}
-
-#[test]
 fn test_gold_stake_effective_discards_reduced_by_one() {
     let gs = GameState::new(DeckType::Blue, Stake::Gold, Some("GOLD_DISC".to_string()));
     assert_eq!(

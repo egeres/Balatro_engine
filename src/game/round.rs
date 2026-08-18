@@ -88,7 +88,7 @@ impl GameState {
                 JokerKind::Misprint => {
                     // Rolls a fresh 0..=23 Mult every hand (card.lua:3701). Pre-rolled here so
                     // score_hand stays deterministic given the state it is handed.
-                    let roll = self.rng.range_usize(0, 23) as i64;
+                    let roll = self.rng.range_usize("misprint", 0, 23) as i64;
                     self.jokers[i].set_counter_i64("mult", roll);
                 }
                 JokerKind::LoyaltyCard => {
@@ -204,7 +204,7 @@ impl GameState {
                 }
                 JokerKind::SpaceJoker => {
                     // 1/4 to level up the played hand — before scoring, so the new level counts.
-                    if self.rng.next_bool_prob((0.25 * oops_mult).min(1.0)) {
+                    if self.rng.next_bool_prob("space", (0.25 * oops_mult).min(1.0)) {
                         if let Some(level) = self.hand_levels.get_mut(&hand_type) {
                             level.level += 1;
                         }
@@ -396,7 +396,7 @@ impl GameState {
             for &idx in &pre_eval.scoring_indices {
                 let card = &mut played_cards[idx];
                 if !card.debuffed && card.effective_suits().contains(&Suit::Hearts) {
-                    if self.rng.next_bool_prob((0.5 * oops_mult).min(1.0)) {
+                    if self.rng.next_bool_prob("bloodstone", (0.5 * oops_mult).min(1.0)) {
                         card.extra_x_mult = 1.5;
                     }
                 }
@@ -409,10 +409,10 @@ impl GameState {
         let mut lucky_dollar_count: i32 = 0;
         for card in played_cards.iter_mut() {
             if card.enhancement == Enhancement::Lucky && !card.debuffed {
-                if self.rng.next_bool_prob((1.0 / 5.0) * oops_mult) {
+                if self.rng.next_bool_prob("lucky_mult", (1.0 / 5.0) * oops_mult) {
                     card.extra_mult += 20;
                 }
-                if self.rng.next_bool_prob((1.0 / 15.0) * oops_mult) {
+                if self.rng.next_bool_prob("lucky_money", (1.0 / 15.0) * oops_mult) {
                     lucky_dollar_count += 1;
                     // LuckyCat joker: gains +0.25 x_mult per successful Lucky trigger
                     for j in self.jokers.iter_mut() {
@@ -474,7 +474,7 @@ impl GameState {
                         .map(|(i, _)| i)
                         .collect();
                     if !active_jokers.is_empty() {
-                        let pick = self.rng.range_usize(0, active_jokers.len() - 1);
+                        let pick = self.rng.range_usize("crimson_heart", 0, active_jokers.len() - 1);
                         let idx = active_jokers[pick];
                         let id = self.jokers[idx].id;
                         self.jokers[idx].active = false;
@@ -611,7 +611,7 @@ impl GameState {
             for &idx in &result.scoring_card_indices {
                 let card = &played_cards[idx];
                 if !card.debuffed && card.is_face(pareidolia) {
-                    if self.rng.next_bool_prob((0.5 * oops_mult).min(1.0)) {
+                    if self.rng.next_bool_prob("business", (0.5 * oops_mult).min(1.0)) {
                         self.money += 2;
                     }
                 }
@@ -622,7 +622,7 @@ impl GameState {
         if self.jokers.iter().any(|j| j.kind == JokerKind::ReservedParking && j.active) {
             for card in &hand_cards {
                 if card.rank.is_face() && !card.debuffed {
-                    if self.rng.next_bool_prob((0.5 * oops_mult).min(1.0)) {
+                    if self.rng.next_bool_prob("parking", (0.5 * oops_mult).min(1.0)) {
                         self.money += 1;
                     }
                 }
@@ -654,7 +654,7 @@ impl GameState {
             let card = &played_cards[sci];
             if card.enhancement == Enhancement::Glass && !card.debuffed {
                 // 1/4 chance to break (1/2 with OopsAll6s)
-                if self.rng.next_bool_prob((0.25 * oops_mult).min(1.0)) {
+                if self.rng.next_bool_prob("glass", (0.25 * oops_mult).min(1.0)) {
                     // Notify jokers first — Glass Joker and Canio read the card before it goes.
                     self.notify_card_destroyed(card);
                     // Remove card from deck (destroy_deck_card remaps all index collections)
@@ -703,7 +703,7 @@ impl GameState {
                     let discard_count = 2.min(self.hand.len());
                     for _ in 0..discard_count {
                         if self.hand.is_empty() { break; }
-                        let pick = self.rng.range_usize(0, self.hand.len() - 1);
+                        let pick = self.rng.range_usize("hook", 0, self.hand.len() - 1);
                         let card_idx = self.hand.remove(pick);
                         self.deck[card_idx].face_down = false;
                         self.discard_pile.push(card_idx);
@@ -797,7 +797,7 @@ impl GameState {
                         .filter(|&&idx| played[idx].rank == Rank::Eight)
                         .count();
                     for _ in 0..eights_scored {
-                        if self.rng.next_bool_prob((0.25 * oops_mult).min(1.0)) {
+                        if self.rng.next_bool_prob("8ball", (0.25 * oops_mult).min(1.0)) {
                             if self.consumables.len() < self.consumable_slots as usize {
                                 let tarot = self.random_tarot();
                                 self.consumables.push(ConsumableCard::Tarot(tarot));
@@ -824,7 +824,7 @@ impl GameState {
                                 SpectralCard::Ankh, SpectralCard::DejaVu, SpectralCard::Hex,
                                 SpectralCard::Medium, SpectralCard::Cryptid,
                             ];
-                            let idx = self.rng.range_usize(0, spectrals.len() - 1);
+                            let idx = self.rng.range_usize("seance", 0, spectrals.len() - 1);
                             self.consumables.push(ConsumableCard::Spectral(spectrals[idx]));
                         }
                     }
@@ -851,7 +851,7 @@ impl GameState {
                                 SpectralCard::Talisman, SpectralCard::Aura, SpectralCard::Wraith,
                                 SpectralCard::Ankh, SpectralCard::DejaVu, SpectralCard::Medium,
                             ];
-                            let idx = self.rng.range_usize(0, spectrals.len() - 1);
+                            let idx = self.rng.range_usize("sixth", 0, spectrals.len() - 1);
                             self.consumables.push(ConsumableCard::Spectral(spectrals[idx]));
                         }
                         // Take the card out of hand before destroying it — destroy_deck_card
@@ -1130,7 +1130,7 @@ impl GameState {
             .map(|(i, _)| i)
             .collect();
         for pos in gm_positions.iter().rev() {
-            if self.rng.next_bool_prob((1.0 / 6.0) * win_oops_mult) {
+            if self.rng.next_bool_prob("gros_michel", (1.0 / 6.0) * win_oops_mult) {
                 self.jokers.remove(*pos);
                 // Extinction is permanent: Gros Michel leaves the pool, Cavendish joins it.
                 self.gros_michel_extinct = true;
@@ -1143,7 +1143,7 @@ impl GameState {
             .map(|(i, _)| i)
             .collect();
         for pos in cav_positions.iter().rev() {
-            if self.rng.next_bool_prob((1.0 / 1000.0) * win_oops_mult) {
+            if self.rng.next_bool_prob("cavendish", (1.0 / 1000.0) * win_oops_mult) {
                 self.jokers.remove(*pos);
             }
         }

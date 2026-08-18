@@ -28,7 +28,7 @@ impl GameState {
                 // (card.lua:1731).
                 let omen_globe = self.has_voucher(VoucherKind::OmenGlobe);
                 for _ in 0..cards_shown {
-                    if omen_globe && self.rng.next_f64() > 0.8 {
+                    if omen_globe && self.rng.next_f64("omen_globe") > 0.8 {
                         let sp = self.random_spectral();
                         cards.push(PackCard::Consumable(ConsumableCard::Spectral(sp)));
                     } else {
@@ -87,26 +87,29 @@ impl GameState {
                 ];
                 // card.lua:1759: 40% of the cards are Enhanced, editions are polled at a fixed
                 // rate of 2, and 20% carry a seal (then uniform across the four).
+                // Balatro keys these per ante (`pseudoseed('stdset'..ante)`).
+                let stdset = crate::rng::keyed("stdset", self.ante);
+                let stdseal = crate::rng::keyed("stdseal", self.ante);
                 for _ in 0..cards_shown {
-                    let suit_idx = self.rng.range_usize(0, 3);
-                    let rank_idx = self.rng.range_usize(0, 12);
+                    let suit_idx = self.rng.range_usize(&stdset, 0, 3);
+                    let rank_idx = self.rng.range_usize(&stdset, 0, 12);
                     let id = self.next_id();
                     let mut card = CardInstance::new(id, ranks[rank_idx], suits[suit_idx]);
 
-                    if self.rng.next_f64() > 0.6 {
+                    if self.rng.next_f64(&stdset) > 0.6 {
                         let enhancements = [
                             Enhancement::Bonus, Enhancement::Mult, Enhancement::Wild,
                             Enhancement::Glass, Enhancement::Steel, Enhancement::Stone,
                             Enhancement::Gold, Enhancement::Lucky,
                         ];
                         card.enhancement =
-                            enhancements[self.rng.range_usize(0, enhancements.len() - 1)];
+                            enhancements[self.rng.range_usize(&stdset, 0, enhancements.len() - 1)];
                     }
 
                     card.edition = self.poll_edition_at_rate(2.0, false);
 
-                    if self.rng.next_f64() > 0.8 {
-                        let seal_roll = self.rng.next_f64();
+                    if self.rng.next_f64(&stdseal) > 0.8 {
+                        let seal_roll = self.rng.next_f64("stdsealtype");
                         card.seal = if seal_roll > 0.75 {
                             Seal::Red
                         } else if seal_roll > 0.5 {
@@ -181,7 +184,7 @@ impl GameState {
                     // (guaranteed with OopsAll6s since 2 * 1/2 = 1)
                     if self.jokers.iter().any(|j| j.kind == JokerKind::Hallucination && j.active) {
                         let hall_oops = if self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active) { 2.0_f64 } else { 1.0_f64 };
-                        if self.rng.next_bool_prob((0.5 * hall_oops).min(1.0)) && self.consumables.len() < self.consumable_slots as usize {
+                        if self.rng.next_bool_prob("halu", (0.5 * hall_oops).min(1.0)) && self.consumables.len() < self.consumable_slots as usize {
                             let tarot = self.random_tarot();
                             self.consumables.push(ConsumableCard::Tarot(tarot));
                         }

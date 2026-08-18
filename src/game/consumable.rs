@@ -68,7 +68,7 @@ impl GameState {
         if candidates.is_empty() {
             return None;
         }
-        Some(candidates[self.rng.range_usize(0, candidates.len() - 1)])
+        Some(candidates[self.rng.range_usize("editionless", 0, candidates.len() - 1)])
     }
 
     fn apply_planet(&mut self, planet: PlanetCard) {
@@ -260,10 +260,10 @@ impl GameState {
                 // 1/4 to add a random edition to a joker that has none (card.lua:4209);
                 // 1/2 with OopsAll6s.
                 let wheel_oops = if self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active) { 2.0_f64 } else { 1.0_f64 };
-                if self.rng.next_bool_prob((0.25 * wheel_oops).min(1.0)) {
+                if self.rng.next_bool_prob("wheel_of_fortune", (0.25 * wheel_oops).min(1.0)) {
                     if let Some(idx) = self.random_editionless_joker() {
                         // Probabilities: 50% Foil, 35% Holographic, 15% Polychrome
-                        let ed_roll = self.rng.next_f64();
+                        let ed_roll = self.rng.next_f64("wheel_of_fortune");
                         let edition = if ed_roll < 0.50 { Edition::Foil }
                             else if ed_roll < 0.85 { Edition::Holographic }
                             else { Edition::Polychrome };
@@ -325,7 +325,7 @@ impl GameState {
             SpectralCard::Familiar => {
                 // Destroy 1 random card in hand, add 3 random enhanced face cards to deck
                 if !self.hand.is_empty() {
-                    let idx = self.rng.range_usize(0, self.hand.len() - 1);
+                    let idx = self.rng.range_usize("familiar_create", 0, self.hand.len() - 1);
                     let card_idx = self.hand.remove(idx);
                     let dead_card = self.deck[card_idx].clone();
                     let card_id = dead_card.id;
@@ -341,9 +341,9 @@ impl GameState {
                         Enhancement::Glass, Enhancement::Stone,
                     ];
                     for _ in 0..3 {
-                        let rank = faces[self.rng.range_usize(0, 2)];
-                        let suit = suits[self.rng.range_usize(0, 3)];
-                        let enh = enhancements[self.rng.range_usize(0, 7)];
+                        let rank = faces[self.rng.range_usize("familiar_create", 0, 2)];
+                        let suit = suits[self.rng.range_usize("familiar_create", 0, 3)];
+                        let enh = enhancements[self.rng.range_usize("familiar_create", 0, 7)];
                         let id = self.next_id();
                         let mut card = CardInstance::new(id, rank, suit);
                         card.enhancement = enh;
@@ -368,7 +368,7 @@ impl GameState {
                     if hi < self.hand.len() {
                         let card_idx = self.hand[hi];
                         // Probabilities: 50% Foil, 35% Holographic, 15% Polychrome
-                        let ed_roll = self.rng.next_f64();
+                        let ed_roll = self.rng.next_f64("aura");
                         let edition = if ed_roll < 0.50 { Edition::Foil }
                             else if ed_roll < 0.85 { Edition::Holographic }
                             else { Edition::Polychrome };
@@ -390,7 +390,7 @@ impl GameState {
                 let count = self.hand.len().min(5);
                 if count > 0 {
                     let mut hand_indices: Vec<usize> = (0..self.hand.len()).collect();
-                    self.rng.shuffle(&mut hand_indices);
+                    self.rng.shuffle("immolate", &mut hand_indices);
                     // Collect ids before any removal
                     let to_remove_ids: Vec<u64> = hand_indices[..count]
                         .iter()
@@ -417,7 +417,7 @@ impl GameState {
                 // Copy a random joker, destroy the others (eternal jokers are spared)
                 // Negative edition is removed from the copy per wiki
                 if !self.jokers.is_empty() {
-                    let idx = self.rng.range_usize(0, self.jokers.len() - 1);
+                    let idx = self.rng.range_usize("ankh_choice", 0, self.jokers.len() - 1);
                     let chosen_id = self.jokers[idx].id;
                     let mut new_copy = self.jokers[idx].clone();
                     new_copy.id = self.next_id();
@@ -459,7 +459,7 @@ impl GameState {
             SpectralCard::Grim => {
                 // Destroy 1 random card in hand, add 2 random enhanced Aces to deck
                 if !self.hand.is_empty() {
-                    let idx = self.rng.range_usize(0, self.hand.len() - 1);
+                    let idx = self.rng.range_usize("grim_create", 0, self.hand.len() - 1);
                     let card_idx = self.hand.remove(idx);
                     let dead_card = self.deck[card_idx].clone();
                     let card_id = dead_card.id;
@@ -473,8 +473,8 @@ impl GameState {
                         Enhancement::Glass, Enhancement::Stone,
                     ];
                     for _ in 0..2 {
-                        let suit = suits[self.rng.range_usize(0, 3)];
-                        let enh = enhancements[self.rng.range_usize(0, 7)];
+                        let suit = suits[self.rng.range_usize("grim_create", 0, 3)];
+                        let enh = enhancements[self.rng.range_usize("grim_create", 0, 7)];
                         let id = self.next_id();
                         let mut card = CardInstance::new(id, Rank::Ace, suit);
                         card.enhancement = enh;
@@ -487,7 +487,7 @@ impl GameState {
             SpectralCard::Incantation => {
                 // Destroy 1 random card in hand, add 4 random enhanced numbered cards to deck
                 if !self.hand.is_empty() {
-                    let idx = self.rng.range_usize(0, self.hand.len() - 1);
+                    let idx = self.rng.range_usize("incantation_create", 0, self.hand.len() - 1);
                     let card_idx = self.hand.remove(idx);
                     let dead_card = self.deck[card_idx].clone();
                     let card_id = dead_card.id;
@@ -505,9 +505,9 @@ impl GameState {
                         Enhancement::Glass, Enhancement::Stone,
                     ];
                     for _ in 0..4 {
-                        let rank = number_ranks[self.rng.range_usize(0, 8)];
-                        let suit = suits[self.rng.range_usize(0, 3)];
-                        let enh = enhancements[self.rng.range_usize(0, 7)];
+                        let rank = number_ranks[self.rng.range_usize("incantation_create", 0, 8)];
+                        let suit = suits[self.rng.range_usize("incantation_create", 0, 3)];
+                        let enh = enhancements[self.rng.range_usize("incantation_create", 0, 7)];
                         let id = self.next_id();
                         let mut card = CardInstance::new(id, rank, suit);
                         card.enhancement = enh;
@@ -539,7 +539,7 @@ impl GameState {
                         JokerKind::Stuntman, JokerKind::InvisibleJoker, JokerKind::Brainstorm,
                         JokerKind::DriversLicense, JokerKind::BurntJoker,
                     ];
-                    let idx = self.rng.range_usize(0, rare_jokers.len() - 1);
+                    let idx = self.rng.range_usize("wraith", 0, rare_jokers.len() - 1);
                     let kind = rare_jokers[idx];
                     let id = self.next_id();
                     self.jokers.push(JokerInstance::new(id, kind, Edition::None));
@@ -549,7 +549,7 @@ impl GameState {
             SpectralCard::Sigil => {
                 // Convert all cards in hand to a single random suit
                 let suits = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds];
-                let suit = suits[self.rng.range_usize(0, 3)];
+                let suit = suits[self.rng.range_usize("sigil", 0, 3)];
                 for &card_idx in &self.hand {
                     self.deck[card_idx].suit = suit;
                 }
@@ -561,7 +561,7 @@ impl GameState {
                     Rank::Seven, Rank::Eight, Rank::Nine, Rank::Ten,
                     Rank::Jack, Rank::Queen, Rank::King, Rank::Ace,
                 ];
-                let rank = ranks[self.rng.range_usize(0, 12)];
+                let rank = ranks[self.rng.range_usize("ouija", 0, 12)];
                 for &card_idx in &self.hand {
                     self.deck[card_idx].rank = rank;
                 }
@@ -591,7 +591,7 @@ impl GameState {
                         JokerKind::Canio, JokerKind::Triboulet, JokerKind::Yorick,
                         JokerKind::Chicot, JokerKind::Perkeo,
                     ];
-                    let idx = self.rng.range_usize(0, legendaries.len() - 1);
+                    let idx = self.rng.range_usize("soul_", 0, legendaries.len() - 1);
                     let kind = legendaries[idx];
                     let id = self.next_id();
                     self.jokers.push(JokerInstance::new(id, kind, Edition::None));

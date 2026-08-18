@@ -493,3 +493,80 @@ fn test_pool_still_yields_jokers_with_showman_and_a_full_board() {
     }
     assert!(gs.generate_random_joker().is_some());
 }
+
+// =========================================================
+// Seed reproducibility
+// =========================================================
+
+/// Play a fixed opening from a seed and fingerprint everything the RNG touched.
+fn fingerprint(seed: &str) -> String {
+    let mut gs = GameState::new(DeckType::Red, Stake::White, Some(seed.to_string()));
+    gs.select_blind().unwrap();
+    let deck: String = gs
+        .deck
+        .iter()
+        .map(|c| format!("{:?}{:?}", c.rank, c.suit))
+        .collect();
+    let hand: String = gs
+        .hand
+        .iter()
+        .map(|&i| format!("{:?}{:?}", gs.deck[i].rank, gs.deck[i].suit))
+        .collect();
+    gs.state = GameStateKind::Shop;
+    gs.generate_shop();
+    let shop: String = gs
+        .shop_offers
+        .iter()
+        .map(|o| format!("{:?}", o.kind))
+        .collect();
+    format!("{}|{}|{}|{:?}|{:?}", deck, hand, shop, gs.boss_blind, gs.round_targets)
+}
+
+#[test]
+fn test_a_seed_reproduces_the_same_run() {
+    assert_eq!(fingerprint("REPRO"), fingerprint("REPRO"));
+}
+
+#[test]
+fn test_different_seeds_give_different_runs() {
+    assert_ne!(fingerprint("SEED_ONE"), fingerprint("SEED_TWO"));
+}
+
+/// The reason for keying the streams: draining one system's rolls must not shift another's.
+/// Here Glass breaks are rolled many times and the shop is unaffected.
+#[test]
+fn test_one_systems_rolls_do_not_disturb_another() {
+    let mut a = GameState::new(DeckType::Red, Stake::White, Some("ISOLATE".to_string()));
+    let mut b = GameState::new(DeckType::Red, Stake::White, Some("ISOLATE".to_string()));
+
+    for _ in 0..200 {
+        a.rng.next_bool_prob("glass", 0.25);
+    }
+
+    a.state = GameStateKind::Shop;
+    b.state = GameStateKind::Shop;
+    a.generate_shop();
+    b.generate_shop();
+
+    let items = |gs: &GameState| -> Vec<String> {
+        gs.shop_offers.iter().map(|o| format!("{:?}", o.kind)).collect()
+    };
+    assert_eq!(items(&a), items(&b));
+}
+
+/// Per-ante streams are independent, so the round targets at ante 1 do not depend on how many
+/// rolls ante 2 consumed.
+#[test]
+fn test_per_ante_streams_are_independent() {
+    let mut a = GameState::new(DeckType::Red, Stake::White, Some("ANTE".to_string()));
+    let mut b = GameState::new(DeckType::Red, Stake::White, Some("ANTE".to_string()));
+
+    for _ in 0..50 {
+        a.rng.next_u64(&crate::rng::keyed("idol", 7));
+    }
+    a.ante = 1;
+    b.ante = 1;
+    a.select_blind().unwrap();
+    b.select_blind().unwrap();
+    assert_eq!(a.round_targets, b.round_targets);
+}
