@@ -1,7 +1,27 @@
 use crate::card::*;
 use crate::types::*;
-use std::collections::HashMap;
-use super::{GameState, GameStateKind, BalatroError, HistoryEvent, LastConsumable, rank_up};
+use super::{GameState, BalatroError, LastConsumable, rank_up};
+
+/// The enhancements the card-creating spectrals roll from. Same set as [`Enhancement::ALL`], in
+/// the order `create_card` walks it for these three (card.lua:1770).
+const SPECTRAL_ENHANCEMENTS: [Enhancement; 8] = [
+    Enhancement::Lucky, Enhancement::Gold, Enhancement::Wild, Enhancement::Mult,
+    Enhancement::Bonus, Enhancement::Steel, Enhancement::Glass, Enhancement::Stone,
+];
+
+/// Card edits for [`GameState::change_targets`], named so the tarot table reads as a list of
+/// what each card does rather than a wall of field assignments.
+fn set_enhancement(enhancement: Enhancement) -> impl Fn(&mut CardInstance) {
+    move |card| card.enhancement = enhancement
+}
+
+fn set_suit(suit: Suit) -> impl Fn(&mut CardInstance) {
+    move |card| card.suit = suit
+}
+
+fn set_seal(seal: Seal) -> impl Fn(&mut CardInstance) {
+    move |card| card.seal = seal
+}
 
 impl GameState {
     pub fn use_consumable(&mut self, consumable_index: usize, targets: Vec<usize>) -> Result<(), BalatroError> {
@@ -16,11 +36,8 @@ impl GameState {
                 self.planet_cards_used += 1;
                 self.planet_types_used.insert(*p);
                 // Constellation gains +0.1 Xmult per Planet card used (card.lua:2727)
-                for j in self.jokers.iter_mut() {
-                    if j.kind == JokerKind::Constellation && j.active {
-                        let cur = j.get_counter_f64("x_mult");
-                        j.set_counter_f64("x_mult", cur + 0.1);
-                    }
+                for i in self.joker_indices(JokerKind::Constellation) {
+                    self.jokers[i].add_counter_f64("x_mult", 0.1);
                 }
             }
             ConsumableCard::Tarot(t) => {
@@ -50,6 +67,59 @@ impl GameState {
         Ok(())
     }
 
+    /// Apply `change` to each of the first `max` cards the player selected, skipping any hand
+    /// index that is out of range.
+    ///
+    /// Most tarots are exactly this: "enhance up to 2 selected cards", "convert up to 3 cards to
+    /// Hearts", "add a Red Seal to 1 selected card".
+    fn change_targets(&mut self, targets: &[usize], max: usize, change: impl Fn(&mut CardInstance)) {
+        for &hand_idx in targets.iter().take(max) {
+            if let Some(&card_idx) = self.hand.get(hand_idx) {
+                change(&mut self.deck[card_idx]);
+            }
+        }
+    }
+
+    /// Apply `change` to every card currently in hand — what Sigil and Ouija do.
+    fn change_whole_hand(&mut self, change: impl Fn(&mut CardInstance)) {
+        for hand_idx in 0..self.hand.len() {
+            let card_idx = self.hand[hand_idx];
+            change(&mut self.deck[card_idx]);
+        }
+    }
+
+    /// Destroy one random card in hand and replace it with `count` freshly generated ones — the
+    /// shape Familiar, Grim and Incantation share, differing only in what they create.
+    ///
+    /// A single-entry `ranks` list is used as-is rather than rolled for: Grim always makes Aces,
+    /// and rolling a one-way choice would burn a draw from the stream for nothing.
+    fn destroy_one_and_create(&mut self, key: &str, count: usize, ranks: &[Rank]) {
+        if self.hand.is_empty() {
+            return;
+        }
+        let victim = self.rng.range_usize(key, 0, self.hand.len() - 1);
+        let card_idx = self.hand.remove(victim);
+        let dead_card = self.deck[card_idx].clone();
+        self.notify_card_destroyed(&dead_card);
+        self.destroy_deck_card(dead_card.id);
+
+        for _ in 0..count {
+            let rank = if ranks.len() == 1 {
+                ranks[0]
+            } else {
+                ranks[self.rng.range_usize(key, 0, ranks.len() - 1)]
+            };
+            let suit = Suit::ALL[self.rng.range_usize(key, 0, Suit::ALL.len() - 1)];
+            let n = SPECTRAL_ENHANCEMENTS.len() - 1;
+            let enhancement = SPECTRAL_ENHANCEMENTS[self.rng.range_usize(key, 0, n)];
+            let id = self.next_id();
+            let mut card = CardInstance::new(id, rank, suit);
+            card.enhancement = enhancement;
+            self.add_card_to_draw_pile(card);
+        }
+        self.notify_playing_cards_added(count);
+    }
+
     /// A random joker with no edition — the pool The Wheel of Fortune, Ectoplasm and Hex all draw
     /// from (`eligible_strength_jokers` / `eligible_editionless_jokers`, card.lua:4209, :4218).
     fn random_editionless_joker(&mut self) -> Option<usize> {
@@ -76,163 +146,63 @@ impl GameState {
             }
         }
         self.last_consumable_used = Some(LastConsumable::Planet(planet));
-        self.history.push(HistoryEvent {
-            ante: self.ante,
-            round: self.round,
-            event_type: "planet_used".to_string(),
-            data: serde_json::json!({
+        self.log_event(
+            "planet_used",
+            serde_json::json!({
                 "planet": format!("{:?}", planet),
                 "hand_type": hand_type.display_name(),
             }),
-        });
+        );
     }
 
     fn apply_tarot(&mut self, tarot: TarotCard, targets: &[usize]) -> Result<(), BalatroError> {
-        // Get the target cards from hand (targets are hand indices)
+        // `targets` are hand indices, and every tarot below reads at most the first few.
         match tarot {
+            // ── Enhance the selected cards ────────────────────────────────
+            TarotCard::TheMagician => self.change_targets(targets, 2, set_enhancement(Enhancement::Lucky)),
+            TarotCard::TheEmpress => self.change_targets(targets, 2, set_enhancement(Enhancement::Mult)),
+            TarotCard::TheHierophant => self.change_targets(targets, 2, set_enhancement(Enhancement::Bonus)),
+            TarotCard::TheLovers => self.change_targets(targets, 1, set_enhancement(Enhancement::Wild)),
+            TarotCard::TheChariot => self.change_targets(targets, 1, set_enhancement(Enhancement::Steel)),
+            TarotCard::Justice => self.change_targets(targets, 1, set_enhancement(Enhancement::Glass)),
+            TarotCard::TheDevil => self.change_targets(targets, 1, set_enhancement(Enhancement::Gold)),
+            TarotCard::TheTower => self.change_targets(targets, 1, set_enhancement(Enhancement::Stone)),
+
+            // ── Convert up to 3 cards to one suit ─────────────────────────
+            TarotCard::TheStar => self.change_targets(targets, 3, set_suit(Suit::Diamonds)),
+            TarotCard::TheMoon => self.change_targets(targets, 3, set_suit(Suit::Clubs)),
+            TarotCard::TheSun => self.change_targets(targets, 3, set_suit(Suit::Hearts)),
+            TarotCard::TheWorld => self.change_targets(targets, 3, set_suit(Suit::Spades)),
+
+            // ── Everything else ───────────────────────────────────────────
+            TarotCard::Strength => {
+                // Increase rank of up to 2 cards by 1
+                self.change_targets(targets, 2, |c| c.rank = rank_up(c.rank));
+            }
             TarotCard::TheHangedMan => {
-                // Destroy up to 2 selected cards
-                let mut sorted: Vec<usize> = targets.iter().copied().take(2).collect();
-                sorted.sort_by(|a, b| b.cmp(a));
-                for &hi in &sorted {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand.remove(hi);
-                        let dead_card = self.deck[card_idx].clone();
-                        let dead_id = dead_card.id;
-                        self.notify_card_destroyed(&dead_card);
-                        self.destroy_deck_card(dead_id);
+                // Destroy up to 2 selected cards, highest hand index first so the removals do
+                // not invalidate each other.
+                let mut doomed: Vec<usize> = targets.iter().copied().take(2).collect();
+                doomed.sort_unstable_by(|a, b| b.cmp(a));
+                for hand_idx in doomed {
+                    if hand_idx >= self.hand.len() {
+                        continue;
                     }
+                    let card_idx = self.hand.remove(hand_idx);
+                    let dead_card = self.deck[card_idx].clone();
+                    self.notify_card_destroyed(&dead_card);
+                    self.destroy_deck_card(dead_card.id);
                 }
             }
             TarotCard::TheHermit => {
                 // Double money (up to $20 gain)
-                let gain = self.money.min(20);
-                self.money += gain;
+                self.money += self.money.min(20);
             }
             TarotCard::Temperance => {
                 // Give money equal to sum of joker sell values (up to $50)
                 let discount = self.discount_percent();
                 let total: u32 = self.jokers.iter().map(|j| j.sell_value(discount)).sum();
-                let gain = total.min(50);
-                self.money += gain as i32;
-            }
-            TarotCard::TheMagician => {
-                // Enhance up to 2 cards as Lucky
-                for &hi in targets.iter().take(2) {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        self.deck[card_idx].enhancement = Enhancement::Lucky;
-                    }
-                }
-            }
-            TarotCard::TheEmpress => {
-                // Enhance up to 2 cards as Mult
-                for &hi in targets.iter().take(2) {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        self.deck[card_idx].enhancement = Enhancement::Mult;
-                    }
-                }
-            }
-            TarotCard::TheHierophant => {
-                // Enhance up to 2 cards as Bonus
-                for &hi in targets.iter().take(2) {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        self.deck[card_idx].enhancement = Enhancement::Bonus;
-                    }
-                }
-            }
-            TarotCard::TheLovers => {
-                // Enhance 1 card as Wild
-                if let Some(&hi) = targets.first() {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        self.deck[card_idx].enhancement = Enhancement::Wild;
-                    }
-                }
-            }
-            TarotCard::TheChariot => {
-                // Enhance 1 card as Steel
-                if let Some(&hi) = targets.first() {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        self.deck[card_idx].enhancement = Enhancement::Steel;
-                    }
-                }
-            }
-            TarotCard::Justice => {
-                // Enhance 1 card as Glass
-                if let Some(&hi) = targets.first() {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        self.deck[card_idx].enhancement = Enhancement::Glass;
-                    }
-                }
-            }
-            TarotCard::TheDevil => {
-                // Enhance 1 card as Gold
-                if let Some(&hi) = targets.first() {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        self.deck[card_idx].enhancement = Enhancement::Gold;
-                    }
-                }
-            }
-            TarotCard::TheTower => {
-                // Enhance 1 card as Stone
-                if let Some(&hi) = targets.first() {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        self.deck[card_idx].enhancement = Enhancement::Stone;
-                    }
-                }
-            }
-            TarotCard::TheStar => {
-                // Convert up to 3 cards to Diamonds
-                for &hi in targets.iter().take(3) {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        self.deck[card_idx].suit = Suit::Diamonds;
-                    }
-                }
-            }
-            TarotCard::TheMoon => {
-                // Convert up to 3 cards to Clubs
-                for &hi in targets.iter().take(3) {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        self.deck[card_idx].suit = Suit::Clubs;
-                    }
-                }
-            }
-            TarotCard::TheSun => {
-                // Convert up to 3 cards to Hearts
-                for &hi in targets.iter().take(3) {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        self.deck[card_idx].suit = Suit::Hearts;
-                    }
-                }
-            }
-            TarotCard::TheWorld => {
-                // Convert up to 3 cards to Spades
-                for &hi in targets.iter().take(3) {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        self.deck[card_idx].suit = Suit::Spades;
-                    }
-                }
-            }
-            TarotCard::Strength => {
-                // Increase rank of up to 2 cards by 1
-                for &hi in targets.iter().take(2) {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        let new_rank = rank_up(self.deck[card_idx].rank);
-                        self.deck[card_idx].rank = new_rank;
-                    }
-                }
+                self.money += total.min(50) as i32;
             }
             TarotCard::Death => {
                 // Select 2 cards: the LEFT card becomes a full copy of the RIGHT card
@@ -253,16 +223,10 @@ impl GameState {
                 }
             }
             TarotCard::TheWheelOfFortune => {
-                // 1/4 to add a random edition to a joker that has none (card.lua:4209);
-                // 1/2 with OopsAll6s.
-                let wheel_oops = if self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active) { 2.0_f64 } else { 1.0_f64 };
-                if self.rng.next_bool_prob("wheel_of_fortune", (0.25 * wheel_oops).min(1.0)) {
+                // 1/4 to add a random edition to a joker that has none (card.lua:4209).
+                if self.roll_chance("wheel_of_fortune", 0.25) {
                     if let Some(idx) = self.random_editionless_joker() {
-                        // Probabilities: 50% Foil, 35% Holographic, 15% Polychrome
-                        let ed_roll = self.rng.next_f64("wheel_of_fortune");
-                        let edition = if ed_roll < 0.50 { Edition::Foil }
-                            else if ed_roll < 0.85 { Edition::Holographic }
-                            else { Edition::Polychrome };
+                        let edition = self.roll_positive_edition("wheel_of_fortune");
                         self.jokers[idx].edition = edition;
                     }
                 }
@@ -276,27 +240,22 @@ impl GameState {
                 }
             }
             TarotCard::TheFool => {
-                // Creates the most recently used Tarot or Planet card this run
-                // The Fool itself does not count as the "last used" consumable
-                match &self.last_consumable_used.clone() {
-                    Some(LastConsumable::Tarot(t)) => {
-                        if self.has_consumable_room() {
-                            self.add_consumable(ConsumableCard::Tarot(*t));
-                        }
+                // Creates the most recently used Tarot or Planet card this run. The Fool itself
+                // never counts as the "last used" consumable, hence the early return.
+                if let Some(last) = self.last_consumable_used.clone() {
+                    if self.has_room_for_consumable() {
+                        self.add_consumable(match last {
+                            LastConsumable::Tarot(t) => ConsumableCard::Tarot(t),
+                            LastConsumable::Planet(p) => ConsumableCard::Planet(p),
+                        });
                     }
-                    Some(LastConsumable::Planet(p)) => {
-                        if self.has_consumable_room() {
-                            self.add_consumable(ConsumableCard::Planet(*p));
-                        }
-                    }
-                    None => {}
                 }
                 return Ok(());
             }
             TarotCard::TheHighPriestess => {
                 // Creates up to 2 random Planet cards (must have room)
                 for _ in 0..2 {
-                    if self.has_consumable_room() {
+                    if self.has_room_for_consumable() {
                         let planet = self.random_planet();
                         self.add_consumable(ConsumableCard::Planet(planet));
                     }
@@ -305,10 +264,7 @@ impl GameState {
             TarotCard::TheEmperor => {
                 // Creates up to 2 random Tarot cards (must have room)
                 for _ in 0..2 {
-                    if self.has_consumable_room() {
-                        let tarot = self.random_tarot();
-                        self.add_consumable(ConsumableCard::Tarot(tarot));
-                    }
+                    self.create_tarot();
                 }
             }
         }
@@ -318,37 +274,9 @@ impl GameState {
 
     fn apply_spectral(&mut self, spectral: SpectralCard, targets: &[usize]) -> Result<(), BalatroError> {
         match spectral {
+            // Destroy 1 random card in hand, and replace it with several enhanced ones.
             SpectralCard::Familiar => {
-                // Destroy 1 random card in hand, add 3 random enhanced face cards to deck
-                if !self.hand.is_empty() {
-                    let idx = self.rng.range_usize("familiar_create", 0, self.hand.len() - 1);
-                    let card_idx = self.hand.remove(idx);
-                    let dead_card = self.deck[card_idx].clone();
-                    let card_id = dead_card.id;
-                    self.notify_card_destroyed(&dead_card);
-                    self.destroy_deck_card(card_id);
-                    // Add 3 enhanced face cards
-                    let faces = [Rank::Jack, Rank::Queen, Rank::King];
-                    let suits = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds];
-                    let enhancements = [
-                        Enhancement::Lucky, Enhancement::Gold,
-                        Enhancement::Wild, Enhancement::Mult,
-                        Enhancement::Bonus, Enhancement::Steel,
-                        Enhancement::Glass, Enhancement::Stone,
-                    ];
-                    for _ in 0..3 {
-                        let rank = faces[self.rng.range_usize("familiar_create", 0, 2)];
-                        let suit = suits[self.rng.range_usize("familiar_create", 0, 3)];
-                        let enh = enhancements[self.rng.range_usize("familiar_create", 0, 7)];
-                        let id = self.next_id();
-                        let mut card = CardInstance::new(id, rank, suit);
-                        card.enhancement = enh;
-                        let di = self.deck.len();
-                        self.deck.push(card);
-                        self.draw_pile.push(di);
-                    }
-                    self.notify_playing_cards_added(3);
-                }
+                self.destroy_one_and_create("familiar_create", 3, &Rank::FACES)
             }
             SpectralCard::Ectoplasm => {
                 // Negative on a random *editionless* joker (card.lua:4218), and a hand-size cost
@@ -360,17 +288,11 @@ impl GameState {
                 self.ectoplasm_uses += 1;
             }
             SpectralCard::Aura => {
-                // Add Foil/Holo/Poly to 1 selected card
-                if let Some(&hi) = targets.first() {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        // Probabilities: 50% Foil, 35% Holographic, 15% Polychrome
-                        let ed_roll = self.rng.next_f64("aura");
-                        let edition = if ed_roll < 0.50 { Edition::Foil }
-                            else if ed_roll < 0.85 { Edition::Holographic }
-                            else { Edition::Polychrome };
-                        self.deck[card_idx].edition = edition;
-                    }
+                // Add Foil/Holo/Poly to 1 selected card. Rolled only once there is a card to
+                // put it on, so a mis-aimed Aura leaves the stream where it was.
+                if targets.first().is_some_and(|&hi| hi < self.hand.len()) {
+                    let edition = self.roll_positive_edition("aura");
+                    self.change_targets(targets, 1, |c| c.edition = edition);
                 }
             }
             SpectralCard::Hex => {
@@ -426,104 +348,15 @@ impl GameState {
                     self.jokers.push(new_copy);
                 }
             }
-            SpectralCard::DejaVu => {
-                // Add Red Seal to 1 selected card
-                if let Some(&hi) = targets.first() {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        self.deck[card_idx].seal = Seal::Red;
-                    }
-                }
-            }
-            SpectralCard::Trance => {
-                // Add Blue Seal to 1 selected card
-                if let Some(&hi) = targets.first() {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        self.deck[card_idx].seal = Seal::Blue;
-                    }
-                }
-            }
-            SpectralCard::Medium => {
-                // Add Purple Seal to 1 selected card
-                if let Some(&hi) = targets.first() {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        self.deck[card_idx].seal = Seal::Purple;
-                    }
-                }
-            }
-            SpectralCard::Grim => {
-                // Destroy 1 random card in hand, add 2 random enhanced Aces to deck
-                if !self.hand.is_empty() {
-                    let idx = self.rng.range_usize("grim_create", 0, self.hand.len() - 1);
-                    let card_idx = self.hand.remove(idx);
-                    let dead_card = self.deck[card_idx].clone();
-                    let card_id = dead_card.id;
-                    self.notify_card_destroyed(&dead_card);
-                    self.destroy_deck_card(card_id);
-                    let suits = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds];
-                    let enhancements = [
-                        Enhancement::Lucky, Enhancement::Gold,
-                        Enhancement::Wild, Enhancement::Mult,
-                        Enhancement::Bonus, Enhancement::Steel,
-                        Enhancement::Glass, Enhancement::Stone,
-                    ];
-                    for _ in 0..2 {
-                        let suit = suits[self.rng.range_usize("grim_create", 0, 3)];
-                        let enh = enhancements[self.rng.range_usize("grim_create", 0, 7)];
-                        let id = self.next_id();
-                        let mut card = CardInstance::new(id, Rank::Ace, suit);
-                        card.enhancement = enh;
-                        let di = self.deck.len();
-                        self.deck.push(card);
-                        self.draw_pile.push(di);
-                    }
-                    self.notify_playing_cards_added(2);
-                }
-            }
+            // Each of these stamps one seal onto a single selected card.
+            SpectralCard::DejaVu => self.change_targets(targets, 1, set_seal(Seal::Red)),
+            SpectralCard::Trance => self.change_targets(targets, 1, set_seal(Seal::Blue)),
+            SpectralCard::Medium => self.change_targets(targets, 1, set_seal(Seal::Purple)),
+            SpectralCard::Talisman => self.change_targets(targets, 1, set_seal(Seal::Gold)),
+
+            SpectralCard::Grim => self.destroy_one_and_create("grim_create", 2, &[Rank::Ace]),
             SpectralCard::Incantation => {
-                // Destroy 1 random card in hand, add 4 random enhanced numbered cards to deck
-                if !self.hand.is_empty() {
-                    let idx = self.rng.range_usize("incantation_create", 0, self.hand.len() - 1);
-                    let card_idx = self.hand.remove(idx);
-                    let dead_card = self.deck[card_idx].clone();
-                    let card_id = dead_card.id;
-                    self.notify_card_destroyed(&dead_card);
-                    self.destroy_deck_card(card_id);
-                    let number_ranks = [
-                        Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six,
-                        Rank::Seven, Rank::Eight, Rank::Nine, Rank::Ten,
-                    ];
-                    let suits = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds];
-                    let enhancements = [
-                        Enhancement::Lucky, Enhancement::Gold,
-                        Enhancement::Wild, Enhancement::Mult,
-                        Enhancement::Bonus, Enhancement::Steel,
-                        Enhancement::Glass, Enhancement::Stone,
-                    ];
-                    for _ in 0..4 {
-                        let rank = number_ranks[self.rng.range_usize("incantation_create", 0, 8)];
-                        let suit = suits[self.rng.range_usize("incantation_create", 0, 3)];
-                        let enh = enhancements[self.rng.range_usize("incantation_create", 0, 7)];
-                        let id = self.next_id();
-                        let mut card = CardInstance::new(id, rank, suit);
-                        card.enhancement = enh;
-                        let di = self.deck.len();
-                        self.deck.push(card);
-                        self.draw_pile.push(di);
-                    }
-                    self.notify_playing_cards_added(4);
-                }
-            }
-            SpectralCard::Talisman => {
-                // Add a Gold Seal to 1 selected card
-                if let Some(&hi) = targets.first() {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        self.deck[card_idx].seal = Seal::Gold;
-                    }
-                }
+                self.destroy_one_and_create("incantation_create", 4, &Rank::NUMBERS)
             }
             SpectralCard::Wraith => {
                 // Creates a random Rare Joker; sets money to $0. Drawn from the live Rare pool,
@@ -544,41 +377,28 @@ impl GameState {
             }
             SpectralCard::Sigil => {
                 // Convert all cards in hand to a single random suit
-                let suits = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds];
-                let suit = suits[self.rng.range_usize("sigil", 0, 3)];
-                for &card_idx in &self.hand {
-                    self.deck[card_idx].suit = suit;
-                }
+                let suit = Suit::ALL[self.rng.range_usize("sigil", 0, Suit::ALL.len() - 1)];
+                self.change_whole_hand(|c| c.suit = suit);
             }
             SpectralCard::Ouija => {
                 // Convert all cards in hand to a single random rank; -1 hand size
-                let ranks = [
-                    Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six,
-                    Rank::Seven, Rank::Eight, Rank::Nine, Rank::Ten,
-                    Rank::Jack, Rank::Queen, Rank::King, Rank::Ace,
-                ];
-                let rank = ranks[self.rng.range_usize("ouija", 0, 12)];
-                for &card_idx in &self.hand {
-                    self.deck[card_idx].rank = rank;
-                }
+                let rank = Rank::ALL[self.rng.range_usize("ouija", 0, Rank::ALL.len() - 1)];
+                self.change_whole_hand(|c| c.rank = rank);
                 self.hand_size = self.hand_size.saturating_sub(1);
             }
             SpectralCard::Cryptid => {
                 // Create 2 copies of 1 selected card in hand
-                if let Some(&hi) = targets.first() {
-                    if hi < self.hand.len() {
-                        let card_idx = self.hand[hi];
-                        let template = self.deck[card_idx].clone();
-                        for _ in 0..2 {
-                            let id = self.next_id();
-                            let mut copy = template.clone();
-                            copy.id = id;
-                            let di = self.deck.len();
-                            self.deck.push(copy);
-                            self.draw_pile.push(di);
-                        }
-                        self.notify_playing_cards_added(2);
+                let template = targets
+                    .first()
+                    .and_then(|&hi| self.hand.get(hi))
+                    .map(|&card_idx| self.deck[card_idx].clone());
+                if let Some(template) = template {
+                    for _ in 0..2 {
+                        let mut copy = template.clone();
+                        copy.id = self.next_id();
+                        self.add_card_to_draw_pile(copy);
                     }
+                    self.notify_playing_cards_added(2);
                 }
             }
             SpectralCard::TheSoul => {

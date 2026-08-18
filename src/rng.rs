@@ -96,14 +96,6 @@ impl Rng {
     pub fn shuffle<T>(&mut self, key: &str, slice: &mut [T]) {
         slice.shuffle(self.stream(key));
     }
-
-    pub fn choose<'a, T>(&mut self, key: &str, slice: &'a [T]) -> Option<&'a T> {
-        if slice.is_empty() {
-            return None;
-        }
-        let idx = self.range_usize(key, 0, slice.len() - 1);
-        slice.get(idx)
-    }
 }
 
 #[cfg(test)]

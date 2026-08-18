@@ -87,6 +87,43 @@ fn json_to_py(py: Python<'_>, val: &Value) -> PyResult<PyObject> {
     }
 }
 
+// ============================================================
+// Shared JSON shapes
+//
+// These are the pieces that show up in more than one payload, so that a `run_info` tag and a
+// `full_state` tag cannot drift into two different shapes.
+// ============================================================
+
+fn tag_json(tag: &TagKind) -> Value {
+    serde_json::json!({
+        "kind": format!("{:?}", tag),
+        "name": tag.display_name(),
+        "trigger": format!("{:?}", tag.trigger()),
+    })
+}
+
+fn tags_json(tags: &[TagKind]) -> Value {
+    Value::Array(tags.iter().map(tag_json).collect())
+}
+
+fn playing_card_json(c: &card::CardInstance) -> Value {
+    serde_json::json!({
+        "type": "PlayingCard",
+        "rank": format!("{:?}", c.rank),
+        "suit": format!("{:?}", c.suit),
+        "enhancement": format!("{:?}", c.enhancement),
+        "edition": format!("{:?}", c.edition),
+        "seal": format!("{:?}", c.seal),
+    })
+}
+
+fn consumable_json(c: &card::ConsumableCard) -> Value {
+    serde_json::json!({
+        "type": c.card_type(),
+        "name": c.display_name(),
+    })
+}
+
 fn gamestate_to_json(gs: &GameState) -> Value {
     serde_json::json!({
         "state": format!("{:?}", gs.state),
@@ -108,11 +145,7 @@ fn gamestate_to_json(gs: &GameState) -> Value {
         "current_blind": format!("{:?}", gs.current_blind),
         "boss_blind": gs.boss_blind.map(|b| format!("{:?}", b)),
         "vouchers": gs.vouchers.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>(),
-        "tags": gs.tags.iter().map(|t| serde_json::json!({
-            "kind": format!("{:?}", t),
-            "name": t.display_name(),
-            "trigger": format!("{:?}", t.trigger()),
-        })).collect::<Vec<_>>(),
+        "tags": tags_json(&gs.tags),
         "pending_free_pack": gs.pending_free_pack.map(|p| format!("{:?}", p)),
     })
 }
@@ -127,35 +160,20 @@ fn round_info_json(gs: &GameState) -> Value {
             // The Fish, The Wheel, The House and The Mark deal cards face down. Their whole
             // effect is hidden information, so a face-down card reports no identity — it can
             // still be selected and played by hand_index.
-            if c.face_down {
-                serde_json::json!({
-                    "hand_index": hand_idx,
-                    "id": c.id,
-                    "face_down": true,
-                    "rank": Value::Null,
-                    "suit": Value::Null,
-                    "enhancement": Value::Null,
-                    "edition": Value::Null,
-                    "seal": Value::Null,
-                    "debuffed": c.debuffed,
-                    "extra_chips": Value::Null,
-                    "selected": gs.selected_indices.contains(&hand_idx),
-                })
-            } else {
-                serde_json::json!({
-                    "hand_index": hand_idx,
-                    "id": c.id,
-                    "face_down": false,
-                    "rank": format!("{:?}", c.rank),
-                    "suit": format!("{:?}", c.suit),
-                    "enhancement": format!("{:?}", c.enhancement),
-                    "edition": format!("{:?}", c.edition),
-                    "seal": format!("{:?}", c.seal),
-                    "debuffed": c.debuffed,
-                    "extra_chips": c.extra_chips,
-                    "selected": gs.selected_indices.contains(&hand_idx),
-                })
-            }
+            let hidden = |v: Value| if c.face_down { Value::Null } else { v };
+            serde_json::json!({
+                "hand_index": hand_idx,
+                "id": c.id,
+                "face_down": c.face_down,
+                "rank": hidden(format!("{:?}", c.rank).into()),
+                "suit": hidden(format!("{:?}", c.suit).into()),
+                "enhancement": hidden(format!("{:?}", c.enhancement).into()),
+                "edition": hidden(format!("{:?}", c.edition).into()),
+                "seal": hidden(format!("{:?}", c.seal).into()),
+                "debuffed": c.debuffed,
+                "extra_chips": hidden(c.extra_chips.into()),
+                "selected": gs.selected_indices.contains(&hand_idx),
+            })
         })
         .collect();
 
@@ -192,6 +210,7 @@ fn round_info_json(gs: &GameState) -> Value {
             })
         })
         .collect();
+
 
     let hand_levels: Vec<Value> = gs
         .hand_levels
@@ -240,18 +259,8 @@ fn shop_info_json(gs: &GameState) -> Value {
                     "perishable": j.perishable,
                     "rental": j.rental,
                 }),
-                card::ShopItem::Consumable(c) => serde_json::json!({
-                    "type": c.card_type(),
-                    "name": c.display_name(),
-                }),
-                card::ShopItem::PlayingCard(c) => serde_json::json!({
-                    "type": "PlayingCard",
-                    "rank": format!("{:?}", c.rank),
-                    "suit": format!("{:?}", c.suit),
-                    "enhancement": format!("{:?}", c.enhancement),
-                    "edition": format!("{:?}", c.edition),
-                    "seal": format!("{:?}", c.seal),
-                }),
+                card::ShopItem::Consumable(c) => consumable_json(c),
+                card::ShopItem::PlayingCard(c) => playing_card_json(c),
                 card::ShopItem::Pack(p) => serde_json::json!({
                     "type": "Pack",
                     "kind": format!("{:?}", p),
@@ -289,24 +298,14 @@ fn pack_info_json(gs: &GameState) -> Value {
                 .enumerate()
                 .map(|(i, pc)| {
                     let card_json = match pc {
-                        card::PackCard::PlayingCard(c) => serde_json::json!({
-                            "type": "PlayingCard",
-                            "rank": format!("{:?}", c.rank),
-                            "suit": format!("{:?}", c.suit),
-                            "enhancement": format!("{:?}", c.enhancement),
-                            "edition": format!("{:?}", c.edition),
-                            "seal": format!("{:?}", c.seal),
-                        }),
+                        card::PackCard::PlayingCard(c) => playing_card_json(c),
+                        card::PackCard::Consumable(c) => consumable_json(c),
                         card::PackCard::Joker(j) => serde_json::json!({
                             "type": "Joker",
                             "kind": format!("{:?}", j.kind),
                             "edition": format!("{:?}", j.edition),
                             "eternal": j.eternal,
                             "perishable": j.perishable,
-                        }),
-                        card::PackCard::Consumable(c) => serde_json::json!({
-                            "type": c.card_type(),
-                            "name": c.display_name(),
                         }),
                     };
                     serde_json::json!({ "index": i, "card": card_json })
@@ -333,19 +332,11 @@ fn run_info_json(gs: &GameState) -> Value {
         "state": format!("{:?}", gs.state),
         "jokers": gs.jokers.iter().map(|j| format!("{:?}", j.kind)).collect::<Vec<_>>(),
         "vouchers": gs.vouchers.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>(),
-        "tags": gs.tags.iter().map(|t| serde_json::json!({
-            "kind": format!("{:?}", t),
-            "name": t.display_name(),
-            "trigger": format!("{:?}", t.trigger()),
-        })).collect::<Vec<_>>(),
+        "tags": tags_json(&gs.tags),
         "pending_free_pack": gs.pending_free_pack.map(|p| format!("{:?}", p)),
         // The tag you would get for skipping the blind currently up. Balatro shows this before
         // you commit, so it is observable state rather than a surprise roll.
-        "tag_on_offer": gs.tag_on_offer().map(|t| serde_json::json!({
-            "kind": format!("{:?}", t),
-            "name": t.display_name(),
-            "trigger": format!("{:?}", t.trigger()),
-        })),
+        "tag_on_offer": gs.tag_on_offer().as_ref().map(tag_json),
         "blind_tags": {
             "small": gs.blind_tags[0].display_name(),
             "big": gs.blind_tags[1].display_name(),
@@ -602,15 +593,13 @@ impl BalatroEngine {
     }
 
     fn deselect_all(&mut self) -> PyResult<()> {
-        self.gs.deselect_all();
-        Ok(())
+        self.gs.deselect_all().map_err(balatro_err_to_py)
     }
 
     fn select_cards_by_rank(&mut self, rank_u8: u8) -> PyResult<()> {
         let rank = Rank::from_u8(rank_u8)
             .ok_or_else(|| PyValueError::new_err(format!("Invalid rank: {rank_u8}")))?;
-        self.gs.select_cards_by_rank(rank);
-        Ok(())
+        self.gs.select_cards_by_rank(rank).map_err(balatro_err_to_py)
     }
 
     fn play_hand(&mut self, py: Python<'_>) -> PyResult<PyObject> {
@@ -712,33 +701,21 @@ impl BalatroEngine {
 fn _engine(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<BalatroEngine>()?;
 
-    // Expose numeric constants for enum mapping
-    // DeckType
-    m.add("DECK_RED", 0u8)?;
-    m.add("DECK_BLUE", 1u8)?;
-    m.add("DECK_YELLOW", 2u8)?;
-    m.add("DECK_GREEN", 3u8)?;
-    m.add("DECK_BLACK", 4u8)?;
-    m.add("DECK_MAGIC", 5u8)?;
-    m.add("DECK_NEBULA", 6u8)?;
-    m.add("DECK_GHOST", 7u8)?;
-    m.add("DECK_ABANDONED", 8u8)?;
-    m.add("DECK_CHECKERED", 9u8)?;
-    m.add("DECK_ZODIAC", 10u8)?;
-    m.add("DECK_PAINTED", 11u8)?;
-    m.add("DECK_ANAGLYPH", 12u8)?;
-    m.add("DECK_PLASMA", 13u8)?;
-    m.add("DECK_ERRATIC", 14u8)?;
-
-    // Stake
-    m.add("STAKE_WHITE", 0u8)?;
-    m.add("STAKE_RED", 1u8)?;
-    m.add("STAKE_GREEN", 2u8)?;
-    m.add("STAKE_BLACK", 3u8)?;
-    m.add("STAKE_BLUE", 4u8)?;
-    m.add("STAKE_PURPLE", 5u8)?;
-    m.add("STAKE_ORANGE", 6u8)?;
-    m.add("STAKE_GOLD", 7u8)?;
+    // The numeric constants Python passes back to `BalatroEngine::new`. Both are derived from
+    // the same tables `DeckType::from_u8` / `Stake::from_u8` read, so a new deck or stake gets
+    // its constant automatically and the numbering cannot drift out of sync.
+    for (value, deck) in DeckType::ALL.iter().enumerate() {
+        m.add(
+            pyo3::types::PyString::new_bound(m.py(), &format!("DECK_{deck:?}").to_uppercase()),
+            value as u8,
+        )?;
+    }
+    for (value, stake) in Stake::ALL.iter().enumerate() {
+        m.add(
+            pyo3::types::PyString::new_bound(m.py(), &format!("STAKE_{stake:?}").to_uppercase()),
+            value as u8,
+        )?;
+    }
 
     Ok(())
 }

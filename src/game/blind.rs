@@ -1,8 +1,7 @@
 use crate::card::*;
 use crate::rng::keyed;
 use crate::types::*;
-use std::collections::HashMap;
-use super::{GameState, GameStateKind, BlindKind, BalatroError, HistoryEvent};
+use super::{GameState, GameStateKind, BlindKind, BalatroError};
 
 impl GameState {
     /// Pick the Boss blind for the current ante (`common_events.lua:2338`).
@@ -78,14 +77,8 @@ impl GameState {
         self.gain_tag(tag);
         for j in self.jokers.iter_mut() {
             match j.kind {
-                JokerKind::Throwback => {
-                    let skips = j.get_counter_i64("skips");
-                    j.set_counter_i64("skips", skips + 1);
-                }
-                JokerKind::RedCard => {
-                    let mult = j.get_counter_i64("mult");
-                    j.set_counter_i64("mult", mult + 3);
-                }
+                JokerKind::Throwback => j.add_counter_i64("skips", 1),
+                JokerKind::RedCard => j.add_counter_i64("mult", 3),
                 _ => {}
             }
         }
@@ -162,26 +155,30 @@ impl GameState {
                     level.level += 3;
                 }
             }
-            TagKind::TopUp => {
-                // Up to 2 Common jokers, slots permitting.
-                for _ in 0..2 {
-                    if self.jokers.len() >= self.effective_joker_slots() {
-                        break;
-                    }
-                    let pool: Vec<JokerKind> = JokerKind::ALL
-                        .iter()
-                        .copied()
-                        .filter(|k| k.rarity() == 1 && self.joker_in_pool(*k))
-                        .collect();
-                    if pool.is_empty() {
-                        break;
-                    }
-                    let kind = pool[self.rng.range_usize("top", 0, pool.len() - 1)];
-                    let id = self.next_id();
-                    self.jokers.push(JokerInstance::new(id, kind, Edition::None));
-                }
-            }
+            TagKind::TopUp => self.grant_common_jokers("top", 2),
             _ => {}
+        }
+    }
+
+    /// Hand the player up to `count` random Common jokers, one at a time so each is visible to
+    /// the pool filter and cannot be handed out twice. Stops early if the joker slots fill up or
+    /// the Common pool runs dry. Riff-raff and the Top-up Tag both work exactly this way.
+    pub(crate) fn grant_common_jokers(&mut self, key: &str, count: usize) {
+        for _ in 0..count {
+            if self.jokers.len() >= self.effective_joker_slots() {
+                break;
+            }
+            let pool: Vec<JokerKind> = JokerKind::ALL
+                .iter()
+                .copied()
+                .filter(|k| k.rarity() == 1 && self.joker_in_pool(*k))
+                .collect();
+            if pool.is_empty() {
+                break;
+            }
+            let kind = pool[self.rng.range_usize(key, 0, pool.len() - 1)];
+            let id = self.next_id();
+            self.jokers.push(JokerInstance::new(id, kind, Edition::None));
         }
     }
 
@@ -247,11 +244,7 @@ impl GameState {
         // Chaos the Clown's free rerolls are *set*, not accumulated, and the reroll price starts
         // over (state_events.lua:312). Both belong to `G.GAME.current_round`, so they are pinned
         // here and then carried into the shop that follows this round.
-        self.free_rerolls = self
-            .jokers
-            .iter()
-            .filter(|j| j.kind == JokerKind::ChaosTheClown && j.active)
-            .count() as u32;
+        self.free_rerolls = self.count_joker(JokerKind::ChaosTheClown) as u32;
         self.reroll_cost_increase = 0;
         self.recalculate_reroll_cost(true);
 
@@ -275,12 +268,8 @@ impl GameState {
         self.apply_boss_blind_debuffs();
 
         // AmberAcorn: shuffle joker order at the start of the blind
-        if let Some(BossBlind::AmberAcorn) = self.boss_blind {
-            if matches!(self.current_blind, BlindKind::Boss) {
-                if !self.boss_blind_disabled() {
-                    self.rng.shuffle("amber_acorn", &mut self.jokers);
-                }
-            }
+        if self.boss_effect_active(BossBlind::AmberAcorn) {
+            self.rng.shuffle("amber_acorn", &mut self.jokers);
         }
 
         // Set score goal
@@ -325,7 +314,7 @@ impl GameState {
         }
 
         // Ancient Joker never repeats the previous round's suit.
-        let others: Vec<Suit> = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds]
+        let others: Vec<Suit> = Suit::ALL
             .into_iter()
             .filter(|s| *s != self.round_targets.ancient_suit)
             .collect();
@@ -363,7 +352,7 @@ impl GameState {
     pub(crate) fn effective_max_discards(&self) -> u32 {
         let mut discards = self.max_discards;
         // Blue stake and above: -1 discard per round
-        if self.stake as u8 >= Stake::Blue as u8 {
+        if self.stake.at_least(Stake::Blue) {
             discards = discards.saturating_sub(1);
         }
         // TheWater: start with 0 discards
@@ -387,12 +376,8 @@ impl GameState {
     pub fn effective_hand_size(&self) -> u32 {
         let mut size = self.hand_size + self.juggle_hand_size;
         // TheManacle: -1 hand size during Boss blind
-        if let Some(BossBlind::TheManacle) = self.boss_blind {
-            if matches!(self.current_blind, BlindKind::Boss) {
-                if !self.boss_blind_disabled() {
-                    size = size.saturating_sub(1);
-                }
-            }
+        if self.boss_effect_active(BossBlind::TheManacle) {
+            size = size.saturating_sub(1);
         }
         for j in &self.jokers {
             if !j.active {
@@ -428,81 +413,66 @@ impl GameState {
         }
 
         // Blinds that draw cards face down (`Blind:stay_flipped`, blind.lua:604).
-        if matches!(self.current_blind, BlindKind::Boss) {
-            if !self.boss_blind_disabled() {
-                let newly_drawn: Vec<usize> = (start_hand_len..self.hand.len()).collect();
-                match self.boss_blind {
-                    Some(BossBlind::TheFish) => {
-                        // Only the cards drawn right after a hand was *played* are hidden — a
-                        // discard does not set `prepped` (blind.lua:487).
-                        if self.fish_prepped {
-                            for hand_idx in newly_drawn {
-                                let card_idx = self.hand[hand_idx];
-                                self.deck[card_idx].face_down = true;
-                            }
-                        }
-                    }
-                    Some(BossBlind::TheWheel) => {
-                        // 1-in-7 per newly drawn card, and it is a listed probability, so Oops!
-                        // All 6s doubles it (`G.GAME.probabilities.normal/7`, blind.lua:607).
-                        let oops = if self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active) {
-                            2.0_f64
-                        } else {
-                            1.0_f64
-                        };
-                        for hand_idx in newly_drawn {
-                            if self.rng.next_bool_prob("wheel", (oops / 7.0).min(1.0)) {
-                                let card_idx = self.hand[hand_idx];
-                                self.deck[card_idx].face_down = true;
-                            }
-                        }
-                    }
-                    Some(BossBlind::TheHouse) => {
-                        // Only the opening hand of the round is hidden — nothing has been played
-                        // or discarded yet (blind.lua:611).
-                        if self.hands_remaining == self.effective_max_hands()
-                            && self.discards_remaining == self.effective_max_discards()
-                        {
-                            for hand_idx in newly_drawn {
-                                let card_idx = self.hand[hand_idx];
-                                self.deck[card_idx].face_down = true;
-                            }
-                        }
-                    }
-                    Some(BossBlind::TheMark) => {
-                        // Face cards are hidden, not disabled (blind.lua:614). It calls
-                        // `is_face(true)`, so Pareidolia hides the whole hand.
-                        let pareidolia = self.has_pareidolia();
-                        for hand_idx in newly_drawn {
-                            let card_idx = self.hand[hand_idx];
-                            if self.deck[card_idx].is_face(pareidolia) {
-                                self.deck[card_idx].face_down = true;
-                            }
-                        }
-                    }
-                    _ => {}
+        let newly_drawn: Vec<usize> = (start_hand_len..self.hand.len()).collect();
+        match self.active_boss() {
+            Some(BossBlind::TheFish) => {
+                // Only the cards drawn right after a hand was *played* are hidden — a discard
+                // does not set `prepped` (blind.lua:487).
+                if self.fish_prepped {
+                    self.hide_drawn_cards(&newly_drawn);
                 }
             }
+            Some(BossBlind::TheWheel) => {
+                // 1-in-7 per newly drawn card, and it is a listed probability, so Oops! All 6s
+                // doubles it (`G.GAME.probabilities.normal/7`, blind.lua:607).
+                for hand_idx in newly_drawn.iter().copied() {
+                    if self.roll_chance("wheel", 1.0 / 7.0) {
+                        self.hide_drawn_cards(&[hand_idx]);
+                    }
+                }
+            }
+            Some(BossBlind::TheHouse) => {
+                // Only the opening hand of the round is hidden — nothing has been played or
+                // discarded yet (blind.lua:611).
+                if self.hands_remaining == self.effective_max_hands()
+                    && self.discards_remaining == self.effective_max_discards()
+                {
+                    self.hide_drawn_cards(&newly_drawn);
+                }
+            }
+            Some(BossBlind::TheMark) => {
+                // Face cards are hidden, not disabled (blind.lua:614). It calls `is_face(true)`,
+                // so Pareidolia hides the whole hand.
+                let pareidolia = self.has_pareidolia();
+                let faces: Vec<usize> = newly_drawn
+                    .iter()
+                    .copied()
+                    .filter(|&hi| self.deck[self.hand[hi]].is_face(pareidolia))
+                    .collect();
+                self.hide_drawn_cards(&faces);
+            }
+            _ => {}
         }
 
         self.fish_prepped = false;
 
         // CeruleanBell: one random newly-drawn card is always selected (forced)
-        if let Some(BossBlind::CeruleanBell) = self.boss_blind {
-            if matches!(self.current_blind, BlindKind::Boss) {
-                if !self.boss_blind_disabled() {
-                    let newly_drawn_count = self.hand.len() - start_hand_len;
-                    if newly_drawn_count > 0 {
-                        let offset = self.rng.range_usize("cerulean_bell", 0, newly_drawn_count - 1);
-                        let forced_hand_idx = start_hand_len + offset;
-                        let card_deck_idx = self.hand[forced_hand_idx];
-                        self.cerulean_forced_card_id = Some(self.deck[card_deck_idx].id);
-                        if !self.selected_indices.contains(&forced_hand_idx) {
-                            self.selected_indices.push(forced_hand_idx);
-                        }
-                    }
-                }
+        if self.boss_effect_active(BossBlind::CeruleanBell) && !newly_drawn.is_empty() {
+            let offset = self.rng.range_usize("cerulean_bell", 0, newly_drawn.len() - 1);
+            let forced_hand_idx = newly_drawn[offset];
+            self.cerulean_forced_card_id = Some(self.deck[self.hand[forced_hand_idx]].id);
+            if !self.selected_indices.contains(&forced_hand_idx) {
+                self.selected_indices.push(forced_hand_idx);
             }
+        }
+    }
+
+    /// Turn the given hand positions face down. The card keeps every property it had — a
+    /// face-down card still scores, it just cannot be read.
+    fn hide_drawn_cards(&mut self, hand_indices: &[usize]) {
+        for &hand_idx in hand_indices {
+            let card_idx = self.hand[hand_idx];
+            self.deck[card_idx].face_down = true;
         }
     }
 
@@ -588,8 +558,7 @@ impl GameState {
             }
             let gained = target.sell_value(discount) as i64 * 2;
             sliced.push(target.id);
-            let cur = self.jokers[i].get_counter_i64("mult");
-            self.jokers[i].set_counter_i64("mult", cur + gained);
+            self.jokers[i].add_counter_i64("mult", gained);
         }
         if !sliced.is_empty() {
             self.jokers.retain(|j| !sliced.contains(&j.id));
@@ -609,13 +578,11 @@ impl GameState {
             };
             match kind {
                 JokerKind::MarbleJoker => {
-                    // Add 1 stone card to deck
+                    // A Stone card, shuffled into the draw pile.
                     let id = self.next_id();
                     let mut stone = CardInstance::new(id, Rank::Ace, Suit::Spades);
                     stone.enhancement = Enhancement::Stone;
-                    let deck_idx = self.deck.len();
-                    self.deck.push(stone);
-                    self.draw_pile.push(deck_idx);
+                    self.add_card_to_draw_pile(stone);
                     self.notify_playing_cards_added(1);
                 }
                 JokerKind::Madness => {
@@ -623,43 +590,31 @@ impl GameState {
                     if !self.jokers[idx].active {
                         continue;
                     }
-                    let cur = self.jokers[idx].get_counter_f64("x_mult");
-                    self.jokers[idx].set_counter_f64("x_mult", cur + 0.5);
+                    self.jokers[idx].add_counter_f64("x_mult", 0.5);
                     let destroyable: Vec<usize> = self.jokers.iter().enumerate()
                         .filter(|(_, j)| j.kind != JokerKind::Madness && !j.eternal)
                         .map(|(i, _)| i)
                         .collect();
                     if !destroyable.is_empty() {
                         let pick = self.rng.range_usize("madness", 0, destroyable.len() - 1);
-                        let victim = destroyable[pick];
-                        self.jokers.remove(victim);
+                        self.jokers.remove(destroyable[pick]);
                     }
                 }
                 JokerKind::Cartomancer => {
                     // Creates a Tarot when the Blind is selected — nothing to do with what you
                     // then play (card.lua `first_hand_drawn`, en-us.lua j_cartomancer).
-                    if self.has_consumable_room() {
-                        let tarot = self.random_tarot();
-                        self.add_consumable(ConsumableCard::Tarot(tarot));
-                    }
+                    self.create_tarot();
                 }
                 JokerKind::Certificate => {
                     // Adds a playing card with a random seal straight to *hand* (card.lua:2465
                     // emplaces into G.hand), so it is playable this round rather than being
                     // shuffled somewhere into the draw pile.
-                    let suits = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds];
-                    let ranks = [
-                        Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six,
-                        Rank::Seven, Rank::Eight, Rank::Nine, Rank::Ten,
-                        Rank::Jack, Rank::Queen, Rank::King, Rank::Ace,
-                    ];
-                    let seals = [Seal::Gold, Seal::Red, Seal::Blue, Seal::Purple];
-                    let suit_idx = self.rng.range_usize("cert_fr", 0, 3);
-                    let rank_idx = self.rng.range_usize("cert_fr", 0, 12);
-                    let seal_idx = self.rng.range_usize("certsl", 0, seals.len() - 1);
+                    let suit = Suit::ALL[self.rng.range_usize("cert_fr", 0, Suit::ALL.len() - 1)];
+                    let rank = Rank::ALL[self.rng.range_usize("cert_fr", 0, Rank::ALL.len() - 1)];
+                    let seal = Seal::REAL[self.rng.range_usize("certsl", 0, Seal::REAL.len() - 1)];
                     let new_id = self.next_id();
-                    let mut new_card = CardInstance::new(new_id, ranks[rank_idx], suits[suit_idx]);
-                    new_card.seal = seals[seal_idx];
+                    let mut new_card = CardInstance::new(new_id, rank, suit);
+                    new_card.seal = seal;
                     let deck_idx = self.deck.len();
                     self.deck.push(new_card);
                     self.hand.push(deck_idx);
@@ -668,45 +623,28 @@ impl GameState {
                 JokerKind::RiffRaff => {
                     // Two *Common* jokers, drawn from the Common pool directly — rolling the
                     // whole pool and discarding non-Commons would yield roughly 1.4.
-                    for _ in 0..2 {
-                        if self.jokers.len() >= self.effective_joker_slots() {
-                            break;
-                        }
-                        let pool: Vec<JokerKind> = JokerKind::ALL
-                            .iter()
-                            .copied()
-                            .filter(|k| k.rarity() == 1 && self.joker_in_pool(*k))
-                            .collect();
-                        if pool.is_empty() {
-                            break;
-                        }
-                        let kind = pool[self.rng.range_usize("rif", 0, pool.len() - 1)];
-                        let id = self.next_id();
-                        self.jokers.push(JokerInstance::new(id, kind, Edition::None));
-                    }
+                    self.grant_common_jokers("rif", 2);
                 }
                 JokerKind::TurtleBean => {
                     // TurtleBean shrinks by 1 each round; destroyed when h_size reaches 0
                     if !self.jokers[idx].active {
                         continue;
                     }
-                    let new_val = self.jokers[idx].get_counter_i64("h_size") - 1;
-                    self.jokers[idx].set_counter_i64("h_size", new_val);
-                    if new_val <= 0 && !self.jokers[idx].eternal {
+                    self.jokers[idx].add_counter_i64("h_size", -1);
+                    if self.jokers[idx].get_counter_i64("h_size") <= 0 && !self.jokers[idx].eternal {
                         self.jokers.remove(idx);
                     }
                 }
                 JokerKind::ToDoList => {
-                    // Randomize the target hand type each round
-                    let hand_types = [
-                        "HighCard", "Pair", "TwoPair", "ThreeOfAKind", "Straight",
-                        "Flush", "FullHouse", "FourOfAKind", "StraightFlush",
+                    // Randomize the target hand type each round. The three secret hands are not
+                    // eligible — you cannot be asked for a hand you have never seen.
+                    const TARGETS: [HandType; 9] = [
+                        HandType::HighCard, HandType::Pair, HandType::TwoPair,
+                        HandType::ThreeOfAKind, HandType::Straight, HandType::Flush,
+                        HandType::FullHouse, HandType::FourOfAKind, HandType::StraightFlush,
                     ];
-                    let pick = self.rng.range_usize("to_do", 0, hand_types.len() - 1);
-                    self.jokers[idx].counters.insert(
-                        "hand_type".to_string(),
-                        serde_json::json!(hand_types[pick]),
-                    );
+                    let pick = TARGETS[self.rng.range_usize("to_do", 0, TARGETS.len() - 1)];
+                    self.jokers[idx].set_counter_str("hand_type", &format!("{pick:?}"));
                 }
                 _ => {}
             }

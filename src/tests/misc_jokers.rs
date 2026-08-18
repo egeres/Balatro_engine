@@ -425,7 +425,6 @@ fn test_delayed_gratification_does_not_pay_when_discards_used() {
     // Now win by setting score goal low
     gs.score_goal = 1.0;
     gs.select_card(0).unwrap();
-    let money_before = gs.money;
     gs.play_hand().unwrap();
 
     // discards were used, so DG should not pay its +$6

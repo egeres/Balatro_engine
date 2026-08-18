@@ -375,9 +375,9 @@ fn check_straight(
         let mut vals: Vec<(u8, usize)> = unique.clone();
         if use_ace_low {
             // Replace Ace (14) with 1
-            for (r, i) in vals.iter_mut() {
-                if *r == 14 {
-                    *r = 1;
+            for (rank, _) in vals.iter_mut() {
+                if *rank == 14 {
+                    *rank = 1;
                 }
             }
             vals.sort_by_key(|&(r, _)| r);
@@ -552,7 +552,7 @@ fn find_pair(
 mod tests {
     use super::*;
     use crate::card::CardInstance;
-    use crate::types::{Enhancement, Rank, Suit};
+    use crate::types::{Rank, Suit};
 
     fn make_card(id: u64, rank: Rank, suit: Suit) -> CardInstance {
         CardInstance::new(id, rank, suit)

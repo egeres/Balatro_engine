@@ -180,126 +180,44 @@ pub struct JokerInstance {
     pub active: bool,
 }
 
+/// Jokers whose Mult counter starts at zero and climbs.
+const MULT_FROM_ZERO: [JokerKind; 8] = [
+    JokerKind::CeremonialDagger,
+    JokerKind::FlashCard,
+    JokerKind::GreenJoker,
+    JokerKind::Misprint,
+    JokerKind::RedCard,
+    JokerKind::RideTheBus,
+    JokerKind::SpareTrousers,
+    JokerKind::Swashbuckler,
+];
+
+/// Jokers whose Chips counter starts at zero and climbs.
+const CHIPS_FROM_ZERO: [JokerKind; 4] = [
+    JokerKind::Castle,
+    JokerKind::Runner,
+    JokerKind::SquareJoker,
+    JokerKind::WeeJoker,
+];
+
+/// Jokers that start at X1 Mult and scale up from there.
+const X_MULT_FROM_ONE: [JokerKind; 11] = [
+    JokerKind::Campfire,
+    JokerKind::Canio,
+    JokerKind::Constellation,
+    JokerKind::GlassJoker,
+    JokerKind::HitTheRoad,
+    JokerKind::Hologram,
+    JokerKind::LuckyCat,
+    JokerKind::Madness,
+    JokerKind::Obelisk,
+    JokerKind::Vampire,
+    JokerKind::Yorick,
+];
+
 impl JokerInstance {
     pub fn new(id: u64, kind: JokerKind, edition: Edition) -> Self {
-        let mut counters = std::collections::HashMap::new();
-        // Initialize joker-specific counters
-        match kind {
-            JokerKind::CeremonialDagger => {
-                counters.insert("mult".to_string(), serde_json::json!(0));
-            }
-            JokerKind::Runner => {
-                counters.insert("chips".to_string(), serde_json::json!(0));
-            }
-            JokerKind::SquareJoker => {
-                counters.insert("chips".to_string(), serde_json::json!(0));
-            }
-            JokerKind::WeeJoker => {
-                counters.insert("chips".to_string(), serde_json::json!(0));
-            }
-            JokerKind::IceCream => {
-                counters.insert("chips".to_string(), serde_json::json!(100));
-            }
-            JokerKind::LoyaltyCard => {
-                // Hands played since acquisition; X4 Mult on every 6th.
-                counters.insert("hands".to_string(), serde_json::json!(0_i64));
-            }
-            JokerKind::Misprint => {
-                // Re-rolled to 0..=23 before each hand scores.
-                counters.insert("mult".to_string(), serde_json::json!(0_i64));
-            }
-            JokerKind::Popcorn => {
-                counters.insert("mult".to_string(), serde_json::json!(20));
-            }
-            JokerKind::SpareTrousers => {
-                counters.insert("mult".to_string(), serde_json::json!(0));
-            }
-            JokerKind::Castle => {
-                // Target suit lives on GameState.round_targets: it is round-wide, not per-joker.
-                counters.insert("chips".to_string(), serde_json::json!(0));
-            }
-            JokerKind::Hologram => {
-                counters.insert("x_mult".to_string(), serde_json::json!(1.0_f64));
-            }
-            JokerKind::Vampire => {
-                counters.insert("x_mult".to_string(), serde_json::json!(1.0_f64));
-            }
-            JokerKind::Obelisk => {
-                counters.insert("x_mult".to_string(), serde_json::json!(1.0_f64));
-                counters.insert("hand_count".to_string(), serde_json::json!({}));
-            }
-            JokerKind::LuckyCat => {
-                counters.insert("x_mult".to_string(), serde_json::json!(1.0_f64));
-            }
-            JokerKind::Constellation => {
-                counters.insert("x_mult".to_string(), serde_json::json!(1.0_f64));
-            }
-            JokerKind::GlassJoker => {
-                counters.insert("x_mult".to_string(), serde_json::json!(1.0_f64));
-            }
-            JokerKind::Ramen => {
-                counters.insert("x_mult".to_string(), serde_json::json!(2.0_f64));
-            }
-            JokerKind::HitTheRoad => {
-                counters.insert("x_mult".to_string(), serde_json::json!(1.0_f64));
-            }
-            JokerKind::FlashCard => {
-                counters.insert("mult".to_string(), serde_json::json!(0));
-            }
-            JokerKind::Madness => {
-                counters.insert("x_mult".to_string(), serde_json::json!(1.0_f64));
-            }
-            JokerKind::GreenJoker => {
-                counters.insert("mult".to_string(), serde_json::json!(0));
-            }
-            JokerKind::RideTheBus => {
-                counters.insert("mult".to_string(), serde_json::json!(0));
-            }
-            JokerKind::Swashbuckler => {
-                counters.insert("mult".to_string(), serde_json::json!(0));
-            }
-            JokerKind::TurtleBean => {
-                counters.insert("h_size".to_string(), serde_json::json!(5));
-            }
-            JokerKind::Yorick => {
-                counters.insert("x_mult".to_string(), serde_json::json!(1.0_f64));
-                counters.insert("discards".to_string(), serde_json::json!(0));
-            }
-            JokerKind::Campfire => {
-                counters.insert("x_mult".to_string(), serde_json::json!(1.0_f64));
-            }
-            JokerKind::Rocket => {
-                counters.insert("dollars".to_string(), serde_json::json!(1));
-            }
-            JokerKind::Seltzer => {
-                counters.insert("hands".to_string(), serde_json::json!(10_i64));
-            }
-            JokerKind::Satellite => {
-                // tracks unique planet types used (as a set stored as count)
-                counters.insert("planets_used".to_string(), serde_json::json!(0_i64));
-            }
-            JokerKind::ToDoList => {
-                counters.insert("hand_type".to_string(), serde_json::json!("HighCard"));
-            }
-            JokerKind::RedCard => {
-                counters.insert("mult".to_string(), serde_json::json!(0_i64));
-            }
-            JokerKind::Burglar => {
-                // Gains +3 hands, discards = 0 for the round (tracked via effective_max_*)
-            }
-            JokerKind::Canio => {
-                // Starts at X1 Mult, gains +1 Xmult per face card destroyed
-                counters.insert("x_mult".to_string(), serde_json::json!(1.0_f64));
-            }
-            JokerKind::InvisibleJoker => {
-                counters.insert("rounds".to_string(), serde_json::json!(0));
-            }
-            JokerKind::Egg => {
-                counters.insert("sell_bonus".to_string(), serde_json::json!(0));
-            }
-            _ => {}
-        }
-        Self {
+        let mut joker = Self {
             id,
             kind,
             edition,
@@ -307,8 +225,54 @@ impl JokerInstance {
             perishable: false,
             perishable_rounds_left: 5,
             rental: false,
-            counters,
+            counters: std::collections::HashMap::new(),
             active: true,
+        };
+        joker.init_counters();
+        joker
+    }
+
+    /// Seed the counters this joker starts life with.
+    ///
+    /// A missing counter reads as zero, but every scaling effect reads-then-writes, so anything
+    /// that starts somewhere other than zero — an X-Mult joker starts at X1, not X0 — has to be
+    /// seeded here or its very first upgrade would land on the wrong base.
+    fn init_counters(&mut self) {
+        let kind = self.kind;
+        if MULT_FROM_ZERO.contains(&kind) {
+            self.set_counter_i64("mult", 0);
+        }
+        if CHIPS_FROM_ZERO.contains(&kind) {
+            self.set_counter_i64("chips", 0);
+        }
+        if X_MULT_FROM_ONE.contains(&kind) {
+            self.set_counter_f64("x_mult", 1.0);
+        }
+
+        match kind {
+            // Melts by 5 Chips a hand until there is nothing left.
+            JokerKind::IceCream => self.set_counter_i64("chips", 100),
+            // Hands played since acquisition; X4 Mult on every 6th.
+            JokerKind::LoyaltyCard => self.set_counter_i64("hands", 0),
+            // Loses 4 Mult a round; eaten at 0.
+            JokerKind::Popcorn => self.set_counter_i64("mult", 20),
+            // The one X-Mult joker that starts above X1 and shrinks.
+            JokerKind::Ramen => self.set_counter_f64("x_mult", 2.0),
+            // Hand size granted, shrinking by 1 a round.
+            JokerKind::TurtleBean => self.set_counter_i64("h_size", 5),
+            // Pays out its counter each round, +$2 per Boss beaten.
+            JokerKind::Rocket => self.set_counter_i64("dollars", 1),
+            // Retriggers every card for 10 hands, then destroys itself.
+            JokerKind::Seltzer => self.set_counter_i64("hands", 10),
+            JokerKind::Satellite => self.set_counter_i64("planets_used", 0),
+            JokerKind::ToDoList => self.set_counter_str("hand_type", "HighCard"),
+            JokerKind::InvisibleJoker => self.set_counter_i64("rounds", 0),
+            // Gains $3 of sell value each round.
+            JokerKind::Egg => self.set_counter_i64("sell_bonus", 0),
+            // Every 23rd card discarded is worth +1 X-Mult.
+            JokerKind::Yorick => self.set_counter_i64("discards", 0),
+            JokerKind::Obelisk => self.set_counter_json("hand_count", serde_json::json!({})),
+            _ => {}
         }
     }
 
@@ -362,12 +326,37 @@ impl JokerInstance {
             .unwrap_or(0)
     }
 
+    pub fn get_counter_str(&self, key: &str) -> Option<&str> {
+        self.counters.get(key).and_then(|v| v.as_str())
+    }
+
     pub fn set_counter_f64(&mut self, key: &str, val: f64) {
-        self.counters.insert(key.to_string(), serde_json::json!(val));
+        self.set_counter_json(key, serde_json::json!(val));
     }
 
     pub fn set_counter_i64(&mut self, key: &str, val: i64) {
-        self.counters.insert(key.to_string(), serde_json::json!(val));
+        self.set_counter_json(key, serde_json::json!(val));
+    }
+
+    pub fn set_counter_str(&mut self, key: &str, val: &str) {
+        self.set_counter_json(key, serde_json::json!(val));
+    }
+
+    pub fn set_counter_json(&mut self, key: &str, val: serde_json::Value) {
+        self.counters.insert(key.to_string(), val);
+    }
+
+    /// Add to a counter, reading a missing one as zero. This is how nearly every scaling joker
+    /// grows, so it saves the read-modify-write dance at each call site.
+    pub fn add_counter_f64(&mut self, key: &str, delta: f64) {
+        let new = self.get_counter_f64(key) + delta;
+        self.set_counter_f64(key, new);
+    }
+
+    /// As [`Self::add_counter_f64`], for the integer counters.
+    pub fn add_counter_i64(&mut self, key: &str, delta: i64) {
+        let new = self.get_counter_i64(key) + delta;
+        self.set_counter_i64(key, new);
     }
 }
 

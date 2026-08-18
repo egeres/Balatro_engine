@@ -2,6 +2,8 @@ use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 use super::{Edition, HandType};
 
+super::debug_repr!(TarotCard, SpectralCard, VoucherKind);
+
 #[pyclass(eq, eq_int)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TarotCard {
@@ -29,11 +31,17 @@ pub enum TarotCard {
     TheWorld,
 }
 
-#[pymethods]
 impl TarotCard {
-    fn __repr__(&self) -> String {
-        format!("{:?}", self)
-    }
+    /// The full Major Arcana — every tarot a random roll can produce.
+    pub const ALL: [TarotCard; 22] = [
+        TarotCard::TheFool, TarotCard::TheMagician, TarotCard::TheHighPriestess,
+        TarotCard::TheEmpress, TarotCard::TheEmperor, TarotCard::TheHierophant,
+        TarotCard::TheLovers, TarotCard::TheChariot, TarotCard::Justice, TarotCard::TheHermit,
+        TarotCard::TheWheelOfFortune, TarotCard::Strength, TarotCard::TheHangedMan,
+        TarotCard::Death, TarotCard::Temperance, TarotCard::TheDevil, TarotCard::TheTower,
+        TarotCard::TheStar, TarotCard::TheMoon, TarotCard::TheSun, TarotCard::Judgement,
+        TarotCard::TheWorld,
+    ];
 }
 
 #[pyclass(eq, eq_int)]
@@ -51,6 +59,18 @@ pub enum PlanetCard {
     PlanetX,  // Five of a Kind  (SECRET: only after playing Five of a Kind)
     Ceres,    // Flush House     (SECRET: only after playing Flush House)
     Eris,     // Flush Five      (SECRET: only after playing Flush Five)
+}
+
+impl PlanetCard {
+    /// The nine planets any roll can produce.
+    pub const BASE: [PlanetCard; 9] = [
+        PlanetCard::Mercury, PlanetCard::Venus, PlanetCard::Earth, PlanetCard::Mars,
+        PlanetCard::Jupiter, PlanetCard::Saturn, PlanetCard::Uranus, PlanetCard::Neptune,
+        PlanetCard::Pluto,
+    ];
+
+    /// The three that stay out of the pool until you have played their hand.
+    pub const SECRET: [PlanetCard; 3] = [PlanetCard::PlanetX, PlanetCard::Ceres, PlanetCard::Eris];
 }
 
 #[pymethods]
@@ -97,13 +117,6 @@ pub enum SpectralCard {
     Cryptid,
     TheSoul,
     BlackHole,
-}
-
-#[pymethods]
-impl SpectralCard {
-    fn __repr__(&self) -> String {
-        format!("{:?}", self)
-    }
 }
 
 #[pyclass(eq, eq_int)]
@@ -159,11 +172,17 @@ pub enum VoucherKind {
     Palette,        // +1 more hand size
 }
 
-#[pymethods]
 impl VoucherKind {
-    fn __repr__(&self) -> String {
-        format!("{:?}", self)
-    }
+    /// The base tier of each voucher pair — the only ones a shop offers outright. Redeeming one
+    /// puts its upgrade (see `upgraded_voucher`) into the pool in its place.
+    pub const BASE: [VoucherKind; 16] = [
+        VoucherKind::Overstock, VoucherKind::ClearanceSale, VoucherKind::Hone,
+        VoucherKind::RerollSurplus, VoucherKind::CrystalBall, VoucherKind::Telescope,
+        VoucherKind::Grabber, VoucherKind::Wasteful, VoucherKind::TarotMerchant,
+        VoucherKind::PlanetMerchant, VoucherKind::SeedMoney, VoucherKind::Blank,
+        VoucherKind::MagicTrick, VoucherKind::Hieroglyph, VoucherKind::DirectorsCut,
+        VoucherKind::PaintBrush,
+    ];
 }
 
 #[pyclass(eq, eq_int)]
@@ -425,11 +444,8 @@ impl TagKind {
 
 /// The Planet card that levels `hand_type`, if one exists.
 pub fn planet_for_hand(hand_type: HandType) -> Option<PlanetCard> {
-    [
-        PlanetCard::Mercury, PlanetCard::Venus, PlanetCard::Earth, PlanetCard::Mars,
-        PlanetCard::Jupiter, PlanetCard::Saturn, PlanetCard::Uranus, PlanetCard::Neptune,
-        PlanetCard::Pluto, PlanetCard::PlanetX, PlanetCard::Ceres, PlanetCard::Eris,
-    ]
-    .into_iter()
-    .find(|p| p.hand_type() == hand_type)
+    PlanetCard::BASE
+        .into_iter()
+        .chain(PlanetCard::SECRET)
+        .find(|p| p.hand_type() == hand_type)
 }

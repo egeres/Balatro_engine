@@ -225,7 +225,7 @@ fn test_no_observatory_planet_does_not_set_x_mult() {
 /// Observatory X1.5 actually increases Flush score during scoring.
 #[test]
 fn test_observatory_increases_flush_score() {
-    use crate::types::{PlanetCard, HandType};
+    use crate::types::PlanetCard;
     // Jupiter levels Flush from L1→L2: chips = 35+15=50, mult = 4+2=6
     // Observatory X1.5 applied: mult = 6×1.5 = 9
     // 5 Spades 2-3-4-5-7: card chips = 2+3+4+5+7 = 21 → total chips = 71

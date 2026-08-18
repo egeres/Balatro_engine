@@ -1,6 +1,27 @@
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 
+/// Give each of these enums a Python `__repr__` that prints its Rust name.
+///
+/// One `#[pymethods]` block per class is all pyo3 allows without the `multiple-pymethods`
+/// feature, so this only covers the enums whose Python surface is *just* `__repr__`; the ones
+/// that also expose real methods spell it out in their own block.
+macro_rules! debug_repr {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            #[pymethods]
+            impl $ty {
+                fn __repr__(&self) -> String {
+                    format!("{:?}", self)
+                }
+            }
+        )*
+    };
+}
+pub(crate) use debug_repr;
+
+debug_repr!(Rank, Suit, Enhancement, Edition, Seal, DeckType, Stake, HandType, GameState);
+
 #[pyclass(eq, eq_int)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Rank {
@@ -20,6 +41,22 @@ pub enum Rank {
 }
 
 impl Rank {
+    /// Every rank, low to high. The index into this table *is* the wire value used by
+    /// [`Rank::from_u8`], and card generators draw from it, so the order is load-bearing.
+    pub const ALL: [Rank; 13] = [
+        Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six, Rank::Seven, Rank::Eight,
+        Rank::Nine, Rank::Ten, Rank::Jack, Rank::Queen, Rank::King, Rank::Ace,
+    ];
+
+    /// The nine numbered ranks — what Incantation creates.
+    pub const NUMBERS: [Rank; 9] = [
+        Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six, Rank::Seven, Rank::Eight,
+        Rank::Nine, Rank::Ten,
+    ];
+
+    /// The three face ranks — what Familiar creates.
+    pub const FACES: [Rank; 3] = [Rank::Jack, Rank::Queen, Rank::King];
+
     pub fn base_chips(&self) -> i64 {
         match self {
             Rank::Two => 2,
@@ -82,29 +119,7 @@ impl Rank {
     }
 
     pub fn from_u8(v: u8) -> Option<Self> {
-        match v {
-            0 => Some(Rank::Two),
-            1 => Some(Rank::Three),
-            2 => Some(Rank::Four),
-            3 => Some(Rank::Five),
-            4 => Some(Rank::Six),
-            5 => Some(Rank::Seven),
-            6 => Some(Rank::Eight),
-            7 => Some(Rank::Nine),
-            8 => Some(Rank::Ten),
-            9 => Some(Rank::Jack),
-            10 => Some(Rank::Queen),
-            11 => Some(Rank::King),
-            12 => Some(Rank::Ace),
-            _ => None,
-        }
-    }
-}
-
-#[pymethods]
-impl Rank {
-    fn __repr__(&self) -> String {
-        format!("{:?}", self)
+        Self::ALL.get(v as usize).copied()
     }
 }
 
@@ -117,11 +132,9 @@ pub enum Suit {
     Diamonds,
 }
 
-#[pymethods]
 impl Suit {
-    fn __repr__(&self) -> String {
-        format!("{:?}", self)
-    }
+    /// The four suits, in the order every card generator and suit scan walks them.
+    pub const ALL: [Suit; 4] = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds];
 }
 
 #[pyclass(eq, eq_int)]
@@ -138,11 +151,13 @@ pub enum Enhancement {
     Lucky,   // 1/5 chance +20 mult, 1/15 chance $20
 }
 
-#[pymethods]
 impl Enhancement {
-    fn __repr__(&self) -> String {
-        format!("{:?}", self)
-    }
+    /// The eight real enhancements, in the order the shop and Standard packs roll them.
+    /// `None` is excluded: nothing ever *rolls* a plain card.
+    pub const ALL: [Enhancement; 8] = [
+        Enhancement::Bonus, Enhancement::Mult, Enhancement::Wild, Enhancement::Glass,
+        Enhancement::Steel, Enhancement::Stone, Enhancement::Gold, Enhancement::Lucky,
+    ];
 }
 
 #[pyclass(eq, eq_int)]
@@ -155,13 +170,6 @@ pub enum Edition {
     Negative,    // +1 joker slot (jokers only)
 }
 
-#[pymethods]
-impl Edition {
-    fn __repr__(&self) -> String {
-        format!("{:?}", self)
-    }
-}
-
 #[pyclass(eq, eq_int)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Seal {
@@ -172,11 +180,13 @@ pub enum Seal {
     Purple, // create tarot card when discarded
 }
 
-#[pymethods]
 impl Seal {
-    fn __repr__(&self) -> String {
-        format!("{:?}", self)
-    }
+    /// The four real seals, in roll order. Certificate draws from these.
+    pub const REAL: [Seal; 4] = [Seal::Gold, Seal::Red, Seal::Blue, Seal::Purple];
+
+    /// As [`Seal::REAL`], but with "no seal" as an equally likely outcome — what the Illusion
+    /// voucher rolls for a shop playing card.
+    pub const ALL: [Seal; 5] = [Seal::None, Seal::Gold, Seal::Red, Seal::Blue, Seal::Purple];
 }
 
 #[pyclass(eq, eq_int)]
@@ -200,32 +210,16 @@ pub enum DeckType {
 }
 
 impl DeckType {
-    pub fn from_u8(v: u8) -> Option<Self> {
-        match v {
-            0 => Some(DeckType::Red),
-            1 => Some(DeckType::Blue),
-            2 => Some(DeckType::Yellow),
-            3 => Some(DeckType::Green),
-            4 => Some(DeckType::Black),
-            5 => Some(DeckType::Magic),
-            6 => Some(DeckType::Nebula),
-            7 => Some(DeckType::Ghost),
-            8 => Some(DeckType::Abandoned),
-            9 => Some(DeckType::Checkered),
-            10 => Some(DeckType::Zodiac),
-            11 => Some(DeckType::Painted),
-            12 => Some(DeckType::Anaglyph),
-            13 => Some(DeckType::Plasma),
-            14 => Some(DeckType::Erratic),
-            _ => None,
-        }
-    }
-}
+    /// Every deck, in the order the `DECK_*` constants exposed to Python number them.
+    pub const ALL: [DeckType; 15] = [
+        DeckType::Red, DeckType::Blue, DeckType::Yellow, DeckType::Green, DeckType::Black,
+        DeckType::Magic, DeckType::Nebula, DeckType::Ghost, DeckType::Abandoned,
+        DeckType::Checkered, DeckType::Zodiac, DeckType::Painted, DeckType::Anaglyph,
+        DeckType::Plasma, DeckType::Erratic,
+    ];
 
-#[pymethods]
-impl DeckType {
-    fn __repr__(&self) -> String {
-        format!("{:?}", self)
+    pub fn from_u8(v: u8) -> Option<Self> {
+        Self::ALL.get(v as usize).copied()
     }
 }
 
@@ -243,25 +237,20 @@ pub enum Stake {
 }
 
 impl Stake {
-    pub fn from_u8(v: u8) -> Option<Self> {
-        match v {
-            0 => Some(Stake::White),
-            1 => Some(Stake::Red),
-            2 => Some(Stake::Green),
-            3 => Some(Stake::Black),
-            4 => Some(Stake::Blue),
-            5 => Some(Stake::Purple),
-            6 => Some(Stake::Orange),
-            7 => Some(Stake::Gold),
-            _ => None,
-        }
-    }
-}
+    /// Every stake, ascending. The index is the wire value of the `STAKE_*` constants, and the
+    /// ordering also drives the `stake as u8 >= Stake::X as u8` difficulty gates.
+    pub const ALL: [Stake; 8] = [
+        Stake::White, Stake::Red, Stake::Green, Stake::Black, Stake::Blue, Stake::Purple,
+        Stake::Orange, Stake::Gold,
+    ];
 
-#[pymethods]
-impl Stake {
-    fn __repr__(&self) -> String {
-        format!("{:?}", self)
+    pub fn from_u8(v: u8) -> Option<Self> {
+        Self::ALL.get(v as usize).copied()
+    }
+
+    /// Whether this stake is at least as hard as `other`.
+    pub fn at_least(self, other: Stake) -> bool {
+        self as u8 >= other as u8
     }
 }
 
@@ -282,14 +271,28 @@ pub enum HandType {
     HighCard,
 }
 
-#[pymethods]
 impl HandType {
-    fn __repr__(&self) -> String {
-        format!("{:?}", self)
-    }
-}
+    /// Every hand type, best to worst.
+    pub const ALL: [HandType; 12] = [
+        HandType::FlushFive, HandType::FlushHouse, HandType::FiveOfAKind,
+        HandType::StraightFlush, HandType::FourOfAKind, HandType::FullHouse, HandType::Flush,
+        HandType::Straight, HandType::ThreeOfAKind, HandType::TwoPair, HandType::Pair,
+        HandType::HighCard,
+    ];
 
-impl HandType {
+    /// Parse the `{:?}` spelling of a hand type, which is how To Do List stores its target.
+    pub fn from_debug_name(name: &str) -> Option<HandType> {
+        HandType::ALL.into_iter().find(|h| format!("{h:?}") == name)
+    }
+
+    /// The three hands that stay hidden until you first play one (`visible = false`).
+    pub fn is_secret(&self) -> bool {
+        matches!(
+            self,
+            HandType::FlushFive | HandType::FlushHouse | HandType::FiveOfAKind
+        )
+    }
+
     // There used to be `contains_pair()` / `contains_flush()` / … helpers here, deriving what a
     // hand holds from its *name*. That is not how Balatro asks the question: the hand-shape
     // jokers read `context.poker_hands`, built from the played cards themselves
@@ -582,13 +585,6 @@ pub enum GameState {
     Shop,
     BoosterPack,
     GameOver,
-}
-
-#[pymethods]
-impl GameState {
-    fn __repr__(&self) -> String {
-        format!("{:?}", self)
-    }
 }
 
 pub mod joker_kind;

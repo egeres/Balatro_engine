@@ -1,7 +1,12 @@
 use crate::card::*;
 use crate::types::*;
-use std::collections::HashMap;
-use super::{GameState, GameStateKind, BlindKind, BalatroError, HistoryEvent, upgraded_voucher};
+use super::{GameState, GameStateKind, BlindKind, BalatroError, upgraded_voucher};
+
+/// What Director's Cut and Retcon charge for a Boss re-roll (game.lua:606).
+const BOSS_REROLL_COST: u32 = 10;
+
+/// A voucher's flat price before discounts.
+const VOUCHER_COST: u32 = 10;
 
 impl GameState {
     /// Booster packs offered per shop, with Balatro's weights (game.lua:665-692).
@@ -86,25 +91,16 @@ impl GameState {
     /// A random playing card for the shop. Illusion lets it carry an enhancement, an edition and
     /// a seal 40% of the time (UI_definitions.lua:772).
     pub(crate) fn random_playing_card(&mut self) -> CardInstance {
-        let suits = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds];
-        let ranks = [
-            Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six, Rank::Seven,
-            Rank::Eight, Rank::Nine, Rank::Ten, Rank::Jack, Rank::Queen, Rank::King, Rank::Ace,
-        ];
-        let suit = suits[self.rng.range_usize("front", 0, 3)];
-        let rank = ranks[self.rng.range_usize("front", 0, 12)];
+        let suit = Suit::ALL[self.rng.range_usize("front", 0, Suit::ALL.len() - 1)];
+        let rank = Rank::ALL[self.rng.range_usize("front", 0, Rank::ALL.len() - 1)];
         let id = self.next_id();
         let mut card = CardInstance::new(id, rank, suit);
 
         if self.has_voucher(VoucherKind::Illusion) && self.rng.next_f64("illusion") > 0.6 {
-            let enhancements = [
-                Enhancement::Bonus, Enhancement::Mult, Enhancement::Wild, Enhancement::Glass,
-                Enhancement::Steel, Enhancement::Stone, Enhancement::Gold, Enhancement::Lucky,
-            ];
-            card.enhancement = enhancements[self.rng.range_usize("illusion", 0, enhancements.len() - 1)];
+            let n = Enhancement::ALL.len() - 1;
+            card.enhancement = Enhancement::ALL[self.rng.range_usize("illusion", 0, n)];
             card.edition = self.poll_edition(false);
-            let seals = [Seal::None, Seal::Gold, Seal::Red, Seal::Blue, Seal::Purple];
-            card.seal = seals[self.rng.range_usize("illusion", 0, seals.len() - 1)];
+            card.seal = Seal::ALL[self.rng.range_usize("illusion", 0, Seal::ALL.len() - 1)];
         }
         card
     }
@@ -130,6 +126,16 @@ impl GameState {
             Edition::Foil
         } else {
             Edition::None
+        }
+    }
+
+    /// The Foil / Holographic / Polychrome split that Aura and The Wheel of Fortune share:
+    /// 50 / 35 / 15. Unlike [`Self::poll_edition`] the card always comes out with one.
+    pub(crate) fn roll_positive_edition(&mut self, key: &str) -> Edition {
+        match self.rng.next_f64(key) {
+            r if r < 0.50 => Edition::Foil,
+            r if r < 0.85 => Edition::Holographic,
+            _ => Edition::Polychrome,
         }
     }
 
@@ -178,7 +184,7 @@ impl GameState {
                 TagKind::Voucher => {
                     // A second voucher on offer this shop.
                     let v = self.random_voucher();
-                    self.shop_offers.push(ShopOffer::new(ShopItem::Voucher(v), 10));
+                    self.shop_offers.push(ShopOffer::new(ShopItem::Voucher(v), VOUCHER_COST));
                 }
                 _ => {
                     if let Some(rarity) = tag.forced_rarity() {
@@ -317,9 +323,7 @@ impl GameState {
         // Balatro flags a joker key as used while a copy of it exists anywhere — owned, sitting in
         // the shop, or inside an open pack (card.lua:352, cleared at :4745) — and only Showman
         // lifts the restriction (common_events.lua:1987).
-        if !self.jokers.iter().any(|j| j.kind == JokerKind::Showman && j.active)
-            && self.joker_kind_in_play(kind)
-        {
+        if !self.has_joker(JokerKind::Showman) && self.joker_kind_in_play(kind) {
             return false;
         }
 
@@ -404,9 +408,8 @@ impl GameState {
         // `perishable_compat`, card.lua:517).
         // One roll decides both (common_events.lua:2138): above 0.7 is Eternal, 0.4 to 0.7 is
         // Perishable. Two independent 30% rolls left Perishable at 21% once Eternal won ties.
-        let stake_level = self.stake as u8;
-        let eternals_enabled = stake_level >= Stake::Black as u8;
-        let perishables_enabled = stake_level >= Stake::Orange as u8;
+        let eternals_enabled = self.stake.at_least(Stake::Black);
+        let perishables_enabled = self.stake.at_least(Stake::Orange);
         if eternals_enabled || perishables_enabled {
             let poll = self.rng.next_f64("etperpoll");
             if eternals_enabled && poll > 0.7 && kind.eternal_compat() {
@@ -415,140 +418,100 @@ impl GameState {
                 joker.perishable = true;
             }
         }
-        if stake_level >= Stake::Gold as u8 && self.rng.next_f64("ssjr") > 0.7 {
+        if self.stake.at_least(Stake::Gold) && self.rng.next_f64("ssjr") > 0.7 {
             joker.rental = true;
         }
 
         Some(joker)
     }
 
+    /// The voucher on offer for an ante. Each pair contributes one candidate: its upgrade if the
+    /// base has been redeemed, otherwise the base itself. A pair that is fully redeemed drops out.
     pub(crate) fn random_voucher(&mut self) -> VoucherKind {
-        // Only offer base-tier vouchers (upgraded versions require buying the base first)
-        let base_vouchers = vec![
-            VoucherKind::Overstock,
-            VoucherKind::ClearanceSale,
-            VoucherKind::Hone,
-            VoucherKind::RerollSurplus,
-            VoucherKind::CrystalBall,
-            VoucherKind::Telescope,
-            VoucherKind::Grabber,
-            VoucherKind::Wasteful,
-            VoucherKind::TarotMerchant,
-            VoucherKind::PlanetMerchant,
-            VoucherKind::SeedMoney,
-            VoucherKind::Blank,
-            VoucherKind::MagicTrick,
-            VoucherKind::Hieroglyph,
-            VoucherKind::DirectorsCut,
-            VoucherKind::PaintBrush,
-        ];
-        // If the player already has the base, offer the upgrade
-        let available: Vec<VoucherKind> = base_vouchers
-            .iter()
-            .flat_map(|&base| {
-                if self.vouchers.contains(&base) {
-                    vec![upgraded_voucher(base)]
-                } else if !self.vouchers.contains(&base) {
-                    vec![base]
+        let available: Vec<VoucherKind> = VoucherKind::BASE
+            .into_iter()
+            .map(|base| {
+                if self.has_voucher(base) {
+                    upgraded_voucher(base)
                 } else {
-                    vec![]
+                    base
                 }
             })
-            .filter(|v| !self.vouchers.contains(v))
+            .filter(|v| !self.has_voucher(*v))
             .collect();
         if available.is_empty() {
             return VoucherKind::Overstock;
         }
-        let idx = self.rng.range_usize("voucher", 0, available.len() - 1);
-        available[idx]
+        available[self.rng.range_usize("voucher", 0, available.len() - 1)]
     }
 
     pub(crate) fn random_tarot(&mut self) -> TarotCard {
-        let tarots = vec![
-            TarotCard::TheFool,
-            TarotCard::TheMagician,
-            TarotCard::TheHighPriestess,
-            TarotCard::TheEmpress,
-            TarotCard::TheEmperor,
-            TarotCard::TheHierophant,
-            TarotCard::TheLovers,
-            TarotCard::TheChariot,
-            TarotCard::Justice,
-            TarotCard::TheHermit,
-            TarotCard::TheWheelOfFortune,
-            TarotCard::Strength,
-            TarotCard::TheHangedMan,
-            TarotCard::Death,
-            TarotCard::Temperance,
-            TarotCard::TheDevil,
-            TarotCard::TheTower,
-            TarotCard::TheStar,
-            TarotCard::TheMoon,
-            TarotCard::TheSun,
-            TarotCard::Judgement,
-            TarotCard::TheWorld,
-        ];
-        let idx = self.rng.range_usize("tarot", 0, tarots.len() - 1);
-        tarots[idx]
+        TarotCard::ALL[self.rng.range_usize("tarot", 0, TarotCard::ALL.len() - 1)]
     }
 
+    /// A random Planet. The three secret ones join the pool only once their hand has been played.
     pub(crate) fn random_planet(&mut self) -> PlanetCard {
-        let mut planets = vec![
-            PlanetCard::Mercury,
-            PlanetCard::Venus,
-            PlanetCard::Earth,
-            PlanetCard::Mars,
-            PlanetCard::Jupiter,
-            PlanetCard::Saturn,
-            PlanetCard::Uranus,
-            PlanetCard::Neptune,
-            PlanetCard::Pluto,
-        ];
-        // Secret planets only available after playing the corresponding hand type
-        if self.hand_levels.get(&HandType::FiveOfAKind).map(|h| h.played > 0).unwrap_or(false) {
-            planets.push(PlanetCard::PlanetX);
-        }
-        if self.hand_levels.get(&HandType::FlushHouse).map(|h| h.played > 0).unwrap_or(false) {
-            planets.push(PlanetCard::Ceres);
-        }
-        if self.hand_levels.get(&HandType::FlushFive).map(|h| h.played > 0).unwrap_or(false) {
-            planets.push(PlanetCard::Eris);
-        }
-        let idx = self.rng.range_usize("planet", 0, planets.len() - 1);
-        planets[idx]
+        let mut planets = PlanetCard::BASE.to_vec();
+        planets.extend(PlanetCard::SECRET.into_iter().filter(|p| {
+            self.hand_levels
+                .get(&p.hand_type())
+                .is_some_and(|h| h.played > 0)
+        }));
+        planets[self.rng.range_usize("planet", 0, planets.len() - 1)]
     }
 
     pub fn has_voucher(&self, v: VoucherKind) -> bool {
         self.vouchers.contains(&v)
     }
 
-    pub fn buy_joker(&mut self, shop_index: usize) -> Result<(), BalatroError> {
+    /// The checks every shop purchase starts with: the right screen, an offer that exists, has
+    /// not been bought, and is the kind of thing the caller means to buy. Returns its live price.
+    ///
+    /// Affordability is deliberately left out — the buy paths differ on whether money or a free
+    /// slot is checked first, and the error the player sees depends on that order.
+    fn check_offer(
+        &self,
+        index: usize,
+        expected: &str,
+        is_expected_kind: impl Fn(&ShopItem) -> bool,
+    ) -> Result<u32, BalatroError> {
         if !matches!(self.state, GameStateKind::Shop) {
             return Err(BalatroError::NotInShop);
         }
-        if shop_index >= self.shop_offers.len() {
-            return Err(BalatroError::IndexOutOfRange(shop_index, self.shop_offers.len()));
-        }
-        if self.shop_offers[shop_index].sold {
+        let offer = self
+            .shop_offers
+            .get(index)
+            .ok_or(BalatroError::IndexOutOfRange(index, self.shop_offers.len()))?;
+        if offer.sold {
             return Err(BalatroError::AlreadySold);
         }
-        if !matches!(self.shop_offers[shop_index].kind, ShopItem::Joker(_)) {
-            return Err(BalatroError::WrongItemType("Expected joker".to_string()));
+        if !is_expected_kind(&offer.kind) {
+            return Err(BalatroError::WrongItemType(format!("Expected {expected}")));
         }
+        Ok(self.offer_price(index).unwrap_or(0))
+    }
 
-        let price = self.offer_price(shop_index).unwrap_or(0);
-        if !self.can_afford(price as i32) {
-            return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
+    /// Refuse a purchase the player cannot cover. Credit Card debt counts as spendable.
+    fn require_affordable(&self, price: u32) -> Result<(), BalatroError> {
+        if self.can_afford(price as i32) {
+            Ok(())
+        } else {
+            Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32))
         }
+    }
+
+    pub fn buy_joker(&mut self, shop_index: usize) -> Result<(), BalatroError> {
+        let price = self.check_offer(shop_index, "joker", |k| matches!(k, ShopItem::Joker(_)))?;
+        self.require_affordable(price)?;
         if self.jokers.len() >= self.effective_joker_slots() {
             return Err(BalatroError::JokerSlotsFull);
         }
 
         self.money -= price as i32;
-        if let ShopItem::Joker(j) = &self.shop_offers[shop_index].kind.clone() {
+        if let ShopItem::Joker(j) = self.shop_offers[shop_index].kind.clone() {
             // A Negative joker brings its own slot; effective_joker_slots() derives that from
             // the board, so nothing needs adding here.
-            self.jokers.push(j.clone());
+            self.jokers.push(j);
         }
         self.shop_offers[shop_index].sold = true;
         Ok(())
@@ -612,26 +575,12 @@ impl GameState {
     }
 
     pub fn buy_consumable(&mut self, shop_index: usize) -> Result<(), BalatroError> {
-        if !matches!(self.state, GameStateKind::Shop) {
-            return Err(BalatroError::NotInShop);
-        }
-        if shop_index >= self.shop_offers.len() {
-            return Err(BalatroError::IndexOutOfRange(shop_index, self.shop_offers.len()));
-        }
-        if self.shop_offers[shop_index].sold {
-            return Err(BalatroError::AlreadySold);
-        }
-        if !matches!(self.shop_offers[shop_index].kind, ShopItem::Consumable(_)) {
-            return Err(BalatroError::WrongItemType("Expected consumable".to_string()));
-        }
-        if !self.has_consumable_room() {
+        let price =
+            self.check_offer(shop_index, "consumable", |k| matches!(k, ShopItem::Consumable(_)))?;
+        if !self.has_room_for_consumable() {
             return Err(BalatroError::ConsumableSlotsFull);
         }
-
-        let price = self.offer_price(shop_index).unwrap_or(0);
-        if !self.can_afford(price as i32) {
-            return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
-        }
+        self.require_affordable(price)?;
 
         self.money -= price as i32;
         if let ShopItem::Consumable(c) = self.shop_offers[shop_index].kind.clone() {
@@ -642,32 +591,17 @@ impl GameState {
     }
 
     pub fn buy_pack(&mut self, shop_index: usize) -> Result<(), BalatroError> {
-        if !matches!(self.state, GameStateKind::Shop) {
-            return Err(BalatroError::NotInShop);
-        }
-        if shop_index >= self.shop_offers.len() {
-            return Err(BalatroError::IndexOutOfRange(shop_index, self.shop_offers.len()));
-        }
-        if self.shop_offers[shop_index].sold {
-            return Err(BalatroError::AlreadySold);
-        }
-        let pack_kind = match &self.shop_offers[shop_index].kind {
-            ShopItem::Pack(p) => *p,
-            _ => return Err(BalatroError::WrongItemType("Expected pack".to_string())),
+        let price = self.check_offer(shop_index, "pack", |k| matches!(k, ShopItem::Pack(_)))?;
+        self.require_affordable(price)?;
+        let ShopItem::Pack(pack_kind) = self.shop_offers[shop_index].kind else {
+            unreachable!("check_offer just confirmed this is a pack")
         };
-
-        let price = self.offer_price(shop_index).unwrap_or(0);
-        if !self.can_afford(price as i32) {
-            return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
-        }
 
         self.money -= price as i32;
         self.shop_offers[shop_index].sold = true;
 
-        // Generate pack contents
-        let contents = self.generate_pack_contents(pack_kind);
+        self.current_pack = Some(self.generate_pack_contents(pack_kind));
         self.on_booster_opened();
-        self.current_pack = Some(contents);
         self.state = GameStateKind::BoosterPack;
         Ok(())
     }
@@ -676,15 +610,10 @@ impl GameState {
         if !matches!(self.state, GameStateKind::Shop) {
             return Err(BalatroError::NotInShop);
         }
-        let voucher = match self.shop_voucher {
-            Some(v) => v,
-            None => return Err(BalatroError::NoVoucherAvailable),
-        };
+        let voucher = self.shop_voucher.ok_or(BalatroError::NoVoucherAvailable)?;
 
         let price = self.voucher_price();
-        if !self.can_afford(price as i32) {
-            return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
-        }
+        self.require_affordable(price)?;
 
         self.money -= price as i32;
         self.apply_voucher(voucher);
@@ -725,19 +654,11 @@ impl GameState {
             VoucherKind::Observatory => {
                 // Planet cards used give +0.5 Xmult — handled in apply_planet
             }
-            VoucherKind::Grabber => {
+            VoucherKind::Grabber | VoucherKind::NachoTong => {
                 self.max_hands += 1;
                 self.hands_remaining = self.hands_remaining.saturating_add(1);
             }
-            VoucherKind::NachoTong => {
-                self.max_hands += 1;
-                self.hands_remaining = self.hands_remaining.saturating_add(1);
-            }
-            VoucherKind::Wasteful => {
-                self.max_discards += 1;
-                self.discards_remaining = self.discards_remaining.saturating_add(1);
-            }
-            VoucherKind::Recyclomancy => {
+            VoucherKind::Wasteful | VoucherKind::Recyclomancy => {
                 self.max_discards += 1;
                 self.discards_remaining = self.discards_remaining.saturating_add(1);
             }
@@ -747,13 +668,9 @@ impl GameState {
             VoucherKind::TarotTycoon => self.tarot_rate = 32.0,
             VoucherKind::PlanetMerchant => self.planet_rate = 9.6,
             VoucherKind::PlanetTycoon => self.planet_rate = 32.0,
-            VoucherKind::SeedMoney => {
-                // Sets the cap outright rather than adding to it (game.lua:602).
-                self.max_interest = self.max_interest.max(50);
-            }
-            VoucherKind::MoneyTree => {
-                self.max_interest = self.max_interest.max(100);
-            }
+            // Both set the interest cap outright rather than adding to it (game.lua:602).
+            VoucherKind::SeedMoney => self.max_interest = self.max_interest.max(50),
+            VoucherKind::MoneyTree => self.max_interest = self.max_interest.max(100),
             VoucherKind::Blank => {
                 // "Does nothing?" (en-us.lua:2988). It exists only to unlock Antimatter.
             }
@@ -778,16 +695,11 @@ impl GameState {
                 self.max_discards = self.max_discards.saturating_sub(1);
                 self.discards_remaining = self.discards_remaining.saturating_sub(1);
             }
-            VoucherKind::DirectorsCut => {
-                // Unlocks a paid Boss blind reroll; no immediate effect.
+            VoucherKind::DirectorsCut | VoucherKind::Retcon => {
+                // Unlock a paid Boss blind reroll — one per ante, or unlimited. No immediate
+                // effect; `can_reroll_boss_blind` reads them.
             }
-            VoucherKind::Retcon => {
-                // Unlimited paid Boss blind rerolls; no immediate effect.
-            }
-            VoucherKind::PaintBrush => {
-                self.hand_size += 1;
-            }
-            VoucherKind::Palette => {
+            VoucherKind::PaintBrush | VoucherKind::Palette => {
                 self.hand_size += 1;
             }
         }
@@ -832,10 +744,7 @@ impl GameState {
             ShopItem::Joker(j) => (j.edition, j.rental),
             _ => (Edition::None, false),
         };
-        let astronomer = self
-            .jokers
-            .iter()
-            .any(|j| j.kind == JokerKind::Astronomer && j.active)
+        let astronomer = self.has_joker(JokerKind::Astronomer)
             && match &offer.kind {
                 ShopItem::Consumable(ConsumableCard::Planet(_)) => true,
                 ShopItem::Pack(p) => self.is_celestial_pack(*p),
@@ -844,9 +753,9 @@ impl GameState {
         Some(self.price_card(offer.price, edition, rental, astronomer, offer.free))
     }
 
-    /// What the voucher on offer costs. Vouchers are a flat $10 before discounts.
+    /// What the voucher on offer costs. Vouchers are a flat price before discounts.
     pub fn voucher_price(&self) -> u32 {
-        self.price_card(10, Edition::None, false, false, false)
+        self.price_card(VOUCHER_COST, Edition::None, false, false, false)
     }
 
     /// Test hook for the pricing rule.
@@ -866,10 +775,7 @@ impl GameState {
 
         let was_free = self.shop_rerolls_free || self.free_rerolls > 0;
         let actual_cost = if was_free { 0 } else { self.reroll_cost };
-
-        if !self.can_afford(actual_cost as i32) {
-            return Err(BalatroError::NotEnoughMoney(actual_cost, self.money.max(0) as u32));
-        }
+        self.require_affordable(actual_cost)?;
 
         self.money -= actual_cost as i32;
         if !self.shop_rerolls_free && self.free_rerolls > 0 {
@@ -884,8 +790,7 @@ impl GameState {
         // Flash Card joker: +2 mult per reroll
         for j in self.jokers.iter_mut() {
             if j.kind == JokerKind::FlashCard {
-                let cur = j.get_counter_i64("mult");
-                j.set_counter_i64("mult", cur + 2);
+                j.add_counter_i64("mult", 2);
             }
         }
 
@@ -895,40 +800,20 @@ impl GameState {
     /// Buy a loose playing card from the shop and add it to the deck.
     /// Only reachable once Magic Trick has been redeemed.
     pub fn buy_playing_card(&mut self, shop_index: usize) -> Result<(), BalatroError> {
-        if !matches!(self.state, GameStateKind::Shop) {
-            return Err(BalatroError::NotInShop);
-        }
-        if shop_index >= self.shop_offers.len() {
-            return Err(BalatroError::IndexOutOfRange(shop_index, self.shop_offers.len()));
-        }
-        if self.shop_offers[shop_index].sold {
-            return Err(BalatroError::AlreadySold);
-        }
+        let price = self.check_offer(shop_index, "playing card", |k| {
+            matches!(k, ShopItem::PlayingCard(_))
+        })?;
+        self.require_affordable(price)?;
         let ShopItem::PlayingCard(card) = self.shop_offers[shop_index].kind.clone() else {
-            return Err(BalatroError::WrongItemType("Expected playing card".to_string()));
+            unreachable!("check_offer just confirmed this is a playing card")
         };
-        let price = self.offer_price(shop_index).unwrap_or(0);
-        if !self.can_afford(price as i32) {
-            return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
-        }
 
         self.money -= price as i32;
         self.shop_offers[shop_index].sold = true;
 
-        let deck_idx = self.deck.len();
-        self.deck.push(card);
-        self.draw_pile.push(deck_idx);
-
+        self.add_card_to_draw_pile(card);
         self.notify_playing_cards_added(1);
         Ok(())
-    }
-
-    /// Whether this Boss blind's ability is switched off right now. Chicot and a sold Luchador
-    /// both do it, and every boss effect has to ask.
-    pub(crate) fn boss_effect_active(&self, boss: BossBlind) -> bool {
-        matches!(self.current_blind, BlindKind::Boss)
-            && self.boss_blind == Some(boss)
-            && !self.boss_blind_disabled()
     }
 
     /// Re-roll the upcoming Boss blind for $10. Director's Cut allows one per ante;
@@ -946,7 +831,7 @@ impl GameState {
         if !unlimited && self.boss_rerolled_this_ante {
             return false;
         }
-        self.can_afford(10)
+        self.can_afford(BOSS_REROLL_COST as i32)
     }
 
     pub fn reroll_boss_blind(&mut self) -> Result<(), BalatroError> {
@@ -963,10 +848,8 @@ impl GameState {
                 "Director's Cut allows only one Boss reroll per ante".to_string(),
             ));
         }
-        let price = 10u32;
-        if !self.can_afford(price as i32) {
-            return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
-        }
+        let price = BOSS_REROLL_COST;
+        self.require_affordable(price)?;
         self.money -= price as i32;
         self.boss_rerolled_this_ante = true;
         self.boss_blind = self.pick_boss_blind();
@@ -981,9 +864,7 @@ impl GameState {
         // Perkeo: at end of shop, creates a Negative copy of 1 random consumable in possession.
         // The Negative copy always fits, because it brings its own slot — one that goes away
         // again once the consumables are spent (`release_negative_consumable_slots`).
-        if self.jokers.iter().any(|j| j.kind == JokerKind::Perkeo && j.active)
-            && !self.consumables.is_empty()
-        {
+        if self.has_joker(JokerKind::Perkeo) && !self.consumables.is_empty() {
             let idx = self.rng.range_usize("perkeo", 0, self.consumables.len() - 1);
             let copy = self.consumables[idx].card.clone();
             self.consumables.push(HeldConsumable::negative(copy));

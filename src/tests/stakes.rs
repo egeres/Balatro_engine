@@ -16,7 +16,6 @@
 
 use super::*;
 use crate::card::ShopItem;
-use crate::types::PackKind;
 
 // =========================================================
 // Stake ordering

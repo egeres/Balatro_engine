@@ -215,8 +215,6 @@ fn test_blue_seal_creates_planet_card_at_round_end() {
 fn test_purple_seal_creates_tarot_card_on_discard() {
     // Purple seal on a discarded card → creates a Tarot consumable
     let mut gs = make_game();
-    let mut purple_card = card(0, Rank::Two, Suit::Spades);
-    purple_card.seal = Seal::Purple;
     setup_round(
         &mut gs,
         (0..10).map(|i| {

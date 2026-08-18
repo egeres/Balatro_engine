@@ -838,21 +838,21 @@ fn test_without_the_psychic_hand_size_3_draws_3() {
 /// TheWall uses a 4× chip multiplier → goal = 300 × 4 = 1200.
 #[test]
 fn test_the_wall_chip_goal_is_4x() {
-    let mut gs = boss_select(BossBlind::TheWall);
+    let gs = boss_select(BossBlind::TheWall);
     assert_eq!(gs.get_blind_chip_goal() as i64, 1200, "TheWall: 300 × 4 = 1200");
 }
 
 /// TheNeedle uses a 1× chip multiplier → goal = 300 × 1 = 300.
 #[test]
 fn test_the_needle_chip_goal_is_1x() {
-    let mut gs = boss_select(BossBlind::TheNeedle);
+    let gs = boss_select(BossBlind::TheNeedle);
     assert_eq!(gs.get_blind_chip_goal() as i64, 300, "TheNeedle: 300 × 1 = 300");
 }
 
 /// VioletVessel uses a 6× chip multiplier → goal = 300 × 6 = 1800.
 #[test]
 fn test_violet_vessel_chip_goal_is_6x() {
-    let mut gs = boss_select(BossBlind::VioletVessel);
+    let gs = boss_select(BossBlind::VioletVessel);
     assert_eq!(gs.get_blind_chip_goal() as i64, 1800, "VioletVessel: 300 × 6 = 1800");
 }
 
@@ -869,7 +869,7 @@ fn test_all_standard_bosses_have_2x_chip_goal() {
         BossBlind::AmberAcorn, BossBlind::CrimsonHeart,
     ];
     for boss in standard_bosses {
-        let mut gs = boss_select(boss);
+        let gs = boss_select(boss);
         assert_eq!(
             gs.get_blind_chip_goal() as i64, 600,
             "{:?} should have 2× chip goal (600)", boss
@@ -1290,10 +1290,6 @@ fn test_crimson_heart_joker_reenabled_after_hand() {
 /// Chicot suppresses CrimsonHeart: no joker is disabled, score includes joker bonuses.
 #[test]
 fn test_crimson_heart_with_chicot_joker_not_disabled() {
-    let played = vec![
-        card(1, Rank::Eight, Suit::Spades),
-        card(2, Rank::Eight, Suit::Hearts),
-    ];
     // AbstractJoker gives +3 mult/joker. With Chicot blocking CrimsonHeart,
     // AbstractJoker should contribute normally: 26 chips × (2+3+3) mult = 26×8 = 208
     // (2 jokers in total: AbstractJoker+Chicot → +6 mult)
@@ -1493,15 +1489,11 @@ fn test_the_hook_discards_2_cards_after_play() {
     let mut gs = boss_select(BossBlind::TheHook);
     gs.select_blind().unwrap();
     gs.score_goal = f64::MAX;
-    let hand_before = gs.hand.len();
     // Play exactly 1 card
     gs.select_card(0).unwrap();
     gs.play_hand().unwrap();
-    // Hand should have lost 1 (played) + 2 (hook) cards, then drawn back
-    // After playing 1 and hook discarding 2: hand_before - 3 cards removed, then draw fills up
-    // Net hand = (hand_before - 3) + min(3, draw_pile remaining)
-    // We can't easily predict exact count, but we can verify 2 extra were discarded
-    // by checking discard_pile size is at least 3 (1 played + 2 hooked)
+    // The hand loses 1 (played) + 2 (hooked) and is then drawn back up, so its final size
+    // depends on what is left in the draw pile. The discard pile is the reliable witness.
     assert!(
         gs.discard_pile.len() >= 3,
         "TheHook: discard pile should have ≥3 cards (1 played + 2 hooked), got {}",

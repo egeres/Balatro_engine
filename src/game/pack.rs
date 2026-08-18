@@ -28,26 +28,12 @@ impl GameState {
     /// Joker effects that fire the moment a booster pack is opened (`context.open_booster`,
     /// card.lua:2334) — once per pack, whatever kind it is, not once per card taken out of it.
     pub(crate) fn on_booster_opened(&mut self) {
-        let hallucinations = self
-            .jokers
-            .iter()
-            .filter(|j| j.kind == JokerKind::Hallucination && j.active)
-            .count();
-        if hallucinations == 0 {
-            return;
-        }
-        let oops = if self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active) {
-            2.0_f64
-        } else {
-            1.0_f64
-        };
-        for _ in 0..hallucinations {
-            if !self.has_consumable_room() {
+        for _ in 0..self.count_joker(JokerKind::Hallucination) {
+            if !self.has_room_for_consumable() {
                 break;
             }
-            if self.rng.next_bool_prob("halu", (0.5 * oops).min(1.0)) {
-                let tarot = self.random_tarot();
-                self.add_consumable(ConsumableCard::Tarot(tarot));
+            if self.roll_chance("halu", 0.5) {
+                self.create_tarot();
             }
         }
     }
@@ -117,31 +103,20 @@ impl GameState {
             | PackKind::StandardPackSmall
             | PackKind::StandardPackJumbo
             | PackKind::StandardPackMega => {
-                let suits = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds];
-                let ranks = [
-                    Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six,
-                    Rank::Seven, Rank::Eight, Rank::Nine, Rank::Ten,
-                    Rank::Jack, Rank::Queen, Rank::King, Rank::Ace,
-                ];
                 // card.lua:1759: 40% of the cards are Enhanced, editions are polled at a fixed
                 // rate of 2, and 20% carry a seal (then uniform across the four).
                 // Balatro keys these per ante (`pseudoseed('stdset'..ante)`).
                 let stdset = crate::rng::keyed("stdset", self.ante);
                 let stdseal = crate::rng::keyed("stdseal", self.ante);
                 for _ in 0..cards_shown {
-                    let suit_idx = self.rng.range_usize(&stdset, 0, 3);
-                    let rank_idx = self.rng.range_usize(&stdset, 0, 12);
+                    let suit = Suit::ALL[self.rng.range_usize(&stdset, 0, Suit::ALL.len() - 1)];
+                    let rank = Rank::ALL[self.rng.range_usize(&stdset, 0, Rank::ALL.len() - 1)];
                     let id = self.next_id();
-                    let mut card = CardInstance::new(id, ranks[rank_idx], suits[suit_idx]);
+                    let mut card = CardInstance::new(id, rank, suit);
 
                     if self.rng.next_f64(&stdset) > 0.6 {
-                        let enhancements = [
-                            Enhancement::Bonus, Enhancement::Mult, Enhancement::Wild,
-                            Enhancement::Glass, Enhancement::Steel, Enhancement::Stone,
-                            Enhancement::Gold, Enhancement::Lucky,
-                        ];
-                        card.enhancement =
-                            enhancements[self.rng.range_usize(&stdset, 0, enhancements.len() - 1)];
+                        let n = Enhancement::ALL.len() - 1;
+                        card.enhancement = Enhancement::ALL[self.rng.range_usize(&stdset, 0, n)];
                     }
 
                     // Standard packs pass a local rate of 2 as `_mod`, which multiplies with the
@@ -193,12 +168,7 @@ impl GameState {
 
         match &card {
             PackCard::PlayingCard(c) => {
-                // Add to deck
-                let new_card = c.clone();
-                let deck_idx = self.deck.len();
-                self.deck.push(new_card);
-                self.draw_pile.push(deck_idx);
-
+                self.add_card_to_draw_pile(c.clone());
                 self.notify_playing_cards_added(1);
             }
             PackCard::Joker(j) => {
@@ -209,7 +179,7 @@ impl GameState {
                 }
             }
             PackCard::Consumable(c) => {
-                if self.has_consumable_room() {
+                if self.has_room_for_consumable() {
                     self.add_consumable(c.clone());
                     // Note: planet_cards_used / tarot_cards_used are incremented in use_consumable,
                     // not here — counting on pick would double-count when the card is later used.

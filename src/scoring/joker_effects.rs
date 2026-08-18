@@ -68,6 +68,19 @@ fn is_copy_joker(kind: JokerKind) -> bool {
     matches!(kind, JokerKind::Blueprint | JokerKind::Brainstorm)
 }
 
+/// What the joker at `idx` behaves as: itself, or — if it is a copy joker — whatever its
+/// Blueprint/Brainstorm chain lands on. `None` when the chain dead-ends.
+///
+/// The imitated joker is returned whole rather than just its kind, because a copy reads the
+/// target's counters too: a Blueprint next to a Seltzer retriggers on *Seltzer's* remaining hands.
+fn effective_joker(jokers: &[JokerInstance], idx: usize) -> Option<&JokerInstance> {
+    let joker = jokers.get(idx)?;
+    if !is_copy_joker(joker.kind) {
+        return Some(joker);
+    }
+    jokers.get(copy_target(jokers, idx)?)
+}
+
 /// Which suits a scoring hand covers, with Wild Cards each filling at most **one** still-missing
 /// suit rather than counting as all four (card.lua:3807, :3842).
 ///
@@ -111,21 +124,9 @@ fn covered_suits(
 
 /// How many active jokers behave as `kind`, counting Blueprint / Brainstorm copies of it.
 pub(crate) fn count_effective_jokers(jokers: &[JokerInstance], kind: JokerKind) -> usize {
-    jokers
-        .iter()
-        .enumerate()
-        .filter(|(_, j)| j.active)
-        .filter(|(idx, j)| {
-            let effective = if is_copy_joker(j.kind) {
-                match copy_target(jokers, *idx) {
-                    Some(t) => jokers[t].kind,
-                    None => return false,
-                }
-            } else {
-                j.kind
-            };
-            effective == kind
-        })
+    (0..jokers.len())
+        .filter(|&idx| jokers[idx].active)
+        .filter(|&idx| effective_joker(jokers, idx).is_some_and(|j| j.kind == kind))
         .count()
 }
 
@@ -147,16 +148,10 @@ pub(crate) fn count_retriggers(
         retriggers += 1;
     }
 
-    for (j_idx, joker) in jokers.iter().enumerate().filter(|(_, j)| j.active) {
-        // A copy joker retriggers exactly like whatever it is imitating, reading that joker's
-        // counters too (Seltzer's remaining hands, for instance).
-        let joker = if is_copy_joker(joker.kind) {
-            match copy_target(jokers, j_idx) {
-                Some(t) => &jokers[t],
-                None => continue,
-            }
-        } else {
-            joker
+    for j_idx in (0..jokers.len()).filter(|&i| jokers[i].active) {
+        // A copy joker retriggers exactly like whatever it is imitating.
+        let Some(joker) = effective_joker(jokers, j_idx) else {
+            continue;
         };
         match joker.kind {
             JokerKind::Dusk if hands_remaining == 0 => {
@@ -201,19 +196,12 @@ pub(crate) fn count_hand_retriggers(card: &CardInstance, jokers: &[JokerInstance
     if card.seal == Seal::Red {
         retriggers += 1;
     }
-    for (j_idx, joker) in jokers.iter().enumerate().filter(|(_, j)| j.active) {
-        let kind = if is_copy_joker(joker.kind) {
-            match copy_target(jokers, j_idx) {
-                Some(t) => jokers[t].kind,
-                None => continue,
-            }
-        } else {
-            joker.kind
-        };
-        if kind == JokerKind::Mime {
-            retriggers += 1;
-        }
-    }
+    retriggers += (0..jokers.len())
+        .filter(|&idx| jokers[idx].active)
+        .filter(|&idx| {
+            effective_joker(jokers, idx).is_some_and(|j| j.kind == JokerKind::Mime)
+        })
+        .count();
     retriggers
 }
 
@@ -672,21 +660,10 @@ pub(crate) fn calc_joker_main(
             effect.dollars += gold as i32 * 4;
         }
         JokerKind::ToDoList => {
-            let target_str = joker.counters.get("hand_type").and_then(|v| v.as_str()).unwrap_or("HighCard");
-            let target = match target_str {
-                "Pair"          => HandType::Pair,
-                "TwoPair"       => HandType::TwoPair,
-                "ThreeOfAKind"  => HandType::ThreeOfAKind,
-                "Straight"      => HandType::Straight,
-                "Flush"         => HandType::Flush,
-                "FullHouse"     => HandType::FullHouse,
-                "FourOfAKind"   => HandType::FourOfAKind,
-                "StraightFlush" => HandType::StraightFlush,
-                "FiveOfAKind"   => HandType::FiveOfAKind,
-                "FlushHouse"    => HandType::FlushHouse,
-                "FlushFive"     => HandType::FlushFive,
-                _               => HandType::HighCard,
-            };
+            let target = joker
+                .get_counter_str("hand_type")
+                .and_then(HandType::from_debug_name)
+                .unwrap_or(HandType::HighCard);
             if hand_type == target { effect.dollars += 4; }
         }
 

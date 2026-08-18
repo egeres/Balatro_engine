@@ -1,6 +1,6 @@
 use crate::card::*;
 use crate::rng::Rng;
-use crate::scoring::{score_hand, RoundTargets, ScoreResult};
+use crate::scoring::RoundTargets;
 use crate::types::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -192,22 +192,13 @@ pub struct HistoryEvent {
 impl GameState {
     pub fn new(deck_type: DeckType, stake: Stake, seed: Option<String>) -> Self {
         let seed = seed.unwrap_or_default();
-        let mut rng = Rng::new(&seed);
+        let rng = Rng::new(&seed);
 
-        // Initialize hand levels
-        let mut hand_levels = HashMap::new();
-        hand_levels.insert(HandType::FlushFive, HandLevelData::new(false));
-        hand_levels.insert(HandType::FlushHouse, HandLevelData::new(false));
-        hand_levels.insert(HandType::FiveOfAKind, HandLevelData::new(false));
-        hand_levels.insert(HandType::StraightFlush, HandLevelData::new(true));
-        hand_levels.insert(HandType::FourOfAKind, HandLevelData::new(true));
-        hand_levels.insert(HandType::FullHouse, HandLevelData::new(true));
-        hand_levels.insert(HandType::Flush, HandLevelData::new(true));
-        hand_levels.insert(HandType::Straight, HandLevelData::new(true));
-        hand_levels.insert(HandType::ThreeOfAKind, HandLevelData::new(true));
-        hand_levels.insert(HandType::TwoPair, HandLevelData::new(true));
-        hand_levels.insert(HandType::Pair, HandLevelData::new(true));
-        hand_levels.insert(HandType::HighCard, HandLevelData::new(true));
+        // Every hand starts at level 1; the three secret ones start hidden.
+        let hand_levels: HashMap<HandType, HandLevelData> = HandType::ALL
+            .into_iter()
+            .map(|ht| (ht, HandLevelData::new(!ht.is_secret())))
+            .collect();
 
         let mut gs = GameState {
             rng,
@@ -387,25 +378,9 @@ impl GameState {
 
     pub fn build_deck(&mut self) {
         let mut cards = Vec::new();
-        let suits = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds];
-        let ranks = [
-            Rank::Two,
-            Rank::Three,
-            Rank::Four,
-            Rank::Five,
-            Rank::Six,
-            Rank::Seven,
-            Rank::Eight,
-            Rank::Nine,
-            Rank::Ten,
-            Rank::Jack,
-            Rank::Queen,
-            Rank::King,
-            Rank::Ace,
-        ];
 
-        for &suit in &suits {
-            for &rank in &ranks {
+        for suit in Suit::ALL {
+            for rank in Rank::ALL {
                 // Abandoned deck: skip face cards
                 if self.deck_type == DeckType::Abandoned && rank.is_face() {
                     continue;
@@ -425,10 +400,10 @@ impl GameState {
 
                 // Erratic deck: randomize rank and suit
                 if self.deck_type == DeckType::Erratic {
-                    let new_rank_idx = self.rng.range_u32("erratic", 0, 12) as usize;
-                    card.rank = ranks[new_rank_idx];
-                    let new_suit_idx = self.rng.range_u32("erratic", 0, 3) as usize;
-                    card.suit = suits[new_suit_idx];
+                    let rank_idx = self.rng.range_u32("erratic", 0, Rank::ALL.len() as u32 - 1);
+                    let suit_idx = self.rng.range_u32("erratic", 0, Suit::ALL.len() as u32 - 1);
+                    card.rank = Rank::ALL[rank_idx as usize];
+                    card.suit = Suit::ALL[suit_idx as usize];
                 }
 
                 cards.push(card);
@@ -467,19 +442,77 @@ mod pack;
 mod consumable;
 
 impl GameState {
-    pub fn hand_cards(&self) -> Vec<(usize, &CardInstance)> {
-        self.hand
+    // ---------------------------------------------------------------------
+    // Asking about the board
+    // ---------------------------------------------------------------------
+
+    /// Whether an active copy of `kind` is on the board.
+    ///
+    /// "Active" is the important half: a Perishable joker that has run out still occupies its
+    /// slot and still counts for Abstract Joker, but its ability is switched off.
+    pub(crate) fn has_joker(&self, kind: JokerKind) -> bool {
+        self.jokers.iter().any(|j| j.kind == kind && j.active)
+    }
+
+    /// How many active copies of `kind` are on the board. Showman makes duplicates reachable,
+    /// and the effects that pay per copy have to count them.
+    pub(crate) fn count_joker(&self, kind: JokerKind) -> usize {
+        self.jokers.iter().filter(|j| j.kind == kind && j.active).count()
+    }
+
+    /// Every active joker of `kind`, by index — for the effects that mutate their own counters.
+    pub(crate) fn joker_indices(&self, kind: JokerKind) -> Vec<usize> {
+        self.jokers
             .iter()
             .enumerate()
-            .map(|(hi, &di)| (hi, &self.deck[di]))
+            .filter(|(_, j)| j.kind == kind && j.active)
+            .map(|(i, _)| i)
             .collect()
     }
 
-    pub fn is_card_selected(&self, hand_index: usize) -> bool {
-        self.selected_indices.contains(&hand_index)
+    /// The multiplier Oops! All 6s puts on every *listed* probability (card.lua:1450). Each copy
+    /// doubles again in Balatro; this mirrors the single-copy behaviour the engine implements.
+    fn probability_mult(&self) -> f64 {
+        if self.has_joker(JokerKind::OopsAll6s) {
+            2.0
+        } else {
+            1.0
+        }
     }
 
-    /// Notify Canio joker when a card is destroyed — if it's a face card, Canio gains +1 Xmult.
+    /// Roll one of Balatro's listed probabilities — "1 in 4 chance to…" and friends — from the
+    /// `key` stream, with Oops! All 6s applied. A doubled certainty is still just certain.
+    pub(crate) fn roll_chance(&mut self, key: &str, probability: f64) -> bool {
+        let p = (probability * self.probability_mult()).min(1.0);
+        self.rng.next_bool_prob(key, p)
+    }
+
+    /// The Boss blind in force *with its ability switched on*, if any.
+    ///
+    /// Three things have to line up: it is the Boss round, a Boss was drawn, and nothing has
+    /// disabled it (Chicot passively, a sold Luchador by latch). Every boss effect asks this.
+    pub(crate) fn active_boss(&self) -> Option<BossBlind> {
+        if !matches!(self.current_blind, BlindKind::Boss) || self.boss_blind_disabled() {
+            return None;
+        }
+        self.boss_blind
+    }
+
+    /// Whether this specific Boss blind's ability is in force right now.
+    pub(crate) fn boss_effect_active(&self, boss: BossBlind) -> bool {
+        self.active_boss() == Some(boss)
+    }
+
+    /// Record something that happened, stamped with the ante and round it happened in.
+    pub(crate) fn log_event(&mut self, event_type: &str, data: serde_json::Value) {
+        self.history.push(HistoryEvent {
+            ante: self.ante,
+            round: self.round,
+            event_type: event_type.to_string(),
+            data,
+        });
+    }
+
     /// Remove a single card from `deck` by ID and remap all index collections.
     /// Use this instead of `deck.retain(...)` to avoid stale indices in hand/draw_pile/discard_pile.
     pub(crate) fn destroy_deck_card(&mut self, card_id: u64) {
@@ -509,12 +542,7 @@ impl GameState {
     /// The lowest balance the player is allowed to reach (`G.GAME.bankrupt_at`, game.lua:1922).
     /// Normally $0; each Credit Card lowers it by $20 (card.lua:594).
     pub fn bankrupt_at(&self) -> i32 {
-        let credit_cards = self
-            .jokers
-            .iter()
-            .filter(|j| j.kind == JokerKind::CreditCard && j.active)
-            .count();
-        -20 * credit_cards as i32
+        -20 * self.count_joker(JokerKind::CreditCard) as i32
     }
 
     /// Whether a purchase of `cost` is allowed. Balatro's shop buttons test
@@ -544,8 +572,7 @@ impl GameState {
         }
         for j in self.jokers.iter_mut() {
             if j.kind == JokerKind::Hologram && j.active {
-                let cur = j.get_counter_f64("x_mult");
-                j.set_counter_f64("x_mult", cur + 0.25 * count as f64);
+                j.add_counter_f64("x_mult", 0.25 * count as f64);
             }
         }
     }
@@ -562,8 +589,7 @@ impl GameState {
                 continue;
             }
             if j.kind == JokerKind::Campfire {
-                let cur = j.get_counter_f64("x_mult");
-                j.set_counter_f64("x_mult", cur + 0.25);
+                j.add_counter_f64("x_mult", 0.25);
             }
         }
     }
@@ -639,13 +665,13 @@ impl GameState {
     /// Whether Pareidolia is out. `Card:is_face` answers yes to every card while it is
     /// (card.lua:964), so this gates every face-card check in the game, not just the scoring ones.
     pub(crate) fn has_pareidolia(&self) -> bool {
-        self.jokers.iter().any(|j| j.kind == JokerKind::Pareidolia && j.active)
+        self.has_joker(JokerKind::Pareidolia)
     }
 
     /// Whether Smeared Joker is out. It lives inside `Card:is_suit` (card.lua:4084), so it merges
     /// Hearts with Diamonds and Spades with Clubs for *every* suit check, not only flushes.
     pub(crate) fn has_smeared(&self) -> bool {
-        self.jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active)
+        self.has_joker(JokerKind::SmearedJoker)
     }
 
     /// How many consumables can be held right now: the slot count plus one for each Negative
@@ -661,14 +687,41 @@ impl GameState {
         self.consumables.len() < self.effective_consumable_slots()
     }
 
-    /// Alias kept for the internal call sites.
-    pub(crate) fn has_consumable_room(&self) -> bool {
-        self.has_room_for_consumable()
-    }
-
-    /// Put a consumable into the slots. Callers gate on [`Self::has_consumable_room`] first.
+    /// Put a consumable into the slots. Callers gate on [`Self::has_room_for_consumable`] first.
     pub(crate) fn add_consumable(&mut self, card: ConsumableCard) {
         self.consumables.push(HeldConsumable::new(card));
+    }
+
+    /// Put a freshly created card into the deck, ready to be drawn this round.
+    ///
+    /// Deliberately does not notify the jokers that react to a card being added: several of the
+    /// effects that call this add a handful at once, and Hologram counts the batch, not the card.
+    pub(crate) fn add_card_to_draw_pile(&mut self, card: CardInstance) {
+        let deck_idx = self.deck.len();
+        self.deck.push(card);
+        self.draw_pile.push(deck_idx);
+    }
+
+    /// Hand the player a random Tarot, if a slot is free. A great many effects do exactly this.
+    ///
+    /// No slot means no card is *rolled* at all, not one rolled and thrown away, so a full
+    /// consumable tray leaves the tarot stream untouched.
+    pub(crate) fn create_tarot(&mut self) {
+        if !self.has_room_for_consumable() {
+            return;
+        }
+        let tarot = self.random_tarot();
+        self.add_consumable(ConsumableCard::Tarot(tarot));
+    }
+
+    /// As [`Self::create_tarot`], drawing a Spectral from an effect-specific pool: the jokers
+    /// that conjure one each have their own shortlist.
+    pub(crate) fn create_spectral_from(&mut self, key: &str, pool: &[SpectralCard]) {
+        if !self.has_room_for_consumable() || pool.is_empty() {
+            return;
+        }
+        let pick = pool[self.rng.range_usize(key, 0, pool.len() - 1)];
+        self.add_consumable(ConsumableCard::Spectral(pick));
     }
 
     /// The ante that ends the run (`G.GAME.win_ante`).
@@ -686,11 +739,7 @@ impl GameState {
     /// when sold (`card.lua:2355`, `context.selling_self`) — that case latches
     /// `boss_blind_manually_disabled` instead.
     pub(crate) fn boss_blind_disabled(&self) -> bool {
-        self.boss_blind_manually_disabled
-            || self
-                .jokers
-                .iter()
-                .any(|j| j.kind == JokerKind::Chicot && j.active)
+        self.boss_blind_manually_disabled || self.has_joker(JokerKind::Chicot)
     }
 
     /// Notify jokers that a playing card has been destroyed, by any means (Glass shatter, a
@@ -711,36 +760,18 @@ impl GameState {
                 continue;
             }
             match j.kind {
-                JokerKind::Canio if is_face => {
-                    let cur = j.get_counter_f64("x_mult");
-                    j.set_counter_f64("x_mult", cur + 1.0);
-                }
-                JokerKind::GlassJoker if is_glass => {
-                    let cur = j.get_counter_f64("x_mult");
-                    j.set_counter_f64("x_mult", cur + 0.75);
-                }
+                JokerKind::Canio if is_face => j.add_counter_f64("x_mult", 1.0),
+                JokerKind::GlassJoker if is_glass => j.add_counter_f64("x_mult", 0.75),
                 _ => {}
             }
         }
     }
 }
 
+/// The next rank up, as Strength gives it. An Ace cannot go higher and stays put.
 pub(crate) fn rank_up(rank: Rank) -> Rank {
-    match rank {
-        Rank::Two => Rank::Three,
-        Rank::Three => Rank::Four,
-        Rank::Four => Rank::Five,
-        Rank::Five => Rank::Six,
-        Rank::Six => Rank::Seven,
-        Rank::Seven => Rank::Eight,
-        Rank::Eight => Rank::Nine,
-        Rank::Nine => Rank::Ten,
-        Rank::Ten => Rank::Jack,
-        Rank::Jack => Rank::Queen,
-        Rank::Queen => Rank::King,
-        Rank::King => Rank::Ace,
-        Rank::Ace => Rank::Ace, // Can't go higher
-    }
+    let pos = Rank::ALL.iter().position(|&r| r == rank).unwrap_or(0);
+    Rank::ALL.get(pos + 1).copied().unwrap_or(Rank::Ace)
 }
 
 pub(crate) fn upgraded_voucher(base: VoucherKind) -> VoucherKind {
@@ -769,9 +800,9 @@ pub(crate) fn upgraded_voucher(base: VoucherKind) -> VoucherKind {
 /// Blind scaling tier, driven by stake (`game.lua:2053`, `:2056`). Green and above use a steeper
 /// curve, Purple and above steeper still.
 pub fn blind_scaling_tier(stake: Stake) -> u8 {
-    if stake as u8 >= Stake::Purple as u8 {
+    if stake.at_least(Stake::Purple) {
         3
-    } else if stake as u8 >= Stake::Green as u8 {
+    } else if stake.at_least(Stake::Green) {
         2
     } else {
         1

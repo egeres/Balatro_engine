@@ -2,9 +2,21 @@ use crate::card::*;
 use crate::types::*;
 use crate::scoring::score_hand;
 use crate::scoring::ScoreResult;
-use crate::hand_eval::evaluate_hand;
-use std::collections::HashMap;
-use super::{GameState, GameStateKind, BlindKind, BalatroError, HistoryEvent, LastConsumable};
+use super::{GameState, GameStateKind, BlindKind, BalatroError};
+
+/// Seance's pool: every spectral except the ones that need a target card, plus Hex.
+const SEANCE_SPECTRALS: [SpectralCard; 11] = [
+    SpectralCard::Familiar, SpectralCard::Grim, SpectralCard::Incantation, SpectralCard::Aura,
+    SpectralCard::Wraith, SpectralCard::Ectoplasm, SpectralCard::Ankh, SpectralCard::DejaVu,
+    SpectralCard::Hex, SpectralCard::Medium, SpectralCard::Cryptid,
+];
+
+/// Sixth Sense's pool, which trades Ectoplasm, Hex and Cryptid for Talisman.
+const SIXTH_SENSE_SPECTRALS: [SpectralCard; 9] = [
+    SpectralCard::Familiar, SpectralCard::Grim, SpectralCard::Incantation, SpectralCard::Talisman,
+    SpectralCard::Aura, SpectralCard::Wraith, SpectralCard::Ankh, SpectralCard::DejaVu,
+    SpectralCard::Medium,
+];
 
 /// The result of a hand the Boss blind refused to score. The hand still counts as played and
 /// still costs a hand — it simply produces nothing (state_events.lua:614).
@@ -29,13 +41,12 @@ impl GameState {
     /// Evaluate a set of cards with the current jokers' hand-shape modifiers applied
     /// (Four Fingers, Shortcut, Smeared Joker, Splash).
     pub(crate) fn preview_hand(&self, cards: &[CardInstance]) -> crate::hand_eval::HandEvalResult {
-        let has = |k: JokerKind| self.jokers.iter().any(|j| j.kind == k && j.active);
-        evaluate_hand(
+        crate::hand_eval::evaluate_hand(
             cards,
-            has(JokerKind::FourFingers),
-            has(JokerKind::Shortcut),
-            has(JokerKind::SmearedJoker),
-            has(JokerKind::Splash),
+            self.has_joker(JokerKind::FourFingers),
+            self.has_joker(JokerKind::Shortcut),
+            self.has_joker(JokerKind::SmearedJoker),
+            self.has_joker(JokerKind::Splash),
         )
     }
 
@@ -49,10 +60,7 @@ impl GameState {
         eval: &crate::hand_eval::HandEvalResult,
         played: &[CardInstance],
     ) -> bool {
-        if !matches!(self.current_blind, BlindKind::Boss) || self.boss_blind_disabled() {
-            return false;
-        }
-        let Some(boss) = self.boss_blind else { return false };
+        let Some(boss) = self.active_boss() else { return false };
 
         // A debuffed card in the scoring hand trips the blind (state_events.lua:656).
         if eval.scoring_indices.iter().any(|&i| played[i].debuffed) {
@@ -94,10 +102,7 @@ impl GameState {
         eval: &crate::hand_eval::HandEvalResult,
         played_count: usize,
     ) -> bool {
-        if !matches!(self.current_blind, BlindKind::Boss) || self.boss_blind_disabled() {
-            return false;
-        }
-        match self.boss_blind {
+        match self.active_boss() {
             // `debuff = {h_size_ge = 5}` (game.lua:280): fewer than five cards is refused.
             Some(BossBlind::ThePsychic) => played_count < 5,
             // No hand type twice in a round.
@@ -129,11 +134,6 @@ impl GameState {
         let hand_type = eval.hand_type;
         let scoring = &eval.scoring_indices;
         let pareidolia = self.has_pareidolia();
-        let oops_mult = if self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active) {
-            2.0_f64
-        } else {
-            1.0_f64
-        };
 
         for i in 0..self.jokers.len() {
             if !self.jokers[i].active {
@@ -149,13 +149,11 @@ impl GameState {
                 JokerKind::LoyaltyCard => {
                     // X4 Mult every 6th hand played since the joker was acquired
                     // (card.lua:3633 counts from hands_played_at_create).
-                    let n = self.jokers[i].get_counter_i64("hands") + 1;
-                    self.jokers[i].set_counter_i64("hands", n);
+                    self.jokers[i].add_counter_i64("hands", 1);
                 }
                 JokerKind::SquareJoker => {
                     if played.len() == 4 {
-                        let cur = self.jokers[i].get_counter_i64("chips");
-                        self.jokers[i].set_counter_i64("chips", cur + 4);
+                        self.jokers[i].add_counter_i64("chips", 4);
                     }
                 }
                 JokerKind::WeeJoker => {
@@ -177,34 +175,29 @@ impl GameState {
                         })
                         .sum();
                     if twos > 0 {
-                        let cur = self.jokers[i].get_counter_i64("chips");
-                        self.jokers[i].set_counter_i64("chips", cur + 8 * twos as i64);
+                        self.jokers[i].add_counter_i64("chips", 8 * twos as i64);
                     }
                 }
                 JokerKind::Runner => {
                     // `next(context.poker_hands['Straight'])` — contained, not the hand's name.
                     if eval.contained.contains(HandType::Straight) {
-                        let cur = self.jokers[i].get_counter_i64("chips");
-                        self.jokers[i].set_counter_i64("chips", cur + 15);
+                        self.jokers[i].add_counter_i64("chips", 15);
                     }
                 }
                 JokerKind::GreenJoker => {
-                    let cur = self.jokers[i].get_counter_i64("mult");
-                    self.jokers[i].set_counter_i64("mult", cur + 1);
+                    self.jokers[i].add_counter_i64("mult", 1);
                 }
                 JokerKind::SpareTrousers => {
                     if eval.contained.contains(HandType::TwoPair) {
-                        let cur = self.jokers[i].get_counter_i64("mult");
-                        self.jokers[i].set_counter_i64("mult", cur + 2);
+                        self.jokers[i].add_counter_i64("mult", 2);
                     }
                 }
                 JokerKind::RideTheBus => {
-                    let has_face = scoring.iter().any(|&s| played[s].is_face(pareidolia));
-                    if has_face {
+                    // A scoring face card resets the run of consecutive faceless hands.
+                    if scoring.iter().any(|&s| played[s].is_face(pareidolia)) {
                         self.jokers[i].set_counter_i64("mult", 0);
                     } else {
-                        let cur = self.jokers[i].get_counter_i64("mult");
-                        self.jokers[i].set_counter_i64("mult", cur + 1);
+                        self.jokers[i].add_counter_i64("mult", 1);
                     }
                 }
                 JokerKind::Obelisk => {
@@ -222,8 +215,7 @@ impl GameState {
                         .iter()
                         .any(|(ht, h)| *ht != hand_type && h.visible && h.played >= this_plays);
                     if another_is_at_least_as_played {
-                        let cur = self.jokers[i].get_counter_f64("x_mult");
-                        self.jokers[i].set_counter_f64("x_mult", cur + 0.2);
+                        self.jokers[i].add_counter_f64("x_mult", 0.2);
                     } else {
                         self.jokers[i].set_counter_f64("x_mult", 1.0);
                     }
@@ -237,8 +229,7 @@ impl GameState {
                         .filter(|&s| played[s].enhancement != Enhancement::None)
                         .collect();
                     if !victims.is_empty() {
-                        let cur = self.jokers[i].get_counter_f64("x_mult");
-                        self.jokers[i].set_counter_f64("x_mult", cur + 0.1 * victims.len() as f64);
+                        self.jokers[i].add_counter_f64("x_mult", 0.1 * victims.len() as f64);
                         for s in victims {
                             let id = played[s].id;
                             played[s].enhancement = Enhancement::None;
@@ -261,7 +252,7 @@ impl GameState {
                 }
                 JokerKind::SpaceJoker => {
                     // 1/4 to level up the played hand — before scoring, so the new level counts.
-                    if self.rng.next_bool_prob("space", (0.25 * oops_mult).min(1.0)) {
+                    if self.roll_chance("space", 0.25) {
                         if let Some(level) = self.hand_levels.get_mut(&hand_type) {
                             level.level += 1;
                         }
@@ -347,25 +338,6 @@ impl GameState {
         Ok(())
     }
 
-    pub fn deselect_cards_by_suit(&mut self, suit: Suit) -> Result<(), BalatroError> {
-        if !matches!(self.state, GameStateKind::Round) {
-            return Err(BalatroError::NotInRound);
-        }
-        let to_deselect: Vec<usize> = self
-            .selected_indices
-            .iter()
-            .filter(|&&i| {
-                let card_idx = self.hand[i];
-                self.deck[card_idx].suit == suit
-            })
-            .copied()
-            .collect();
-        for i in to_deselect {
-            self.selected_indices.retain(|&x| x != i);
-        }
-        Ok(())
-    }
-
     pub fn play_hand(&mut self) -> Result<ScoreResult, BalatroError> {
         if !matches!(self.state, GameStateKind::Round) {
             return Err(BalatroError::NotInRound);
@@ -400,25 +372,17 @@ impl GameState {
             self.pre_score_joker_updates(&mut played_cards, &pre_eval);
         }
 
-        // OopsAll6s: doubles all listed probabilities when active
-        let oops_active = self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active);
-        let oops_mult = if oops_active { 2.0_f64 } else { 1.0_f64 };
-
-        // Bloodstone: pre-roll 1/2 chance x1.5 per scoring Hearts card
-        let has_bloodstone = !hand_debuffed
-            && self.jokers.iter().any(|j| j.kind == JokerKind::Bloodstone && j.active);
-        if has_bloodstone {
-            let has_four_fingers = self.jokers.iter().any(|j| j.kind == JokerKind::FourFingers && j.active);
-            let has_shortcut = self.jokers.iter().any(|j| j.kind == JokerKind::Shortcut && j.active);
-            let has_smeared = self.jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active);
-            let has_splash = self.jokers.iter().any(|j| j.kind == JokerKind::Splash && j.active);
-            let pre_eval = crate::hand_eval::evaluate_hand(&played_cards, has_four_fingers, has_shortcut, has_smeared, has_splash);
-            for &idx in &pre_eval.scoring_indices {
-                let card = &mut played_cards[idx];
-                if !card.debuffed && card.is_suit(Suit::Hearts, has_smeared) {
-                    if self.rng.next_bool_prob("bloodstone", (0.5 * oops_mult).min(1.0)) {
-                        card.extra_x_mult = 1.5;
-                    }
+        // Bloodstone: pre-roll 1/2 chance x1.5 per scoring Hearts card. Re-evaluated rather than
+        // reusing `pre_eval` because the `before` pass may have changed which cards score.
+        if !hand_debuffed && self.has_joker(JokerKind::Bloodstone) {
+            let smeared = self.has_smeared();
+            for idx in self.preview_hand(&played_cards).scoring_indices {
+                let card = &played_cards[idx];
+                if !card.debuffed
+                    && card.is_suit(Suit::Hearts, smeared)
+                    && self.roll_chance("bloodstone", 0.5)
+                {
+                    played_cards[idx].extra_x_mult = 1.5;
                 }
             }
         }
@@ -427,19 +391,20 @@ impl GameState {
         // +20 Mult on 1/5 (written into extra_mult so flat_mult_bonus picks it up).
         // $20 on 1/15 (counted here, paid out after scoring).
         let mut lucky_dollar_count: i32 = 0;
-        for card in played_cards.iter_mut() {
-            if !hand_debuffed && card.enhancement == Enhancement::Lucky && !card.debuffed {
-                if self.rng.next_bool_prob("lucky_mult", (1.0 / 5.0) * oops_mult) {
-                    card.extra_mult += 20;
-                }
-                if self.rng.next_bool_prob("lucky_money", (1.0 / 15.0) * oops_mult) {
-                    lucky_dollar_count += 1;
-                    // LuckyCat joker: gains +0.25 x_mult per successful Lucky trigger
-                    for j in self.jokers.iter_mut() {
-                        if j.kind == JokerKind::LuckyCat && j.active {
-                            let cur = j.get_counter_f64("x_mult");
-                            j.set_counter_f64("x_mult", cur + 0.25);
-                        }
+        for idx in 0..played_cards.len() {
+            let card = &played_cards[idx];
+            if hand_debuffed || card.enhancement != Enhancement::Lucky || card.debuffed {
+                continue;
+            }
+            if self.roll_chance("lucky_mult", 1.0 / 5.0) {
+                played_cards[idx].extra_mult += 20;
+            }
+            if self.roll_chance("lucky_money", 1.0 / 15.0) {
+                lucky_dollar_count += 1;
+                // LuckyCat joker: gains +0.25 x_mult per successful Lucky trigger
+                for j in self.jokers.iter_mut() {
+                    if j.kind == JokerKind::LuckyCat && j.active {
+                        j.add_counter_f64("x_mult", 0.25);
                     }
                 }
             }
@@ -467,50 +432,30 @@ impl GameState {
             .count();
 
         // TheArm: decrease the level of the played poker hand by 1 (minimum 1) before scoring
-        if let Some(BossBlind::TheArm) = self.boss_blind {
-            if matches!(self.current_blind, BlindKind::Boss) {
-                if !self.boss_blind_disabled() {
-                    // Determine the hand type that will be played
-                    let has_four_fingers = self.jokers.iter().any(|j| j.kind == JokerKind::FourFingers && j.active);
-                    let has_shortcut = self.jokers.iter().any(|j| j.kind == JokerKind::Shortcut && j.active);
-                    let has_smeared = self.jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active);
-                    let has_splash = self.jokers.iter().any(|j| j.kind == JokerKind::Splash && j.active);
-                    let arm_preview = evaluate_hand(&played_cards, has_four_fingers, has_shortcut, has_smeared, has_splash);
-                    if let Some(level) = self.hand_levels.get_mut(&arm_preview.hand_type) {
-                        if level.level > 1 {
-                            level.level -= 1;
-                        }
-                    }
-                }
+        if self.boss_effect_active(BossBlind::TheArm) {
+            let arm_hand = self.preview_hand(&played_cards).hand_type;
+            if let Some(level) = self.hand_levels.get_mut(&arm_hand) {
+                level.level = level.level.saturating_sub(1).max(1);
             }
         }
 
         // CrimsonHeart: disable one random active joker for the duration of this hand
-        let crimson_disabled_joker_id: Option<u64> = if let Some(BossBlind::CrimsonHeart) = self.boss_blind {
-            if matches!(self.current_blind, BlindKind::Boss) {
-                if !self.boss_blind_disabled() {
-                    let active_jokers: Vec<usize> = self.jokers.iter().enumerate()
-                        .filter(|(_, j)| j.active)
-                        .map(|(i, _)| i)
-                        .collect();
-                    if !active_jokers.is_empty() {
-                        let pick = self.rng.range_usize("crimson_heart", 0, active_jokers.len() - 1);
-                        let idx = active_jokers[pick];
-                        let id = self.jokers[idx].id;
-                        self.jokers[idx].active = false;
-                        Some(id)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
+        let mut crimson_disabled_joker_id: Option<u64> = None;
+        if self.boss_effect_active(BossBlind::CrimsonHeart) {
+            let active_jokers: Vec<usize> = self
+                .jokers
+                .iter()
+                .enumerate()
+                .filter(|(_, j)| j.active)
+                .map(|(i, _)| i)
+                .collect();
+            if !active_jokers.is_empty() {
+                let pick = self.rng.range_usize("crimson_heart", 0, active_jokers.len() - 1);
+                let idx = active_jokers[pick];
+                self.jokers[idx].active = false;
+                crimson_disabled_joker_id = Some(self.jokers[idx].id);
             }
-        } else {
-            None
-        };
+        }
 
         let mut inputs = crate::scoring::ScoreInputs::new(
             &played_cards,
@@ -566,20 +511,11 @@ impl GameState {
         }
 
         // TheOx: playing the most-played hand type this run sets money to $0
-        if let Some(BossBlind::TheOx) = self.boss_blind {
-            if matches!(self.current_blind, BlindKind::Boss) {
-                if !self.boss_blind_disabled() {
-                    let max_played = self.hand_levels.values().map(|h| h.played).max().unwrap_or(0);
-                    if max_played > 0 {
-                        let played_hand_count = self.hand_levels
-                            .get(&result.hand_type)
-                            .map(|h| h.played)
-                            .unwrap_or(0);
-                        if played_hand_count >= max_played {
-                            self.money = 0;
-                        }
-                    }
-                }
+        if self.boss_effect_active(BossBlind::TheOx) {
+            let most_played = self.hand_levels.values().map(|h| h.played).max().unwrap_or(0);
+            let this_played = self.hand_levels.get(&result.hand_type).map_or(0, |h| h.played);
+            if most_played > 0 && this_played >= most_played {
+                self.money = 0;
             }
         }
 
@@ -604,17 +540,17 @@ impl GameState {
 
         // Post-scoring joker updates. A debuffed hand never reaches the joker phase at all.
         if !hand_debuffed {
-            self.post_play_joker_updates(&result, &played_cards, &hand_cards);
+            self.post_play_joker_updates(&result, &played_cards);
         }
 
         // Vagabond: create a tarot if money <= $4 when playing a hand
-        if !hand_debuffed && self.money <= 4 {
-            if self.jokers.iter().any(|j| j.kind == JokerKind::Vagabond && j.active) {
-                if self.has_consumable_room() {
-                    let tarot = self.random_tarot();
-                    self.add_consumable(ConsumableCard::Tarot(tarot));
-                }
-            }
+        if !hand_debuffed
+            && self.money <= 4
+            && self.has_joker(JokerKind::Vagabond)
+            && self.has_room_for_consumable()
+        {
+            let tarot = self.random_tarot();
+            self.add_consumable(ConsumableCard::Tarot(tarot));
         }
 
         // Earn dollars from scoring
@@ -622,27 +558,23 @@ impl GameState {
         // Lucky card $20 bonus (1/15 chance per scored Lucky card, pre-rolled above)
         self.money += lucky_dollar_count * 20;
 
-        // BusinessCard: 1/2 chance to earn $2 per scoring face card (doubled to 1.0 with OopsAll6s)
-        if !hand_debuffed && self.jokers.iter().any(|j| j.kind == JokerKind::BusinessCard && j.active) {
-            let pareidolia = self.jokers.iter().any(|j| j.kind == JokerKind::Pareidolia && j.active);
+        let pareidolia = self.has_pareidolia();
+
+        // BusinessCard: 1/2 chance to earn $2 per scoring face card
+        if !hand_debuffed && self.has_joker(JokerKind::BusinessCard) {
             for &idx in &result.scoring_card_indices {
                 let card = &played_cards[idx];
-                if !card.debuffed && card.is_face(pareidolia) {
-                    if self.rng.next_bool_prob("business", (0.5 * oops_mult).min(1.0)) {
-                        self.money += 2;
-                    }
+                if !card.debuffed && card.is_face(pareidolia) && self.roll_chance("business", 0.5) {
+                    self.money += 2;
                 }
             }
         }
 
-        // ReservedParking: 1/2 chance to earn $1 per face card held in hand (doubled to 1.0 with OopsAll6s)
-        if !hand_debuffed && self.jokers.iter().any(|j| j.kind == JokerKind::ReservedParking && j.active) {
-            let pareidolia = self.has_pareidolia();
+        // ReservedParking: 1/2 chance to earn $1 per face card held in hand
+        if !hand_debuffed && self.has_joker(JokerKind::ReservedParking) {
             for card in &hand_cards {
-                if card.is_face(pareidolia) && !card.debuffed {
-                    if self.rng.next_bool_prob("parking", (0.5 * oops_mult).min(1.0)) {
-                        self.money += 1;
-                    }
+                if !card.debuffed && card.is_face(pareidolia) && self.roll_chance("parking", 0.5) {
+                    self.money += 1;
                 }
             }
         }
@@ -652,57 +584,33 @@ impl GameState {
             self.money -= played_cards.len() as i32;
         }
 
-        // Discard played cards, draw new ones
-        let played_sel = self.selected_indices.clone();
-        // Remove played cards from hand (in reverse order to maintain indices)
-        let mut sorted_sel = played_sel.clone();
-        sorted_sel.sort_by(|a, b| b.cmp(a));
-        for si in &sorted_sel {
-            let card_idx = self.hand.remove(*si);
-            self.deck[card_idx].face_down = false;
-            self.discard_pile.push(card_idx);
-        }
-        self.selected_indices.clear();
+        self.discard_selected_cards();
 
         // Process glass cards: chance to destroy.
         // Only *scoring*, non-debuffed glass cards can break (state_events.lua:961).
         for &sci in &result.scoring_card_indices {
-            let card = &played_cards[sci];
-            if !hand_debuffed && card.enhancement == Enhancement::Glass && !card.debuffed {
-                // 1/4 chance to break (1/2 with OopsAll6s)
-                if self.rng.next_bool_prob("glass", (0.25 * oops_mult).min(1.0)) {
-                    // Notify jokers first — Glass Joker and Canio read the card before it goes.
-                    self.notify_card_destroyed(card);
-                    // Remove card from deck (destroy_deck_card remaps all index collections)
-                    self.destroy_deck_card(card.id);
-                    self.history.push(HistoryEvent {
-                        ante: self.ante,
-                        round: self.round,
-                        event_type: "card_destroyed".to_string(),
-                        data: serde_json::json!({
-                            "reason": "glass_break",
-                            "card": format!("{:?} of {:?}", card.rank, card.suit)
-                        }),
-                    });
-                }
+            let card = played_cards[sci].clone();
+            if hand_debuffed || card.enhancement != Enhancement::Glass || card.debuffed {
+                continue;
+            }
+            if self.roll_chance("glass", 0.25) {
+                // Notify jokers first — Glass Joker and Canio read the card before it goes.
+                self.notify_card_destroyed(&card);
+                // Remove card from deck (destroy_deck_card remaps all index collections)
+                self.destroy_deck_card(card.id);
+                self.log_event(
+                    "card_destroyed",
+                    serde_json::json!({
+                        "reason": "glass_break",
+                        "card": format!("{:?} of {:?}", card.rank, card.suit)
+                    }),
+                );
             }
         }
 
-        // Dusk joker: retrigger scoring cards on last hand
-        let is_last_hand = self.hands_remaining == 0;
-        if is_last_hand && self.jokers.iter().any(|j| j.kind == JokerKind::Dusk && j.active) {
-            // Would trigger retriggers (already handled in scoring via retrigger count)
-        }
-
-        // Plasma deck: if score_accumulated >= goal, balance chips/mult
-        // (already handled in scoring)
-
-        // Log the hand play
-        self.history.push(HistoryEvent {
-            ante: self.ante,
-            round: self.round,
-            event_type: "hand_played".to_string(),
-            data: serde_json::json!({
+        self.log_event(
+            "hand_played",
+            serde_json::json!({
                 "hand_type": result.hand_name,
                 "chips": result.final_chips,
                 "mult": result.final_mult,
@@ -710,159 +618,141 @@ impl GameState {
                 "accumulated": self.score_accumulated,
                 "goal": self.score_goal,
             }),
-        });
+        );
 
         // TheHook: discard 2 additional random cards from remaining hand after each play
-        if let Some(BossBlind::TheHook) = self.boss_blind {
-            if matches!(self.current_blind, BlindKind::Boss) {
-                if !self.boss_blind_disabled() {
-                    let discard_count = 2.min(self.hand.len());
-                    for _ in 0..discard_count {
-                        if self.hand.is_empty() { break; }
-                        let pick = self.rng.range_usize("hook", 0, self.hand.len() - 1);
-                        let card_idx = self.hand.remove(pick);
-                        self.deck[card_idx].face_down = false;
-                        self.discard_pile.push(card_idx);
-                    }
-                }
+        if self.boss_effect_active(BossBlind::TheHook) {
+            for _ in 0..2.min(self.hand.len()) {
+                let pick = self.rng.range_usize("hook", 0, self.hand.len() - 1);
+                let card_idx = self.hand.remove(pick);
+                self.deck[card_idx].face_down = false;
+                self.discard_pile.push(card_idx);
             }
         }
 
         // The Fish hides the cards drawn immediately after a play, and only those
         // (`self.prepped`, blind.lua:487, cleared once the draw is done).
         self.fish_prepped = true;
-
-        // Draw: TheSerpent draws exactly 3; otherwise fill to hand size
-        let is_serpent = matches!(self.boss_blind, Some(BossBlind::TheSerpent))
-            && matches!(self.current_blind, BlindKind::Boss)
-            && !self.boss_blind_disabled();
-        if is_serpent {
-            let draw_count = 3.min(self.draw_pile.len());
-            for _ in 0..draw_count {
-                if self.draw_pile.is_empty() { break; }
-                let card_idx = self.draw_pile.remove(0);
-                self.hand.push(card_idx);
-            }
-        } else {
-            self.draw_to_hand();
-        }
+        self.refill_hand();
 
         // Check for round win
         if self.score_accumulated >= self.score_goal {
             self.win_round();
         } else if self.hands_remaining == 0 {
-            // Out of hands, didn't meet goal
-            // Check Mr. Bones joker
+            // Out of hands and short of the goal. Mr. Bones saves a run that got at least a
+            // quarter of the way there, and destroys *itself* doing so — a second copy is still
+            // on the board for the next brush with death.
             let mr_bones = self
                 .jokers
                 .iter()
                 .position(|j| j.kind == JokerKind::MrBones && !j.eternal);
-            if let (Some(pos), true) = (mr_bones, self.score_accumulated >= self.score_goal / 4.0) {
-                // Mr. Bones saves you and destroys *itself* — a second copy is still on the board
-                // for the next brush with death.
-                self.jokers.remove(pos);
-                self.win_round();
-            } else {
-                self.state = GameStateKind::GameOver;
-                self.history.push(HistoryEvent {
-                    ante: self.ante,
-                    round: self.round,
-                    event_type: "game_over".to_string(),
-                    data: serde_json::json!({
-                        "score": self.score_accumulated,
-                        "goal": self.score_goal,
-                    }),
-                });
+            match mr_bones.filter(|_| self.score_accumulated >= self.score_goal / 4.0) {
+                Some(pos) => {
+                    self.jokers.remove(pos);
+                    self.win_round();
+                }
+                None => {
+                    self.state = GameStateKind::GameOver;
+                    self.log_event(
+                        "game_over",
+                        serde_json::json!({
+                            "score": self.score_accumulated,
+                            "goal": self.score_goal,
+                        }),
+                    );
+                }
             }
         }
 
         Ok(result)
     }
 
-    fn post_play_joker_updates(&mut self, result: &ScoreResult, played: &[CardInstance], hand: &[CardInstance]) {
+    /// Move the selected cards out of hand and onto the discard pile, and clear the selection.
+    ///
+    /// Walked highest-index-first so the removals do not invalidate the ones still to come.
+    /// Returns the deck indices in that same order — the caller may still owe those cards
+    /// something, as a discard does for a Purple Seal.
+    fn discard_selected_cards(&mut self) -> Vec<usize> {
+        let mut selected = self.selected_indices.clone();
+        selected.sort_unstable_by(|a, b| b.cmp(a));
+        self.selected_indices.clear();
+
+        selected
+            .into_iter()
+            .map(|hand_idx| {
+                let card_idx = self.hand.remove(hand_idx);
+                self.deck[card_idx].face_down = false;
+                self.discard_pile.push(card_idx);
+                card_idx
+            })
+            .collect()
+    }
+
+    /// Draw back up after a hand is played or discarded.
+    ///
+    /// The Serpent is the exception: it always deals exactly 3, however much room there is
+    /// (blind.lua:596), which is what makes it hurt.
+    fn refill_hand(&mut self) {
+        if !self.boss_effect_active(BossBlind::TheSerpent) {
+            self.draw_to_hand();
+            return;
+        }
+        for _ in 0..3.min(self.draw_pile.len()) {
+            let card_idx = self.draw_pile.remove(0);
+            self.hand.push(card_idx);
+        }
+    }
+
+    fn post_play_joker_updates(&mut self, result: &ScoreResult, played: &[CardInstance]) {
         // Jokers that consume themselves. They are removed outright rather than deactivated, so
         // they stop occupying a slot and stop counting towards Abstract Joker / Joker Stencil.
         let mut expired_jokers: Vec<u64> = Vec::new();
-        let hand_type = result.hand_type;
-        let oops_mult = if self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active) { 2.0_f64 } else { 1.0_f64 };
+
         for i in 0..self.jokers.len() {
-            let kind = self.jokers[i].kind;
-            match kind {
-                                JokerKind::IceCream => {
+            match self.jokers[i].kind {
+                JokerKind::IceCream => {
                     // -5 chips per hand played; melts away entirely at 0
-                    let cur = self.jokers[i].get_counter_i64("chips");
-                    let new = (cur - 5).max(0);
-                    self.jokers[i].set_counter_i64("chips", new);
-                    if new == 0 {
+                    let left = (self.jokers[i].get_counter_i64("chips") - 5).max(0);
+                    self.jokers[i].set_counter_i64("chips", left);
+                    if left == 0 {
                         expired_jokers.push(self.jokers[i].id);
-                    }
-                }
-                                                                                                JokerKind::Hologram => {
-                    // +0.25 Xmult for each playing card added to deck
-                    // (tracked when cards are added to deck)
-                }
-                                                JokerKind::Madness => {
-                    // +0.5 Xmult when blind is entered (done at begin_round)
-                }
-                JokerKind::Castle => {
-                    // +3 chips for each card of the current suit discarded
-                    // (handled in discard)
-                }
-                JokerKind::FlashCard => {
-                    // +2 mult per reroll (handled in shop)
-                }
-                JokerKind::Campfire => {
-                    // +0.25 Xmult for each joker sold
-                    // (handled in sell_joker)
-                }
-                JokerKind::EightBall => {
-                    // 1/4 chance to create a tarot card when an 8 is scored (1/2 with OopsAll6s)
-                    let eights_scored = result.scoring_card_indices.iter()
-                        .filter(|&&idx| played[idx].rank == Rank::Eight)
-                        .count();
-                    for _ in 0..eights_scored {
-                        if self.rng.next_bool_prob("8ball", (0.25 * oops_mult).min(1.0)) {
-                            if self.has_consumable_room() {
-                                let tarot = self.random_tarot();
-                                self.add_consumable(ConsumableCard::Tarot(tarot));
-                            }
-                        }
                     }
                 }
                 JokerKind::Seltzer => {
                     // Retriggers all cards for 10 hands, then destroys itself
-                    let cur = self.jokers[i].get_counter_i64("hands");
-                    let new_val = cur - 1;
-                    self.jokers[i].set_counter_i64("hands", new_val);
-                    if new_val <= 0 {
+                    self.jokers[i].add_counter_i64("hands", -1);
+                    if self.jokers[i].get_counter_i64("hands") <= 0 {
                         expired_jokers.push(self.jokers[i].id);
                     }
                 }
-                                JokerKind::Seance => {
+                JokerKind::EightBall => {
+                    // 1/4 chance of a Tarot per scoring 8.
+                    let eights = result
+                        .scoring_card_indices
+                        .iter()
+                        .filter(|&&idx| played[idx].rank == Rank::Eight)
+                        .count();
+                    for _ in 0..eights {
+                        if self.roll_chance("8ball", 0.25) {
+                            self.create_tarot();
+                        }
+                    }
+                }
+                JokerKind::Seance => {
                     // Straight Flush only. A Flush Five is five of the same rank, which is not a
                     // straight, so `poker_hands['Straight Flush']` stays empty for it.
                     if result.contained.contains(HandType::StraightFlush) {
-                        if self.has_consumable_room() {
-                            let spectrals = [
-                                SpectralCard::Familiar, SpectralCard::Grim, SpectralCard::Incantation,
-                                SpectralCard::Aura, SpectralCard::Wraith, SpectralCard::Ectoplasm,
-                                SpectralCard::Ankh, SpectralCard::DejaVu, SpectralCard::Hex,
-                                SpectralCard::Medium, SpectralCard::Cryptid,
-                            ];
-                            let idx = self.rng.range_usize("seance", 0, spectrals.len() - 1);
-                            self.add_consumable(ConsumableCard::Spectral(spectrals[idx]));
-                        }
+                        self.create_spectral_from("seance", &SEANCE_SPECTRALS);
                     }
                 }
                 JokerKind::Superposition => {
                     // Ace + Straight → create a tarot card
-                    let has_ace = result.scoring_card_indices.iter()
+                    let has_ace = result
+                        .scoring_card_indices
+                        .iter()
                         .any(|&idx| played[idx].rank == Rank::Ace);
                     if has_ace && result.contained.contains(HandType::Straight) {
-                        if self.has_consumable_room() {
-                            let tarot = self.random_tarot();
-                            self.add_consumable(ConsumableCard::Tarot(tarot));
-                        }
+                        self.create_tarot();
                     }
                 }
                 JokerKind::SixthSense => {
@@ -870,15 +760,7 @@ impl GameState {
                     // destroyed either way; a full consumable slot only skips the spectral.
                     let is_first_hand = self.hands_remaining + 1 == self.effective_max_hands();
                     if is_first_hand && played.len() == 1 && played[0].rank == Rank::Six {
-                        if self.has_consumable_room() {
-                            let spectrals = [
-                                SpectralCard::Familiar, SpectralCard::Grim, SpectralCard::Incantation,
-                                SpectralCard::Talisman, SpectralCard::Aura, SpectralCard::Wraith,
-                                SpectralCard::Ankh, SpectralCard::DejaVu, SpectralCard::Medium,
-                            ];
-                            let idx = self.rng.range_usize("sixth", 0, spectrals.len() - 1);
-                            self.add_consumable(ConsumableCard::Spectral(spectrals[idx]));
-                        }
+                        self.create_spectral_from("sixth", &SIXTH_SENSE_SPECTRALS);
                         // Take the card out of hand before destroying it — destroy_deck_card
                         // remaps stored indices and assumes the card is no longer referenced.
                         let card_id = played[0].id;
@@ -895,7 +777,10 @@ impl GameState {
                         self.destroy_deck_card(card_id);
                     }
                 }
-                                                _ => {}
+                // Hologram, Madness, Castle, Flash Card and Campfire also scale, but on events
+                // that happen elsewhere — a card added to the deck, a blind selected, a discard,
+                // a reroll, a joker sold. Each is handled where its event lives.
+                _ => {}
             }
         }
 
@@ -915,47 +800,29 @@ impl GameState {
             return Err(BalatroError::NoDiscardsRemaining);
         }
 
-        // Water boss: reduce discards (tracked separately)
         let discarded_cards: Vec<CardInstance> = self
             .selected_indices
             .iter()
             .map(|&hi| self.deck[self.hand[hi]].clone())
             .collect();
 
-        // Sort indices in reverse to maintain validity during removal
-        let mut sorted_sel = self.selected_indices.clone();
-        sorted_sel.sort_by(|a, b| b.cmp(a));
-        for si in &sorted_sel {
-            let card_idx = self.hand.remove(*si);
-            self.deck[card_idx].face_down = false;
-            self.discard_pile.push(card_idx);
-
-            // Purple Seal: create tarot when discarded
+        for card_idx in self.discard_selected_cards() {
+            // Purple Seal: create a tarot when discarded
             if self.deck[card_idx].seal == Seal::Purple {
-                // Add a random tarot to consumables if space
-                if self.has_consumable_room() {
-                    let tarot = self.random_tarot();
-                    self.add_consumable(ConsumableCard::Tarot(tarot));
-                }
+                self.create_tarot();
             }
         }
-        self.selected_indices.clear();
         self.discards_remaining -= 1;
 
         // FacelessJoker: $5 if 3+ face cards were discarded
         let pareidolia = self.has_pareidolia();
         if discarded_cards.iter().filter(|c| c.is_face(pareidolia)).count() >= 3 {
-            let count = self.jokers.iter().filter(|j| j.kind == JokerKind::FacelessJoker && j.active).count();
-            self.money += 5 * count as i32;
+            self.money += 5 * self.count_joker(JokerKind::FacelessJoker) as i32;
         }
 
         // MailInRebate: +$5 per discarded card matching the round's rank, which is re-rolled
         // every round (common_events.lua:2288).
-        let mail_count = self
-            .jokers
-            .iter()
-            .filter(|j| j.kind == JokerKind::MailInRebate && j.active)
-            .count();
+        let mail_count = self.count_joker(JokerKind::MailInRebate);
         if mail_count > 0 {
             let matching = discarded_cards
                 .iter()
@@ -964,29 +831,26 @@ impl GameState {
             self.money += 5 * matching as i32 * mail_count as i32;
         }
 
-        // TradingCard: if first discard of the round and only 1 card, earn $3 and destroy the card
-        // discards_remaining was already decremented, so first discard leaves it at max-1
-        let is_first_discard = self.discards_remaining == self.effective_max_discards().saturating_sub(1);
-        if is_first_discard && discarded_cards.len() == 1 {
-            if self.jokers.iter().any(|j| j.kind == JokerKind::TradingCard && j.active) {
-                self.money += 3;
-                let card_id = discarded_cards[0].id;
-                self.destroy_deck_card(card_id);
-            }
+        // `discards_remaining` was already decremented, so the first discard leaves it at max-1.
+        let is_first_discard =
+            self.discards_remaining == self.effective_max_discards().saturating_sub(1);
+
+        // TradingCard: the first discard of the round, if it is a single card, pays $3 and
+        // destroys that card.
+        if is_first_discard
+            && discarded_cards.len() == 1
+            && self.has_joker(JokerKind::TradingCard)
+        {
+            self.money += 3;
+            self.destroy_deck_card(discarded_cards[0].id);
         }
 
         // BurntJoker: on first discard of the round, upgrade the level of the discarded hand type
-        if is_first_discard {
-            let burnt_count = self.jokers.iter().filter(|j| j.kind == JokerKind::BurntJoker && j.active).count();
-            if burnt_count > 0 {
-                let has_four_fingers = self.jokers.iter().any(|j| j.kind == JokerKind::FourFingers && j.active);
-                let has_shortcut = self.jokers.iter().any(|j| j.kind == JokerKind::Shortcut && j.active);
-                let has_smeared = self.jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active);
-                let has_splash = self.jokers.iter().any(|j| j.kind == JokerKind::Splash && j.active);
-                let discard_eval = evaluate_hand(&discarded_cards, has_four_fingers, has_shortcut, has_smeared, has_splash);
-                if let Some(level) = self.hand_levels.get_mut(&discard_eval.hand_type) {
-                    level.level += burnt_count as u32;
-                }
+        let burnt_count = self.count_joker(JokerKind::BurntJoker);
+        if is_first_discard && burnt_count > 0 {
+            let discarded_hand = self.preview_hand(&discarded_cards).hand_type;
+            if let Some(level) = self.hand_levels.get_mut(&discarded_hand) {
+                level.level += burnt_count as u32;
             }
         }
 
@@ -1000,38 +864,29 @@ impl GameState {
                     self.jokers[i].set_counter_i64("mult", (cur - 1).max(0));
                 }
                 JokerKind::Yorick => {
-                    // Count individual cards discarded, not discard actions
-                    let cards_this_discard = discarded_cards.len() as i64;
+                    // Counts individual cards discarded, not discard actions, and pays +1 Xmult
+                    // at every 23rd one.
                     let prev = self.jokers[i].get_counter_i64("discards");
-                    let new_total = prev + cards_this_discard;
-                    self.jokers[i].set_counter_i64("discards", new_total);
-                    // Gain +1 Xmult for every 23rd card discarded
-                    let prev_milestones = prev / 23;
-                    let new_milestones = new_total / 23;
-                    if new_milestones > prev_milestones {
-                        let gained = new_milestones - prev_milestones;
-                        let cur = self.jokers[i].get_counter_f64("x_mult");
-                        self.jokers[i].set_counter_f64("x_mult", cur + gained as f64);
+                    let total = prev + discarded_cards.len() as i64;
+                    self.jokers[i].set_counter_i64("discards", total);
+                    let milestones = total / 23 - prev / 23;
+                    if milestones > 0 {
+                        self.jokers[i].add_counter_f64("x_mult", milestones as f64);
                     }
                 }
                 JokerKind::Castle => {
                     // Target suit is re-rolled every round (common_events.lua:2312).
                     let target_suit = self.round_targets.castle_suit;
-                    let count = discarded_cards
-                        .iter()
-                        .filter(|c| c.suit == target_suit)
-                        .count();
+                    let count = discarded_cards.iter().filter(|c| c.suit == target_suit).count();
                     if count > 0 {
-                        let cur = self.jokers[i].get_counter_i64("chips");
-                        self.jokers[i].set_counter_i64("chips", cur + 3 * count as i64);
+                        self.jokers[i].add_counter_i64("chips", 3 * count as i64);
                     }
                 }
                 JokerKind::HitTheRoad => {
                     // Gains X0.5 Mult for every Jack discarded this round
                     let jacks = discarded_cards.iter().filter(|c| c.rank == Rank::Jack).count();
                     if jacks > 0 {
-                        let cur = self.jokers[i].get_counter_f64("x_mult");
-                        self.jokers[i].set_counter_f64("x_mult", cur + 0.5 * jacks as f64);
+                        self.jokers[i].add_counter_f64("x_mult", 0.5 * jacks as f64);
                     }
                 }
                 JokerKind::Ramen => {
@@ -1056,46 +911,24 @@ impl GameState {
             self.jokers.retain(|j| !eaten_jokers.contains(&j.id));
         }
 
-        // Blue Seal: create planet when card held in hand at round end
-        // (handled at round end, not here)
-
-        // Hook boss blind: discard 2 random cards
-        // (applied before player discards normally)
-
-        // (Green deck end-of-round money is handled in win_round)
-
-        self.history.push(HistoryEvent {
-            ante: self.ante,
-            round: self.round,
-            event_type: "discarded".to_string(),
-            data: serde_json::json!({
+        self.log_event(
+            "discarded",
+            serde_json::json!({
                 "cards": discarded_cards.iter().map(|c| format!("{:?} of {:?}", c.rank, c.suit)).collect::<Vec<_>>(),
             }),
-        });
+        );
 
-        // TheSerpent: draw exactly 3 after discard instead of filling to hand size
-        let is_serpent_discard = matches!(self.boss_blind, Some(BossBlind::TheSerpent))
-            && matches!(self.current_blind, BlindKind::Boss)
-            && !self.boss_blind_disabled();
-        if is_serpent_discard {
-            let draw_count = 3.min(self.draw_pile.len());
-            for _ in 0..draw_count {
-                if self.draw_pile.is_empty() { break; }
-                let card_idx = self.draw_pile.remove(0);
-                self.hand.push(card_idx);
-            }
-        } else {
-            self.draw_to_hand();
-        }
+        self.refill_hand();
         Ok(())
     }
 
     fn win_round(&mut self) {
         // Garbage Tag pays out per discard left unused across the run.
         self.unused_discards_this_run += self.discards_remaining;
+        let is_boss = matches!(self.current_blind, BlindKind::Boss);
 
         // Investment Tag: $25 once the Boss blind is beaten (tag.lua:117).
-        if matches!(self.current_blind, BlindKind::Boss) {
+        if is_boss {
             let investments = self.tags.iter().filter(|t| **t == TagKind::Investment).count();
             if investments > 0 {
                 self.tags.retain(|t| *t != TagKind::Investment);
@@ -1113,111 +946,78 @@ impl GameState {
         self.money += 3 * gold_cards_in_hand as i32;
 
         // GoldenJoker: +$4 at end of round
-        let golden_joker_count = self.jokers.iter().filter(|j| j.kind == JokerKind::GoldenJoker && j.active).count();
-        self.money += 4 * golden_joker_count as i32;
+        self.money += 4 * self.count_joker(JokerKind::GoldenJoker) as i32;
 
         // Egg and Gift Card gain sell value at the *end of the round* (card.lua:2985, :2993).
         // Doing it when the shop is stocked let a player farm them by rerolling.
-        for i in 0..self.jokers.len() {
-            if self.jokers[i].kind == JokerKind::Egg && self.jokers[i].active {
-                let cur = self.jokers[i].get_counter_i64("sell_bonus");
-                self.jokers[i].set_counter_i64("sell_bonus", cur + 3);
-            }
+        for i in self.joker_indices(JokerKind::Egg) {
+            self.jokers[i].add_counter_i64("sell_bonus", 3);
         }
-        if self.jokers.iter().any(|j| j.kind == JokerKind::GiftCard && j.active) {
-            for j in self.jokers.iter_mut() {
-                if j.kind != JokerKind::GiftCard {
-                    let cur = j.get_counter_i64("sell_bonus");
-                    j.set_counter_i64("sell_bonus", cur + 1);
-                }
+        if self.has_joker(JokerKind::GiftCard) {
+            for j in self.jokers.iter_mut().filter(|j| j.kind != JokerKind::GiftCard) {
+                j.add_counter_i64("sell_bonus", 1);
             }
         }
 
         // Rocket: earns dollars equal to its counter; +$2 per boss blind beaten
-        let is_boss = matches!(self.current_blind, BlindKind::Boss);
-        for i in 0..self.jokers.len() {
-            if self.jokers[i].kind == JokerKind::Rocket && self.jokers[i].active {
-                let earn = self.jokers[i].get_counter_i64("dollars");
-                self.money += earn as i32;
-                if is_boss {
-                    let new_earn = earn + 2;
-                    self.jokers[i].set_counter_i64("dollars", new_earn);
-                }
+        for i in self.joker_indices(JokerKind::Rocket) {
+            self.money += self.jokers[i].get_counter_i64("dollars") as i32;
+            if is_boss {
+                self.jokers[i].add_counter_i64("dollars", 2);
             }
         }
 
-        // Satellite: +$1 per unique planet type used this run (12 possible types)
-        let planet_types_used = self.planet_types_used.len();
-        let satellite_count = self.jokers.iter().filter(|j| j.kind == JokerKind::Satellite && j.active).count();
-        self.money += planet_types_used as i32 * satellite_count as i32;
+        // Satellite: +$1 per unique planet type used this run
+        self.money +=
+            (self.planet_types_used.len() * self.count_joker(JokerKind::Satellite)) as i32;
 
         // Cloud9: +$1 per 9 in full deck at end of round
         let nines_in_deck = self.deck.iter().filter(|c| c.rank == Rank::Nine && !c.debuffed).count();
-        let cloud9_count = self.jokers.iter().filter(|j| j.kind == JokerKind::Cloud9 && j.active).count();
-        self.money += nines_in_deck as i32 * cloud9_count as i32;
+        self.money += (nines_in_deck * self.count_joker(JokerKind::Cloud9)) as i32;
 
         // DelayedGratification: +$2 per available discard if no discards were used this round
         let max_disc = self.effective_max_discards();
         if self.discards_remaining == max_disc {
-            let dg_count = self.jokers.iter().filter(|j| j.kind == JokerKind::DelayedGratification && j.active).count();
-            self.money += max_disc as i32 * 2 * dg_count as i32;
+            let payers = self.count_joker(JokerKind::DelayedGratification);
+            self.money += max_disc as i32 * 2 * payers as i32;
         }
 
-        // OopsAll6s doubles all listed probabilities at end of round too
-        let win_oops_active = self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active);
-        let win_oops_mult = if win_oops_active { 2.0_f64 } else { 1.0_f64 };
-
-        // GrosMichel: 1/6 chance to be destroyed at end of round (1/3 with OopsAll6s)
-        let gm_positions: Vec<usize> = self.jokers.iter().enumerate()
-            .filter(|(_, j)| j.kind == JokerKind::GrosMichel && j.active && !j.eternal)
-            .map(|(i, _)| i)
-            .collect();
-        for pos in gm_positions.iter().rev() {
-            if self.rng.next_bool_prob("gros_michel", (1.0 / 6.0) * win_oops_mult) {
-                self.jokers.remove(*pos);
+        // The two bananas spoil at the end of a round: Gros Michel on 1 in 6, Cavendish on
+        // 1 in 1000. Walked back-to-front so a removal cannot shift a position still to come.
+        for pos in self.joker_indices(JokerKind::GrosMichel).into_iter().rev() {
+            if !self.jokers[pos].eternal && self.roll_chance("gros_michel", 1.0 / 6.0) {
+                self.jokers.remove(pos);
                 // Extinction is permanent: Gros Michel leaves the pool, Cavendish joins it.
                 self.gros_michel_extinct = true;
             }
         }
-
-        // Cavendish: 1/1000 chance to be destroyed at end of round (1/500 with OopsAll6s)
-        let cav_positions: Vec<usize> = self.jokers.iter().enumerate()
-            .filter(|(_, j)| j.kind == JokerKind::Cavendish && j.active && !j.eternal)
-            .map(|(i, _)| i)
-            .collect();
-        for pos in cav_positions.iter().rev() {
-            if self.rng.next_bool_prob("cavendish", (1.0 / 1000.0) * win_oops_mult) {
-                self.jokers.remove(*pos);
+        for pos in self.joker_indices(JokerKind::Cavendish).into_iter().rev() {
+            if !self.jokers[pos].eternal && self.roll_chance("cavendish", 1.0 / 1000.0) {
+                self.jokers.remove(pos);
             }
         }
 
         // Popcorn: -4 mult per round (not per hand); destroyed when mult reaches 0
         let mut eaten: Vec<u64> = Vec::new();
-        for i in 0..self.jokers.len() {
-            if self.jokers[i].kind == JokerKind::Popcorn && self.jokers[i].active {
-                let cur = self.jokers[i].get_counter_i64("mult");
-                let new = (cur - 4).max(0);
-                self.jokers[i].set_counter_i64("mult", new);
-                if new == 0 {
-                    eaten.push(self.jokers[i].id);
-                }
+        for i in self.joker_indices(JokerKind::Popcorn) {
+            let left = (self.jokers[i].get_counter_i64("mult") - 4).max(0);
+            self.jokers[i].set_counter_i64("mult", left);
+            if left == 0 {
+                eaten.push(self.jokers[i].id);
             }
         }
         if !eaten.is_empty() {
             self.jokers.retain(|j| !eaten.contains(&j.id));
         }
 
-        // InvisibleJoker: increment round counter each round (duplication happens on sell, not here)
-        for i in 0..self.jokers.len() {
-            if self.jokers[i].kind == JokerKind::InvisibleJoker && self.jokers[i].active {
-                let rounds = self.jokers[i].get_counter_i64("rounds") + 1;
-                self.jokers[i].set_counter_i64("rounds", rounds);
-            }
+        // InvisibleJoker: counts rounds survived; the duplication happens on sell, not here
+        for i in self.joker_indices(JokerKind::InvisibleJoker) {
+            self.jokers[i].add_counter_i64("rounds", 1);
         }
 
         // ToTheMoon raises the interest *amount* paid per $5, not the cap (card.lua:614 bumps
         // G.GAME.interest_amount). Payout is amount × min(money/5, cap/5) — state_events.lua:1202.
-        let to_the_moon_count = self.jokers.iter().filter(|j| j.kind == JokerKind::ToTheMoon && j.active).count();
+        let to_the_moon_count = self.count_joker(JokerKind::ToTheMoon);
 
         if self.deck_type == DeckType::Green {
             // Green deck: $2 per remaining hand, $1 per remaining discard, and no interest
@@ -1252,7 +1052,7 @@ impl GameState {
                     .filter(|&&di| self.deck[di].seal == Seal::Blue && !self.deck[di].debuffed)
                     .count();
                 for _ in 0..sealed {
-                    if !self.has_consumable_room() {
+                    if !self.has_room_for_consumable() {
                         break;
                     }
                     self.add_consumable(ConsumableCard::Planet(planet));
@@ -1260,22 +1060,19 @@ impl GameState {
             }
         }
 
-        // Log victory
-        self.history.push(HistoryEvent {
-            ante: self.ante,
-            round: self.round,
-            event_type: "round_won".to_string(),
-            data: serde_json::json!({
+        self.log_event(
+            "round_won",
+            serde_json::json!({
                 "score": self.score_accumulated,
                 "goal": self.score_goal,
                 "dollars_earned": blind_dollars,
             }),
-        });
+        );
 
         // The shop's voucher is drawn once per ante, when the Boss falls
         // (state_events.lua:263) — not once per shop. One bought early is gone for the rest of
         // the ante, and one you skip is still there next shop.
-        if matches!(self.current_blind, BlindKind::Boss) {
+        if is_boss {
             self.shop_voucher = Some(self.random_voucher());
             // The next ante's tags are drawn here too, and eligibility is judged against the
             // ante about to begin (button_callbacks.lua:2951).
@@ -1287,69 +1084,46 @@ impl GameState {
         }
 
         // Mark blind as defeated
-        match self.current_blind {
-            BlindKind::Small => self.blind_defeated_this_ante[0] = true,
-            BlindKind::Big => self.blind_defeated_this_ante[1] = true,
-            BlindKind::Boss => self.blind_defeated_this_ante[2] = true,
-        }
+        let blind_slot = match self.current_blind {
+            BlindKind::Small => 0,
+            BlindKind::Big => 1,
+            BlindKind::Boss => 2,
+        };
+        self.blind_defeated_this_ante[blind_slot] = true;
 
-        // Campfire: reset x_mult to X1 when Boss Blind is defeated
-        if matches!(self.current_blind, BlindKind::Boss) {
-            for j in self.jokers.iter_mut() {
-                if j.kind == JokerKind::Campfire && j.active {
-                    j.set_counter_f64("x_mult", 1.0);
-                }
+        if is_boss {
+            // Campfire's stack is what you paid for the Boss run; it resets once the Boss falls.
+            for i in self.joker_indices(JokerKind::Campfire) {
+                self.jokers[i].set_counter_f64("x_mult", 1.0);
+            }
+            // Anaglyph deck: a Double Tag for every Boss beaten.
+            if self.deck_type == DeckType::Anaglyph {
+                self.gain_tag(TagKind::DoubleFun);
+            }
+            // Beating the final ante's Boss ends the run.
+            if self.ante >= self.win_ante() {
+                self.log_event("game_won", serde_json::json!({}));
+                self.state = GameStateKind::GameOver;
+                return;
             }
         }
 
-        // Anaglyph deck: gain a Double Tag (DoubleFun) after defeating each Boss Blind
-        if matches!(self.current_blind, BlindKind::Boss) && self.deck_type == DeckType::Anaglyph {
-            self.gain_tag(TagKind::DoubleFun);
-        }
-
-        // Check if ante 8 boss beaten = game won
-        if self.ante >= self.win_ante() && matches!(self.current_blind, BlindKind::Boss) {
-            self.history.push(HistoryEvent {
-                ante: self.ante,
-                round: self.round,
-                event_type: "game_won".to_string(),
-                data: serde_json::json!({}),
-            });
-            self.state = GameStateKind::GameOver;
-            return;
-        }
-
-        // If boss blind won, advance to next ante
-        if matches!(self.current_blind, BlindKind::Boss) {
-            // Advance to shop before going to next ante
-            self.state = GameStateKind::Shop;
-            self.generate_shop();
-        } else {
-            // Small/Big blind won → go to shop
-            self.state = GameStateKind::Shop;
-            self.generate_shop();
-        }
+        // Every won blind leads to the shop; `leave_shop` is what advances the blind afterwards.
+        self.state = GameStateKind::Shop;
+        self.generate_shop();
     }
 
     fn blind_reward_dollars(&self) -> i32 {
-        match (self.current_blind.clone(), self.boss_blind) {
+        match self.current_blind {
             // Red stake and above: Small Blind gives no cash reward
-            (BlindKind::Small, _) => {
-                if self.stake as u8 >= Stake::Red as u8 { 0 } else { 3 }
-            }
-            (BlindKind::Big, _) => 4,
-            (BlindKind::Boss, Some(b)) => {
-                // boss blinds give 5$ (showdowns give 8$)
-                match b {
-                    BossBlind::CeruleanBell
-                    | BossBlind::VerdantLeaf
-                    | BossBlind::VioletVessel
-                    | BossBlind::AmberAcorn
-                    | BossBlind::CrimsonHeart => 8,
-                    _ => 5,
-                }
-            }
-            _ => 5,
+            BlindKind::Small if self.stake.at_least(Stake::Red) => 0,
+            BlindKind::Small => 3,
+            BlindKind::Big => 4,
+            // Boss blinds pay $5, and the showdown bosses $8.
+            BlindKind::Boss => match self.boss_blind {
+                Some(b) if b.is_showdown() => 8,
+                _ => 5,
+            },
         }
     }
 

@@ -37,8 +37,6 @@ pub enum ScoreEventKind {
     Mult,
     XMult,
     Dollars,
-    Retrigger,
-    CardDestroyed,
 }
 
 /// Randomised targets that Balatro stores on `G.GAME.current_round` and re-rolls at the start of
@@ -89,9 +87,9 @@ pub struct ScoringContext<'a> {
     /// Size of the deck at the start of the run (G.GAME.starting_deck_size). Deck-dependent:
     /// 52 for most decks, 40 for Abandoned. Used by Erosion.
     pub starting_deck_size: usize,
-    pub boss_blind: Option<BossBlind>,
     /// Whether this Boss blind's ability actually did something to this hand
-    /// (`G.GAME.blind.triggered`). Matador pays out on it.
+    /// (`G.GAME.blind.triggered`). Matador pays out on it — which is the only thing the joker
+    /// phase needs to know about the blind, so the blind's identity is not carried here.
     pub boss_ability_triggered: bool,
     pub joker_count: usize,
     pub joker_slot_count: usize,
@@ -192,42 +190,28 @@ impl<'a> ScoreInputs<'a> {
 // ---------------------------------------------------------------------------
 
 pub fn score_hand(inputs: ScoreInputs) -> ScoreResult {
-    let ScoreInputs {
-        played_cards,
-        hand_cards,
-        jokers,
-        hand_levels,
-        hands_remaining,
-        discards_remaining,
-        money,
-        deck_cards_remaining,
-        total_deck_size,
-        starting_deck_size,
-        boss_blind,
-        boss_ability_triggered,
-        joker_slot_count,
-        tarot_cards_used,
-        steel_count_in_deck,
-        stone_count_in_deck,
-        enhanced_count_in_deck,
-        round_targets,
-        discount_percent,
-        eval,
-    } = inputs;
+    // Kept whole rather than destructured: the same values are handed on to `ScoringContext`,
+    // and spelling out eighteen fields twice is how the two drift apart.
+    let played_cards = inputs.played_cards;
+    let hand_cards = inputs.hand_cards;
+    let jokers = inputs.jokers;
+    let hand_levels = inputs.hand_levels;
+    let hands_remaining = inputs.hands_remaining;
 
-    let has_pareidolia = jokers.iter().any(|j| j.kind == JokerKind::Pareidolia && j.active);
+    let has = |k: JokerKind| jokers.iter().any(|j| j.kind == k && j.active);
+    let has_pareidolia = has(JokerKind::Pareidolia);
+    let has_smeared = has(JokerKind::SmearedJoker);
 
     // Use the caller's locked-in hand where it gave one; otherwise work it out here.
     let owned_eval;
-    let eval: &HandEvalResult = match eval {
+    let eval: &HandEvalResult = match inputs.eval {
         Some(e) => e,
         None => {
-            let has = |k: JokerKind| jokers.iter().any(|j| j.kind == k && j.active);
             owned_eval = evaluate_hand(
                 played_cards,
                 has(JokerKind::FourFingers),
                 has(JokerKind::Shortcut),
-                has(JokerKind::SmearedJoker),
+                has_smeared,
                 has(JokerKind::Splash),
             );
             &owned_eval
@@ -236,7 +220,6 @@ pub fn score_hand(inputs: ScoreInputs) -> ScoreResult {
     let hand_type = eval.hand_type;
     let contained = eval.contained;
     let scoring_indices = eval.scoring_indices.clone();
-    let has_smeared = jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active);
 
     // Hiker writes a permanent bonus onto the cards it scores, and a retriggered card sees that
     // bonus on its later triggers (card.lua:3067). Work on a local copy so the growth is visible
@@ -260,7 +243,7 @@ pub fn score_hand(inputs: ScoreInputs) -> ScoreResult {
     let mut events: Vec<ScoreEvent> = Vec::new();
 
     // Boss blind modifier — The Flint halves chips and mult
-    if let Some(BossBlind::TheFlint) = boss_blind {
+    if let Some(BossBlind::TheFlint) = inputs.boss_blind {
         chips = (chips / 2.0).ceil();
         mult  = (mult  / 2.0).ceil();
         events.push(ScoreEvent { source: "The Flint".to_string(), kind: ScoreEventKind::XMult, value: 0.5 });
@@ -337,7 +320,7 @@ pub fn score_hand(inputs: ScoreInputs) -> ScoreResult {
             for (j_idx, joker) in jokers.iter().enumerate().filter(|(_, j)| j.active) {
                 let effect = calc_joker_individual(
                     joker, j_idx, jokers, card_idx, &card, &scoring_indices, &played,
-                    has_pareidolia, has_smeared, round_targets,
+                    has_pareidolia, has_smeared, inputs.round_targets,
                 );
                 chips += effect.chips as f64;
                 mult  += effect.mult  as f64;
@@ -415,21 +398,20 @@ pub fn score_hand(inputs: ScoreInputs) -> ScoreResult {
         jokers,
         hand_levels,
         hands_remaining,
-        discards_remaining,
-        money,
-        deck_cards_remaining,
-        total_deck_size,
-        starting_deck_size,
-        boss_blind,
-        boss_ability_triggered,
+        discards_remaining: inputs.discards_remaining,
+        money: inputs.money,
+        deck_cards_remaining: inputs.deck_cards_remaining,
+        total_deck_size: inputs.total_deck_size,
+        starting_deck_size: inputs.starting_deck_size,
+        boss_ability_triggered: inputs.boss_ability_triggered,
         joker_count: jokers.len(),
-        joker_slot_count,
-        tarot_cards_used,
-        steel_count_in_deck,
-        stone_count_in_deck,
-        enhanced_count_in_deck,
-        round_targets,
-        discount_percent,
+        joker_slot_count: inputs.joker_slot_count,
+        tarot_cards_used: inputs.tarot_cards_used,
+        steel_count_in_deck: inputs.steel_count_in_deck,
+        stone_count_in_deck: inputs.stone_count_in_deck,
+        enhanced_count_in_deck: inputs.enhanced_count_in_deck,
+        round_targets: inputs.round_targets,
+        discount_percent: inputs.discount_percent,
     };
 
     for (joker_idx, joker) in jokers.iter().enumerate() {

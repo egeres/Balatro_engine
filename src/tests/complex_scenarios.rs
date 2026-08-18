@@ -10,7 +10,6 @@
 
 use super::*;
 use crate::scoring::score_hand;
-use crate::game::GameStateKind;
 
 // Helper: build a hand_levels map with one type overridden.
 fn levels_with(ht: HandType, level: u32) -> std::collections::HashMap<HandType, HandLevelData> {
@@ -19,24 +18,7 @@ fn levels_with(ht: HandType, level: u32) -> std::collections::HashMap<HandType, 
     m
 }
 
-// Helper: score with custom levels and full parameter control.
-fn score_levels(
-    played: &[CardInstance],
-    hand: &[CardInstance],
-    jokers: &[JokerInstance],
-    levels: &std::collections::HashMap<HandType, HandLevelData>,
-) -> crate::scoring::ScoreResult {
-    {
-        let mut si = ScoreInputs::new(played, hand, jokers, levels);
-        si.hands_remaining = 3;
-        si.discards_remaining = 3;
-        si.deck_cards_remaining = 40;
-        si.steel_count_in_deck = played.iter().chain(hand.iter()).filter(|c| c.enhancement == Enhancement::Steel).count();
-        si.stone_count_in_deck = played.iter().chain(hand.iter()).filter(|c| c.is_stone()).count();
-        si.enhanced_count_in_deck = played.iter().chain(hand.iter()).filter(|c| c.enhancement != Enhancement::None).count();
-        score_hand(si)
-    }
-}
+// `score_levels` — score against explicit hand levels — is the shared helper in `super`.
 
 // =========================================================
 // Scenario 1: Level 3 Straight — CrazyJoker + DeviousJoker + Scholar + OddTodd + Joker
