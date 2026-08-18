@@ -285,7 +285,6 @@ impl GameState {
             }
         }
 
-        self.shop_voucher = Some(self.random_voucher());
         self.recalculate_reroll_cost(true);
         self.apply_shop_tags();
     }
@@ -420,7 +419,7 @@ impl GameState {
         Some(joker)
     }
 
-    fn random_voucher(&mut self) -> VoucherKind {
+    pub(crate) fn random_voucher(&mut self) -> VoucherKind {
         // Only offer base-tier vouchers (upgraded versions require buying the base first)
         let base_vouchers = vec![
             VoucherKind::Overstock,
@@ -630,7 +629,7 @@ impl GameState {
         if !matches!(offer.kind, ShopItem::Consumable(_)) {
             return Err(BalatroError::WrongItemType("Expected consumable".to_string()));
         }
-        if self.consumables.len() >= self.consumable_slots as usize {
+        if !self.has_consumable_room() {
             return Err(BalatroError::ConsumableSlotsFull);
         }
 
@@ -651,7 +650,7 @@ impl GameState {
 
         self.money -= price as i32;
         if let ShopItem::Consumable(c) = self.shop_offers[shop_index].kind.clone() {
-            self.consumables.push(c);
+            self.add_consumable(c);
         }
         self.shop_offers[shop_index].sold = true;
         Ok(())
@@ -972,10 +971,8 @@ impl GameState {
             && !self.consumables.is_empty()
         {
             let idx = self.rng.range_usize("perkeo", 0, self.consumables.len() - 1);
-            let copy = self.consumables[idx].clone();
-            self.consumable_slots += 1;
-            self.negative_consumable_slots += 1;
-            self.consumables.push(copy);
+            let copy = self.consumables[idx].card.clone();
+            self.consumables.push(HeldConsumable::negative(copy));
         }
 
         // Rental jokers charge their rate every round (`rental_rate = 3`, game.lua:1915).

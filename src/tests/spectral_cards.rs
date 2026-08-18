@@ -26,7 +26,7 @@ fn apply_spectral(
 ) -> GameState {
     let mut gs = make_game();
     setup_round(&mut gs, deck_cards, hand_size);
-    gs.consumables.push(crate::card::ConsumableCard::Spectral(spectral));
+    gs.consumables.push(crate::card::ConsumableCard::Spectral(spectral).into());
     gs.use_consumable(0, targets).unwrap();
     gs
 }
@@ -82,7 +82,7 @@ fn test_ectoplasm_adds_negative_edition_to_a_joker() {
     let mut gs = make_game();
     setup_round(&mut gs, five_card_hand(), 5);
     gs.jokers.push(joker(99, JokerKind::Joker));
-    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Ectoplasm));
+    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Ectoplasm).into());
     gs.use_consumable(0, vec![]).unwrap();
     assert_eq!(gs.jokers[0].edition, Edition::Negative, "Ectoplasm should set Negative edition on joker");
 }
@@ -93,7 +93,7 @@ fn test_ectoplasm_reduces_hand_size() {
     setup_round(&mut gs, five_card_hand(), 5);
     gs.jokers.push(joker(99, JokerKind::Joker));
     let before = gs.hand_size;
-    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Ectoplasm));
+    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Ectoplasm).into());
     gs.use_consumable(0, vec![]).unwrap();
     assert_eq!(gs.hand_size, before - 1, "Ectoplasm should reduce hand size by 1");
 }
@@ -202,7 +202,7 @@ fn test_ouija_reduces_hand_size() {
     let mut gs = make_game();
     setup_round(&mut gs, five_card_hand(), 5);
     let before = gs.hand_size;
-    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Ouija));
+    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Ouija).into());
     gs.use_consumable(0, vec![]).unwrap();
     assert_eq!(gs.hand_size, before - 1, "Ouija should reduce hand size by 1");
 }
@@ -216,7 +216,7 @@ fn test_immolate_gains_20_dollars() {
     let mut gs = make_game();
     setup_round(&mut gs, five_card_hand(), 5);
     gs.money = 0;
-    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Immolate));
+    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Immolate).into());
     gs.use_consumable(0, vec![]).unwrap();
     assert_eq!(gs.money, 20, "Immolate should give +$20");
 }
@@ -233,7 +233,7 @@ fn test_wraith_sets_money_to_zero() {
     let mut gs = make_game();
     setup_round(&mut gs, five_card_hand(), 5);
     gs.money = 30;
-    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Wraith));
+    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Wraith).into());
     gs.use_consumable(0, vec![]).unwrap();
     assert_eq!(gs.money, 0, "Wraith should set money to $0");
 }
@@ -246,7 +246,7 @@ fn test_wraith_sets_money_to_zero() {
 fn test_wraith_creates_a_rare_joker() {
     let mut gs = make_game();
     setup_round(&mut gs, five_card_hand(), 5);
-    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Wraith));
+    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Wraith).into());
     let before = gs.jokers.len();
     gs.use_consumable(0, vec![]).unwrap();
     assert_eq!(gs.jokers.len(), before + 1, "Wraith should add 1 joker");
@@ -256,7 +256,7 @@ fn test_wraith_creates_a_rare_joker() {
 fn test_the_soul_creates_a_legendary_joker() {
     let mut gs = make_game();
     setup_round(&mut gs, five_card_hand(), 5);
-    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::TheSoul));
+    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::TheSoul).into());
     let before = gs.jokers.len();
     gs.use_consumable(0, vec![]).unwrap();
     assert_eq!(gs.jokers.len(), before + 1, "TheSoul should add 1 joker");
@@ -280,7 +280,7 @@ fn test_hex_adds_polychrome_to_a_joker() {
     setup_round(&mut gs, five_card_hand(), 5);
     gs.jokers.push(joker(10, JokerKind::Joker));
     gs.jokers.push(joker(11, JokerKind::AbstractJoker));
-    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Hex));
+    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Hex).into());
     gs.use_consumable(0, vec![]).unwrap();
     // Exactly 1 joker survives (the chosen one) with Polychrome
     assert_eq!(gs.jokers.len(), 1, "Hex should destroy all but one joker");
@@ -295,7 +295,7 @@ fn test_hex_spares_eternal_jokers() {
     let mut eternal_j = joker(11, JokerKind::AbstractJoker);
     eternal_j.eternal = true;
     gs.jokers.push(eternal_j);
-    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Hex));
+    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Hex).into());
     gs.use_consumable(0, vec![]).unwrap();
     // Eternal joker must survive
     assert!(
@@ -310,7 +310,7 @@ fn test_ankh_copies_one_joker_and_destroys_others() {
     setup_round(&mut gs, five_card_hand(), 5);
     gs.jokers.push(joker(10, JokerKind::Joker));
     gs.jokers.push(joker(11, JokerKind::Scholar));
-    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Ankh));
+    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Ankh).into());
     gs.use_consumable(0, vec![]).unwrap();
     // Ankh: copy chosen, destroy rest → 1 survivor
     assert_eq!(gs.jokers.len(), 1, "Ankh should leave exactly 1 joker (the copy)");
@@ -324,7 +324,7 @@ fn test_ankh_spares_eternal_jokers() {
     let mut eternal_j = joker(11, JokerKind::AbstractJoker);
     eternal_j.eternal = true;
     gs.jokers.push(eternal_j);
-    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Ankh));
+    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Ankh).into());
     gs.use_consumable(0, vec![]).unwrap();
     assert!(
         gs.jokers.iter().any(|j| j.eternal),
@@ -361,7 +361,7 @@ fn test_black_hole_upgrades_every_hand_level_by_1() {
 fn test_spectral_card_is_consumed_after_use() {
     let mut gs = make_game();
     setup_round(&mut gs, five_card_hand(), 5);
-    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::BlackHole));
+    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::BlackHole).into());
     assert_eq!(gs.consumables.len(), 1);
     gs.use_consumable(0, vec![]).unwrap();
     assert_eq!(gs.consumables.len(), 0, "Spectral should be removed after use");
@@ -379,7 +379,7 @@ fn game_with_jokers(jokers: Vec<JokerInstance>) -> GameState {
 }
 
 fn use_spectral(gs: &mut GameState, s: SpectralCard, targets: Vec<usize>) {
-    gs.consumables.push(crate::card::ConsumableCard::Spectral(s));
+    gs.consumables.push(crate::card::ConsumableCard::Spectral(s).into());
     let idx = gs.consumables.len() - 1;
     gs.use_consumable(idx, targets).unwrap();
 }
@@ -436,7 +436,7 @@ fn test_wheel_of_fortune_never_overwrites_an_existing_edition() {
         gs.jokers = vec![poly];
 
         gs.consumables
-            .push(crate::card::ConsumableCard::Tarot(TarotCard::TheWheelOfFortune));
+            .push(crate::card::ConsumableCard::Tarot(TarotCard::TheWheelOfFortune).into());
         gs.use_consumable(0, vec![]).unwrap();
         assert_eq!(gs.jokers[0].edition, Edition::Polychrome);
     }

@@ -206,7 +206,7 @@ fn test_blue_seal_creates_planet_card_at_round_end() {
     gs.play_hand().unwrap(); // triggers win_round → Blue seal fires
 
     let planet_count = gs.consumables.iter().filter(|c| {
-        matches!(c, crate::card::ConsumableCard::Planet(_))
+        matches!(c.card, crate::card::ConsumableCard::Planet(_))
     }).count();
     assert!(planet_count >= 1, "Blue seal should have created a Planet card at round end");
 }
@@ -237,7 +237,7 @@ fn test_purple_seal_creates_tarot_card_on_discard() {
     gs.discard_hand().unwrap();
 
     let tarot_count = gs.consumables.iter().filter(|c| {
-        matches!(c, crate::card::ConsumableCard::Tarot(_))
+        matches!(c.card, crate::card::ConsumableCard::Tarot(_))
     }).count();
     assert!(tarot_count >= 1, "Purple seal should have created a Tarot card on discard");
 }
@@ -354,7 +354,7 @@ fn test_ectoplasm_negative_also_grants_a_slot() {
     let base = gs.effective_joker_slots();
 
     gs.consumables
-        .push(crate::card::ConsumableCard::Spectral(SpectralCard::Ectoplasm));
+        .push(crate::card::ConsumableCard::Spectral(SpectralCard::Ectoplasm).into());
     gs.use_consumable(0, vec![]).unwrap();
 
     assert_eq!(gs.jokers[0].edition, Edition::Negative);

@@ -97,7 +97,7 @@ fn test_magic_deck_starts_with_crystal_ball_and_fools() {
     let gs = GameState::new(DeckType::Magic, Stake::White, Some("MAG".to_string()));
     assert!(gs.vouchers.contains(&VoucherKind::CrystalBall));
     let fool_count = gs.consumables.iter().filter(|c| {
-        matches!(c, crate::card::ConsumableCard::Tarot(TarotCard::TheFool))
+        matches!(c.card, crate::card::ConsumableCard::Tarot(TarotCard::TheFool))
     }).count();
     assert_eq!(fool_count, 2, "Magic deck should start with 2 Fools");
 }

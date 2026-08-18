@@ -14,7 +14,7 @@ use super::*;
 fn apply_planet(planet: PlanetCard) -> GameState {
     let mut gs = make_game();
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
-    gs.consumables.push(crate::card::ConsumableCard::Planet(planet));
+    gs.consumables.push(crate::card::ConsumableCard::Planet(planet).into());
     gs.use_consumable(0, vec![]).unwrap();
     gs
 }
@@ -141,9 +141,9 @@ fn test_jupiter_only_upgrades_flush_not_others() {
 fn test_two_mercury_planets_bring_pair_to_level_3() {
     let mut gs = make_game();
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
-    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Mercury));
+    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Mercury).into());
     gs.use_consumable(0, vec![]).unwrap();
-    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Mercury));
+    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Mercury).into());
     gs.use_consumable(0, vec![]).unwrap();
     assert_eq!(level_of(&gs, HandType::Pair), 3);
 }
@@ -185,7 +185,7 @@ fn test_mercury_level_2_pair_scores_higher_than_level_1() {
 fn test_planet_consumed_is_removed_from_consumables() {
     let mut gs = make_game();
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
-    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Mercury));
+    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Mercury).into());
     assert_eq!(gs.consumables.len(), 1);
     gs.use_consumable(0, vec![]).unwrap();
     assert_eq!(gs.consumables.len(), 0, "Planet card should be consumed after use");
@@ -201,7 +201,7 @@ fn use_planets(count: usize) -> GameState {
     gs.jokers.push(joker(0, JokerKind::Constellation));
     for _ in 0..count {
         gs.consumables
-            .push(crate::card::ConsumableCard::Planet(PlanetCard::Mercury));
+            .push(crate::card::ConsumableCard::Planet(PlanetCard::Mercury).into());
         gs.use_consumable(0, vec![]).unwrap();
     }
     gs
@@ -231,7 +231,7 @@ fn test_constellation_ignores_tarot_use() {
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
     gs.jokers.push(joker(0, JokerKind::Constellation));
     gs.consumables
-        .push(crate::card::ConsumableCard::Tarot(TarotCard::TheDevil));
+        .push(crate::card::ConsumableCard::Tarot(TarotCard::TheDevil).into());
     gs.use_consumable(0, vec![0]).unwrap();
     assert_eq!(gs.jokers[0].get_counter_f64("x_mult"), 1.0);
 }

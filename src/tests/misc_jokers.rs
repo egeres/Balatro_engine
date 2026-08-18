@@ -175,7 +175,7 @@ fn test_cartomancer_creates_tarot_on_blind_select() {
     gs.select_blind().unwrap();
 
     assert_eq!(gs.consumables.len(), 1, "Cartomancer should create a tarot on blind select");
-    assert!(matches!(gs.consumables[0], crate::card::ConsumableCard::Tarot(_)),
+    assert!(matches!(gs.consumables[0].card, crate::card::ConsumableCard::Tarot(_)),
         "Cartomancer should specifically create a Tarot");
 }
 
@@ -184,7 +184,7 @@ fn test_cartomancer_needs_a_free_consumable_slot() {
     let mut gs = make_game();
     gs.jokers.push(joker(100, JokerKind::Cartomancer));
     gs.consumable_slots = 1;
-    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Mercury));
+    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Mercury).into());
 
     gs.select_blind().unwrap();
 
@@ -472,7 +472,7 @@ fn test_diet_cola_does_not_react_to_selling_a_consumable() {
     gs.state = GameStateKind::Shop;
     gs.jokers.push(joker(1, JokerKind::DietCola));
     gs.consumable_slots = 5;
-    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheFool));
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheFool).into());
 
     gs.sell_consumable(0).unwrap();
 
@@ -1510,7 +1510,7 @@ fn test_seance_creates_spectral_on_straight_flush() {
 
     assert!(!gs.consumables.is_empty(),
         "Seance should create a spectral card on Straight Flush");
-    assert!(gs.consumables.iter().any(|c| matches!(c, crate::card::ConsumableCard::Spectral(_))),
+    assert!(gs.consumables.iter().any(|c| matches!(c.card, crate::card::ConsumableCard::Spectral(_))),
         "Seance should specifically create a Spectral card");
 }
 

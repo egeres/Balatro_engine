@@ -59,7 +59,7 @@ fn test_hologram_counts_a_whole_batch_of_spectral_cards() {
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
     gs.jokers.push(joker(1, JokerKind::Hologram));
     gs.consumable_slots = 5;
-    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Incantation));
+    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Incantation).into());
 
     gs.use_consumable(0, vec![]).unwrap();
 
@@ -75,7 +75,7 @@ fn test_campfire_grows_when_a_consumable_is_sold() {
     let mut gs = make_game();
     gs.state = GameStateKind::Shop;
     gs.jokers.push(joker(1, JokerKind::Campfire));
-    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheFool));
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheFool).into());
 
     gs.sell_consumable(0).unwrap();
 
@@ -267,7 +267,7 @@ fn test_the_hanged_man_destroys_at_most_two_cards() {
     ];
     setup_round(&mut gs, cards, 4);
     gs.consumable_slots = 5;
-    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheHangedMan));
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheHangedMan).into());
 
     gs.use_consumable(0, vec![0, 1, 2, 3]).unwrap();
 

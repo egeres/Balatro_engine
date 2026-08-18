@@ -244,9 +244,9 @@ fn test_swap_jokers_order_affects_blueprint_scoring() {
 #[test]
 fn test_swap_consumables_changes_order() {
     let mut gs = make_game();
-    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheFool));
-    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheMagician));
-    gs.consumables.push(ConsumableCard::Planet(PlanetCard::Mercury));
+    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheFool).into());
+    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheMagician).into());
+    gs.consumables.push(ConsumableCard::Planet(PlanetCard::Mercury).into());
 
     gs.swap_consumables(0, 2).unwrap();
 
@@ -258,8 +258,8 @@ fn test_swap_consumables_changes_order() {
 #[test]
 fn test_swap_consumables_adjacent() {
     let mut gs = make_game();
-    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheSun));
-    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheMoon));
+    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheSun).into());
+    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheMoon).into());
 
     gs.swap_consumables(0, 1).unwrap();
 
@@ -270,8 +270,8 @@ fn test_swap_consumables_adjacent() {
 #[test]
 fn test_swap_consumables_same_index_is_noop() {
     let mut gs = make_game();
-    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheSun));
-    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheMoon));
+    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheSun).into());
+    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheMoon).into());
 
     gs.swap_consumables(0, 0).unwrap();
 
@@ -282,7 +282,7 @@ fn test_swap_consumables_same_index_is_noop() {
 #[test]
 fn test_swap_consumables_out_of_range_first_index() {
     let mut gs = make_game();
-    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheFool));
+    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheFool).into());
 
     let err = gs.swap_consumables(3, 0).unwrap_err();
     assert!(matches!(err, BalatroError::IndexOutOfRange(3, 1)));
@@ -291,7 +291,7 @@ fn test_swap_consumables_out_of_range_first_index() {
 #[test]
 fn test_swap_consumables_out_of_range_second_index() {
     let mut gs = make_game();
-    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheFool));
+    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheFool).into());
 
     let err = gs.swap_consumables(0, 3).unwrap_err();
     assert!(matches!(err, BalatroError::IndexOutOfRange(3, 1)));

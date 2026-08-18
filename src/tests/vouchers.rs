@@ -181,7 +181,7 @@ fn test_grabber_and_nacho_tong_stack() {
 fn test_observatory_sets_x_mult_on_planet_use() {
     use crate::types::{PlanetCard, HandType};
     let mut gs = apply_voucher_to_game(VoucherKind::Observatory);
-    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter));
+    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter).into());
     gs.use_consumable(0, vec![]).unwrap();
     let flush_level = gs.hand_levels.get(&HandType::Flush).unwrap();
     assert!(
@@ -196,9 +196,9 @@ fn test_observatory_sets_x_mult_on_planet_use() {
 fn test_observatory_stacks_per_planet_use() {
     use crate::types::{PlanetCard, HandType};
     let mut gs = apply_voucher_to_game(VoucherKind::Observatory);
-    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter));
+    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter).into());
     gs.use_consumable(0, vec![]).unwrap();
-    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter));
+    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter).into());
     gs.use_consumable(0, vec![]).unwrap();
     let flush_level = gs.hand_levels.get(&HandType::Flush).unwrap();
     assert!(
@@ -213,7 +213,7 @@ fn test_observatory_stacks_per_planet_use() {
 fn test_no_observatory_planet_does_not_set_x_mult() {
     use crate::types::{PlanetCard, HandType};
     let mut gs = make_game();
-    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter));
+    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter).into());
     gs.use_consumable(0, vec![]).unwrap();
     let flush_level = gs.hand_levels.get(&HandType::Flush).unwrap();
     assert!(
@@ -242,7 +242,7 @@ fn test_observatory_increases_flush_score() {
 
     // Without Observatory: Jupiter just levels up (L2), score = 71×6 = 426
     let mut gs_no_obs = make_game();
-    gs_no_obs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter));
+    gs_no_obs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter).into());
     gs_no_obs.use_consumable(0, vec![]).unwrap();
     let result_no_obs = {
         let jokers = [];
@@ -257,7 +257,7 @@ fn test_observatory_increases_flush_score() {
 
     // With Observatory: same planet use also gives X1.5, score = 71×9 = 639
     let mut gs = apply_voucher_to_game(VoucherKind::Observatory);
-    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter));
+    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Jupiter).into());
     gs.use_consumable(0, vec![]).unwrap();
     let result = {
         let jokers = [];

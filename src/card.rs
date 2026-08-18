@@ -386,6 +386,51 @@ impl ConsumableCard {
     }
 }
 
+/// A consumable sitting in your consumable slots, with the edition it carries.
+///
+/// Kept apart from [`ConsumableCard`] because only a *held* card can have one: the shop and the
+/// booster packs never roll editions onto consumables (`create_card` only polls them for jokers,
+/// common_events.lua:2149). In a vanilla run Perkeo is the sole source of a Negative one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HeldConsumable {
+    pub card: ConsumableCard,
+    /// A Negative consumable carries its own consumable slot, which it takes with it when used
+    /// or sold (`card.lua:687`, the same rule that gives Negative jokers a joker slot).
+    pub negative: bool,
+}
+
+impl HeldConsumable {
+    pub fn new(card: ConsumableCard) -> Self {
+        Self { card, negative: false }
+    }
+
+    pub fn negative(card: ConsumableCard) -> Self {
+        Self { card, negative: true }
+    }
+}
+
+impl From<ConsumableCard> for HeldConsumable {
+    fn from(card: ConsumableCard) -> Self {
+        Self::new(card)
+    }
+}
+
+/// Reading a held consumable as the card it is, so `display_name()` / `base_cost()` and friends
+/// stay reachable without spelling out `.card` every time.
+impl std::ops::Deref for HeldConsumable {
+    type Target = ConsumableCard;
+    fn deref(&self) -> &ConsumableCard {
+        &self.card
+    }
+}
+
+/// Comparing a held consumable directly against a bare card, ignoring the edition.
+impl PartialEq<ConsumableCard> for HeldConsumable {
+    fn eq(&self, other: &ConsumableCard) -> bool {
+        self.card == *other
+    }
+}
+
 /// Hand level data - tracks levels and play counts for each hand type
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HandLevelData {

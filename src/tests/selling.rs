@@ -125,7 +125,7 @@ fn test_campfire_gains_x_mult_when_joker_sold_mid_round() {
 fn test_sell_consumable_mid_round_removes_it() {
     let mut gs = make_game();
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
-    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheFool));
+    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheFool).into());
 
     gs.sell_consumable(0).unwrap();
 
@@ -137,7 +137,7 @@ fn test_sell_tarot_mid_round_pays_one_dollar() {
     // Tarot base_cost=3 → sell = (3/2).max(1) = 1
     let mut gs = make_game();
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
-    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheMagician));
+    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheMagician).into());
     let before = gs.money;
 
     gs.sell_consumable(0).unwrap();
@@ -150,7 +150,7 @@ fn test_sell_spectral_mid_round_pays_two_dollars() {
     // Spectral base_cost=4 → sell = (4/2).max(1) = 2
     let mut gs = make_game();
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
-    gs.consumables.push(ConsumableCard::Spectral(SpectralCard::Familiar));
+    gs.consumables.push(ConsumableCard::Spectral(SpectralCard::Familiar).into());
     let before = gs.money;
 
     gs.sell_consumable(0).unwrap();
@@ -171,9 +171,9 @@ fn test_sell_consumable_mid_round_out_of_range_returns_error() {
 fn test_sell_multiple_consumables_mid_round() {
     let mut gs = make_game();
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
-    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheWorld));
-    gs.consumables.push(ConsumableCard::Planet(PlanetCard::Jupiter));
-    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheSun));
+    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheWorld).into());
+    gs.consumables.push(ConsumableCard::Planet(PlanetCard::Jupiter).into());
+    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheSun).into());
     let before = gs.money;
 
     // Sell all three one by one (always index 0 as list shrinks)
@@ -191,7 +191,7 @@ fn test_sell_joker_and_consumable_mid_round_both_update_money() {
     let mut gs = make_game();
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
     gs.jokers.push(joker(10, JokerKind::Joker));         // sell_value = 1
-    gs.consumables.push(ConsumableCard::Tarot(TarotCard::Judgement)); // sell = 1
+    gs.consumables.push(ConsumableCard::Tarot(TarotCard::Judgement).into()); // sell = 1
     let before = gs.money;
 
     gs.sell_joker(0).unwrap();

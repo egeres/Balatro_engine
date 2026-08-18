@@ -217,17 +217,20 @@ impl GameState {
     fn begin_round(&mut self) {
         self.state = GameStateKind::Round;
         self.score_accumulated = 0.0;
-        self.hands_remaining = self.effective_max_hands();
-        self.discards_remaining = self.effective_max_discards();
         self.selected_indices.clear();
         self.hand.clear();
         self.discard_pile.clear();
 
-        // Reset showdown blind state
+        // Reset showdown blind state. This has to happen before the hand and discard counts are
+        // worked out: a Luchador sold last round leaves the blind latched off, and The Needle and
+        // The Water both read that latch.
         self.fish_prepped = false;
         self.verdant_leaf_joker_sold = false;
         self.cerulean_forced_card_id = None;
         self.boss_blind_manually_disabled = false;
+
+        self.hands_remaining = self.effective_max_hands();
+        self.discards_remaining = self.effective_max_discards();
 
         // Reset per-round hand played counters
         for data in self.hand_levels.values_mut() {
@@ -325,7 +328,14 @@ impl GameState {
     }
 
     pub(crate) fn effective_max_hands(&self) -> u32 {
-        let mut hands = self.max_hands;
+        // The Needle cuts the round down to a single hand (`hands_sub = round_resets.hands - 1`,
+        // blind.lua:183). It lands in Blind:set_blind, before the jokers' setting_blind pass, so
+        // Burglar's +3 still stacks on top of the 1.
+        let mut hands = if self.boss_effect_active(BossBlind::TheNeedle) {
+            1
+        } else {
+            self.max_hands
+        };
         for j in &self.jokers {
             if !j.active {
                 continue;
@@ -350,12 +360,8 @@ impl GameState {
             discards = discards.saturating_sub(1);
         }
         // TheWater: start with 0 discards
-        if let Some(BossBlind::TheWater) = self.boss_blind {
-            if matches!(self.current_blind, BlindKind::Boss) {
-                if !self.boss_blind_disabled() {
-                    return 0;
-                }
-            }
+        if self.boss_effect_active(BossBlind::TheWater) {
+            return 0;
         }
         for j in &self.jokers {
             if !j.active {
@@ -624,9 +630,9 @@ impl GameState {
                 JokerKind::Cartomancer => {
                     // Creates a Tarot when the Blind is selected — nothing to do with what you
                     // then play (card.lua `first_hand_drawn`, en-us.lua j_cartomancer).
-                    if self.consumables.len() < self.consumable_slots as usize {
+                    if self.has_consumable_room() {
                         let tarot = self.random_tarot();
-                        self.consumables.push(ConsumableCard::Tarot(tarot));
+                        self.add_consumable(ConsumableCard::Tarot(tarot));
                     }
                 }
                 JokerKind::Certificate => {

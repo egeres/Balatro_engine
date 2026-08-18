@@ -377,13 +377,6 @@ impl GameState {
             return Err(BalatroError::NoHandsRemaining);
         }
 
-        // Needle boss: only 1 hand
-        if self.boss_effect_active(BossBlind::TheNeedle)
-            && self.hands_remaining < self.effective_max_hands()
-        {
-            return Err(BalatroError::BossBlindEffect("The Needle: only 1 hand allowed".to_string()));
-        }
-
         let played_hand_indices: Vec<usize> = self
             .selected_indices
             .iter()
@@ -616,9 +609,9 @@ impl GameState {
         // Vagabond: create a tarot if money <= $4 when playing a hand
         if !hand_debuffed && self.money <= 4 {
             if self.jokers.iter().any(|j| j.kind == JokerKind::Vagabond && j.active) {
-                if self.consumables.len() < self.consumable_slots as usize {
+                if self.has_consumable_room() {
                     let tarot = self.random_tarot();
-                    self.consumables.push(ConsumableCard::Tarot(tarot));
+                    self.add_consumable(ConsumableCard::Tarot(tarot));
                 }
             }
         }
@@ -824,9 +817,9 @@ impl GameState {
                         .count();
                     for _ in 0..eights_scored {
                         if self.rng.next_bool_prob("8ball", (0.25 * oops_mult).min(1.0)) {
-                            if self.consumables.len() < self.consumable_slots as usize {
+                            if self.has_consumable_room() {
                                 let tarot = self.random_tarot();
-                                self.consumables.push(ConsumableCard::Tarot(tarot));
+                                self.add_consumable(ConsumableCard::Tarot(tarot));
                             }
                         }
                     }
@@ -844,7 +837,7 @@ impl GameState {
                     // Straight Flush only. A Flush Five is five of the same rank, which is not a
                     // straight, so `poker_hands['Straight Flush']` stays empty for it.
                     if result.contained.contains(HandType::StraightFlush) {
-                        if self.consumables.len() < self.consumable_slots as usize {
+                        if self.has_consumable_room() {
                             let spectrals = [
                                 SpectralCard::Familiar, SpectralCard::Grim, SpectralCard::Incantation,
                                 SpectralCard::Aura, SpectralCard::Wraith, SpectralCard::Ectoplasm,
@@ -852,7 +845,7 @@ impl GameState {
                                 SpectralCard::Medium, SpectralCard::Cryptid,
                             ];
                             let idx = self.rng.range_usize("seance", 0, spectrals.len() - 1);
-                            self.consumables.push(ConsumableCard::Spectral(spectrals[idx]));
+                            self.add_consumable(ConsumableCard::Spectral(spectrals[idx]));
                         }
                     }
                 }
@@ -861,9 +854,9 @@ impl GameState {
                     let has_ace = result.scoring_card_indices.iter()
                         .any(|&idx| played[idx].rank == Rank::Ace);
                     if has_ace && result.contained.contains(HandType::Straight) {
-                        if self.consumables.len() < self.consumable_slots as usize {
+                        if self.has_consumable_room() {
                             let tarot = self.random_tarot();
-                            self.consumables.push(ConsumableCard::Tarot(tarot));
+                            self.add_consumable(ConsumableCard::Tarot(tarot));
                         }
                     }
                 }
@@ -872,14 +865,14 @@ impl GameState {
                     // destroyed either way; a full consumable slot only skips the spectral.
                     let is_first_hand = self.hands_remaining + 1 == self.effective_max_hands();
                     if is_first_hand && played.len() == 1 && played[0].rank == Rank::Six {
-                        if self.consumables.len() < self.consumable_slots as usize {
+                        if self.has_consumable_room() {
                             let spectrals = [
                                 SpectralCard::Familiar, SpectralCard::Grim, SpectralCard::Incantation,
                                 SpectralCard::Talisman, SpectralCard::Aura, SpectralCard::Wraith,
                                 SpectralCard::Ankh, SpectralCard::DejaVu, SpectralCard::Medium,
                             ];
                             let idx = self.rng.range_usize("sixth", 0, spectrals.len() - 1);
-                            self.consumables.push(ConsumableCard::Spectral(spectrals[idx]));
+                            self.add_consumable(ConsumableCard::Spectral(spectrals[idx]));
                         }
                         // Take the card out of hand before destroying it — destroy_deck_card
                         // remaps stored indices and assumes the card is no longer referenced.
@@ -935,9 +928,9 @@ impl GameState {
             // Purple Seal: create tarot when discarded
             if self.deck[card_idx].seal == Seal::Purple {
                 // Add a random tarot to consumables if space
-                if self.consumables.len() < self.consumable_slots as usize {
+                if self.has_consumable_room() {
                     let tarot = self.random_tarot();
-                    self.consumables.push(ConsumableCard::Tarot(tarot));
+                    self.add_consumable(ConsumableCard::Tarot(tarot));
                 }
             }
         }
@@ -1254,10 +1247,10 @@ impl GameState {
                     .filter(|&&di| self.deck[di].seal == Seal::Blue && !self.deck[di].debuffed)
                     .count();
                 for _ in 0..sealed {
-                    if self.consumables.len() >= self.consumable_slots as usize {
+                    if !self.has_consumable_room() {
                         break;
                     }
-                    self.consumables.push(ConsumableCard::Planet(planet));
+                    self.add_consumable(ConsumableCard::Planet(planet));
                 }
             }
         }
@@ -1273,6 +1266,13 @@ impl GameState {
                 "dollars_earned": blind_dollars,
             }),
         });
+
+        // The shop's voucher is drawn once per ante, when the Boss falls
+        // (state_events.lua:263) — not once per shop. One bought early is gone for the rest of
+        // the ante, and one you skip is still there next shop.
+        if matches!(self.current_blind, BlindKind::Boss) {
+            self.shop_voucher = Some(self.random_voucher());
+        }
 
         // Mark blind as defeated
         match self.current_blind {

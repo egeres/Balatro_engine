@@ -224,3 +224,81 @@ fn test_a_joker_never_gets_both_stake_stickers() {
         }
     }
 }
+
+// =========================================================
+// The voucher slot is per ante, not per shop
+// =========================================================
+
+/// Beat the current blind with a trivially easy goal and step into the shop. The Boss ability is
+/// nulled out so that whichever boss got rolled cannot interfere.
+fn clear_a_blind(gs: &mut GameState) {
+    gs.boss_blind = None;
+    gs.select_blind().unwrap();
+    gs.score_goal = 1.0;
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+    assert!(matches!(gs.state, GameStateKind::Shop));
+}
+
+#[test]
+fn test_the_same_voucher_is_offered_all_ante() {
+    let mut gs = GameState::new(DeckType::Red, Stake::White, Some("VOU1".to_string()));
+    let ante_voucher = gs.shop_voucher.expect("a voucher is drawn at run start");
+
+    clear_a_blind(&mut gs); // Small
+    assert_eq!(gs.shop_voucher, Some(ante_voucher));
+    gs.leave_shop().unwrap();
+
+    clear_a_blind(&mut gs); // Big
+    assert_eq!(gs.shop_voucher, Some(ante_voucher),
+        "the voucher slot holds the same card all ante");
+}
+
+#[test]
+fn test_the_voucher_slot_is_redrawn_when_the_boss_falls() {
+    let mut gs = GameState::new(DeckType::Red, Stake::White, Some("VOU2".to_string()));
+
+    // Take this ante's voucher, which empties the slot.
+    clear_a_blind(&mut gs);
+    gs.money = 100;
+    gs.buy_voucher().unwrap();
+    assert!(gs.shop_voucher.is_none());
+    gs.leave_shop().unwrap();
+
+    clear_a_blind(&mut gs); // Big — still empty, same ante
+    assert!(gs.shop_voucher.is_none());
+    gs.leave_shop().unwrap();
+
+    clear_a_blind(&mut gs); // Boss — a new ante's voucher is drawn
+    assert!(gs.shop_voucher.is_some(),
+        "the Boss falling draws the next ante's voucher");
+}
+
+#[test]
+fn test_a_bought_voucher_does_not_come_back_next_shop() {
+    let mut gs = GameState::new(DeckType::Red, Stake::White, Some("VOU3".to_string()));
+    clear_a_blind(&mut gs);
+    gs.money = 100;
+    let bought = gs.shop_voucher.unwrap();
+    gs.buy_voucher().unwrap();
+
+    gs.leave_shop().unwrap();
+    clear_a_blind(&mut gs);
+
+    assert!(gs.shop_voucher.is_none(),
+        "buying the ante's voucher empties the slot until the next ante");
+    assert!(gs.vouchers.contains(&bought));
+}
+
+#[test]
+fn test_rerolling_cannot_fish_for_a_different_voucher() {
+    let mut gs = GameState::new(DeckType::Red, Stake::White, Some("VOU4".to_string()));
+    clear_a_blind(&mut gs);
+    gs.money = 500;
+    let offered = gs.shop_voucher;
+
+    for _ in 0..8 {
+        gs.reroll_shop().unwrap();
+    }
+    assert_eq!(gs.shop_voucher, offered);
+}

@@ -637,22 +637,50 @@ fn test_the_needle_allows_first_hand() {
     assert!(gs.play_hand().is_ok(), "TheNeedle: first hand must succeed");
 }
 
-/// Attempting a second hand during a TheNeedle Boss blind returns BossBlindEffect.
+/// TheNeedle gives you one hand by cutting the round's hand count to 1, not by refusing plays.
 #[test]
-fn test_the_needle_blocks_second_hand_on_boss() {
+fn test_the_needle_leaves_the_round_with_a_single_hand() {
     let mut gs = boss_select(BossBlind::TheNeedle);
     gs.select_blind().unwrap();
+
+    assert_eq!(gs.effective_max_hands(), 1);
+    assert_eq!(gs.hands_remaining, 1, "the round opens with exactly one hand");
+
     gs.score_goal = f64::MAX;
-    // First hand succeeds
     gs.select_card(0).unwrap();
     gs.play_hand().unwrap();
-    // Second hand must fail
+
+    // Spending the only hand ends the round the ordinary way, rather than the second play
+    // being refused by a special case.
+    assert_eq!(gs.hands_remaining, 0);
+    assert!(matches!(gs.state, GameStateKind::GameOver),
+        "one hand, goal not met, so the run is over");
+}
+
+/// Because the round really is one hand long, that hand *is* the last one — which is what
+/// Acrobat and Dusk key off.
+#[test]
+fn test_the_needle_makes_the_only_hand_the_final_hand() {
+    let mut gs = boss_select(BossBlind::TheNeedle);
+    gs.jokers.push(joker(1, JokerKind::Acrobat));
+    gs.select_blind().unwrap();
+    gs.score_goal = f64::MAX;
+
     gs.select_card(0).unwrap();
-    let result = gs.play_hand();
-    assert!(
-        matches!(result, Err(BalatroError::BossBlindEffect(_))),
-        "TheNeedle: second hand must return BossBlindEffect, got {:?}", result
-    );
+    let r = gs.play_hand().unwrap();
+
+    assert!(r.events.iter().any(|e| e.source == "Acrobat"),
+        "Acrobat should see the one allowed hand as the final hand");
+}
+
+/// Burglar still stacks on top of the 1, because it lands after Blind:set_blind.
+#[test]
+fn test_burglar_stacks_on_top_of_the_needle() {
+    let mut gs = boss_select(BossBlind::TheNeedle);
+    gs.jokers.push(joker(1, JokerKind::Burglar));
+    gs.select_blind().unwrap();
+
+    assert_eq!(gs.hands_remaining, 4, "The Needle sets 1, then Burglar adds 3");
 }
 
 /// TheNeedle imposes no hand-count restriction on Small or Big blinds.

@@ -208,7 +208,7 @@ fn run_pack_opening_and_consumable_chain() {
     );
     assert_eq!(gs.consumables.len(), 1);
     assert!(
-        matches!(gs.consumables[0], ConsumableCard::Planet(PlanetCard::Mercury)),
+        matches!(gs.consumables[0].card, ConsumableCard::Planet(PlanetCard::Mercury)),
         "consumables[0] should be Mercury"
     );
 
@@ -241,7 +241,7 @@ fn run_pack_opening_and_consumable_chain() {
     let target_deck_idx = gs.hand[0];
 
     // Inject TheEmpress tarot directly into consumables (simulates having purchased it).
-    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheEmpress));
+    gs.consumables.push(ConsumableCard::Tarot(TarotCard::TheEmpress).into());
 
     // Apply TheEmpress to hand[0] → sets Mult enhancement on the underlying deck card.
     // Target is a hand-relative index (0), not a deck index.

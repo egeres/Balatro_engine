@@ -294,7 +294,7 @@ fn destroy_with_hanged_man(deck_cards: Vec<CardInstance>, targets: Vec<usize>) -
     setup_round(&mut gs, deck_cards, 3);
     gs.jokers.push(joker(0, JokerKind::GlassJoker));
     gs.consumables
-        .push(crate::card::ConsumableCard::Tarot(TarotCard::TheHangedMan));
+        .push(crate::card::ConsumableCard::Tarot(TarotCard::TheHangedMan).into());
     gs.use_consumable(0, targets).unwrap();
     gs
 }
@@ -486,35 +486,40 @@ fn test_sliced_joker_does_not_fire_its_own_setting_blind_effect() {
 // =========================================================
 
 #[test]
-fn test_perkeo_copies_a_consumable_when_leaving_the_shop() {
+fn test_perkeo_makes_a_negative_copy_when_leaving_the_shop() {
     let mut gs = make_game();
     gs.state = crate::game::GameStateKind::Shop;
     gs.jokers.push(joker(1, JokerKind::Perkeo));
-    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheFool));
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheFool).into());
 
     gs.leave_shop().unwrap();
 
     assert_eq!(gs.consumables.len(), 2, "Perkeo should copy the held consumable");
     assert_eq!(gs.consumables[1], crate::card::ConsumableCard::Tarot(TarotCard::TheFool));
-    assert_eq!(gs.consumable_slots, 3, "the Negative copy brings its own slot");
+    assert!(gs.consumables[1].negative, "the copy is Negative");
+    assert!(!gs.consumables[0].negative, "the original is not");
+    assert_eq!(gs.effective_consumable_slots(), 3, "the Negative copy brings its own slot");
 }
 
 #[test]
-fn test_perkeo_slot_goes_away_with_the_card() {
-    // In Balatro the extra slot belongs to the Negative card, so it must not accumulate across
-    // shops for the rest of the run.
+fn test_the_negative_slot_belongs_to_the_negative_card() {
+    // Spending an ordinary consumable must not hand back the Negative card's slot.
     let mut gs = make_game();
     gs.state = crate::game::GameStateKind::Shop;
     gs.jokers.push(joker(1, JokerKind::Perkeo));
-    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Mercury));
+    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Mercury).into());
 
     gs.leave_shop().unwrap();
-    assert_eq!(gs.consumable_slots, 3);
+    assert_eq!(gs.effective_consumable_slots(), 3);
 
-    // Spend both consumables; the borrowed slot is handed back.
+    // Spend the ordinary one; the Negative card is still held, so its slot stays.
     gs.use_consumable(0, vec![]).unwrap();
+    assert_eq!(gs.effective_consumable_slots(), 3, "the Negative card is still in hand");
+    assert!(gs.consumables[0].negative);
+
+    // Spend the Negative one and the slot goes with it.
     gs.use_consumable(0, vec![]).unwrap();
-    assert_eq!(gs.consumable_slots, 2, "the Negative slot should be released once spent");
+    assert_eq!(gs.effective_consumable_slots(), 2);
 }
 
 #[test]
@@ -525,11 +530,25 @@ fn test_perkeo_slots_do_not_creep_over_many_shops() {
     for _ in 0..5 {
         gs.state = crate::game::GameStateKind::Shop;
         gs.consumables.clear();
-        gs.release_negative_consumable_slots();
-        gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheFool));
+        gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheFool).into());
         gs.leave_shop().unwrap();
     }
 
-    assert_eq!(gs.consumable_slots, 3,
+    assert_eq!(gs.effective_consumable_slots(), 3,
         "each shop lends exactly one slot, it should not stack to 7");
+    assert_eq!(gs.consumable_slots, 2, "the base slot count never moved");
+}
+
+#[test]
+fn test_a_negative_consumable_lets_you_hold_one_over_the_limit() {
+    let mut gs = make_game();
+    gs.state = crate::game::GameStateKind::Shop;
+    gs.jokers.push(joker(1, JokerKind::Perkeo));
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheFool).into());
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheStar).into());
+
+    // Slots are full at 2, but Perkeo's copy always fits.
+    gs.leave_shop().unwrap();
+    assert_eq!(gs.consumables.len(), 3);
+    assert_eq!(gs.effective_consumable_slots(), 3, "and the board is exactly full again");
 }

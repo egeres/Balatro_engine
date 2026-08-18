@@ -40,7 +40,7 @@ pub struct GameState {
     pub hand: Vec<usize>,         // indices of cards currently in hand
     pub discard_pile: Vec<usize>, // indices of discarded cards this round
     pub jokers: Vec<JokerInstance>,
-    pub consumables: Vec<ConsumableCard>,
+    pub consumables: Vec<HeldConsumable>,
     pub hands_remaining: u32,
     pub discards_remaining: u32,
     pub score_accumulated: f64,
@@ -64,10 +64,6 @@ pub struct GameState {
     pub max_discards: u32,
     pub joker_slots: u32,
     pub consumable_slots: u32,
-    /// How much of `consumable_slots` is on loan from Negative consumables (Perkeo's copy).
-    /// In Balatro the slot belongs to the card and leaves with it, so this is released as the
-    /// consumables are spent rather than accumulating for the rest of the run.
-    pub negative_consumable_slots: u32,
     pub max_interest: i32,
 
     // History
@@ -248,7 +244,6 @@ impl GameState {
             max_discards: 3,
             joker_slots: 5,
             consumable_slots: 2,
-            negative_consumable_slots: 0,
             max_interest: 25,
             history: Vec::new(),
             next_id: 1,
@@ -289,6 +284,9 @@ impl GameState {
 
         // Pick boss blind for ante 1
         gs.boss_blind = gs.pick_boss_blind();
+
+        // The first ante's voucher (game.lua:2178).
+        gs.shop_voucher = Some(gs.random_voucher());
 
         gs
     }
@@ -353,8 +351,8 @@ impl GameState {
                 // Start with Crystal Ball voucher + 2× The Fool tarot cards
                 self.vouchers.push(VoucherKind::CrystalBall);
                 self.consumable_slots += 1; // Crystal Ball gives +1 consumable slot
-                self.consumables.push(ConsumableCard::Tarot(TarotCard::TheFool));
-                self.consumables.push(ConsumableCard::Tarot(TarotCard::TheFool));
+                self.consumables.push(HeldConsumable::new(ConsumableCard::Tarot(TarotCard::TheFool)));
+                self.consumables.push(HeldConsumable::new(ConsumableCard::Tarot(TarotCard::TheFool)));
             }
             DeckType::Nebula => {
                 // Telescope voucher, at the cost of a consumable slot (game.lua:634)
@@ -365,7 +363,7 @@ impl GameState {
                 // Spectral cards appear in the shop, and the run starts with a Hex
                 // (`spectral_rate = 2, consumables = {'c_hex'}`, game.lua:635)
                 self.spectral_rate = 2.0;
-                self.consumables.push(ConsumableCard::Spectral(SpectralCard::Hex));
+                self.consumables.push(HeldConsumable::new(ConsumableCard::Spectral(SpectralCard::Hex)));
             }
             DeckType::Zodiac => {
                 // Start with Tarot Merchant, Planet Merchant, Overstock vouchers
@@ -569,15 +567,22 @@ impl GameState {
         self.jokers.iter().any(|j| j.kind == JokerKind::SmearedJoker && j.active)
     }
 
-    /// Hand back the consumable slots Negative consumables were holding open, now that the
-    /// consumables have been spent. Called after anything leaves `consumables`.
-    pub(crate) fn release_negative_consumable_slots(&mut self) {
-        let base = self.consumable_slots - self.negative_consumable_slots;
-        let keep = (self.consumables.len() as u32)
-            .saturating_sub(base)
-            .min(self.negative_consumable_slots);
-        self.consumable_slots = base + keep;
-        self.negative_consumable_slots = keep;
+    /// How many consumables can be held right now: the slot count plus one for each Negative
+    /// consumable, since a Negative card brings its own slot and takes it away again when spent
+    /// (card.lua:687).
+    pub fn effective_consumable_slots(&self) -> usize {
+        let negatives = self.consumables.iter().filter(|c| c.negative).count();
+        self.consumable_slots as usize + negatives
+    }
+
+    /// Whether there is room for one more consumable.
+    pub(crate) fn has_consumable_room(&self) -> bool {
+        self.consumables.len() < self.effective_consumable_slots()
+    }
+
+    /// Put a consumable into the slots. Callers gate on [`Self::has_consumable_room`] first.
+    pub(crate) fn add_consumable(&mut self, card: ConsumableCard) {
+        self.consumables.push(HeldConsumable::new(card));
     }
 
     /// The ante that ends the run (`G.GAME.win_ante`).

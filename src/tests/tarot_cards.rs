@@ -11,7 +11,7 @@ fn apply_tarot_in_round(
 ) -> GameState {
     let mut gs = make_game();
     setup_round(&mut gs, deck_cards, hand_size);
-    gs.consumables.push(crate::card::ConsumableCard::Tarot(tarot));
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(tarot).into());
     gs.use_consumable(0, targets).unwrap();
     gs
 }
@@ -183,7 +183,7 @@ fn test_the_hermit_doubles_money() {
     let mut gs = make_game();
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
     gs.money = 10;
-    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheHermit));
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheHermit).into());
     gs.use_consumable(0, vec![]).unwrap();
     // Should have doubled: 10 + 10 = 20
     assert_eq!(gs.money, 20);
@@ -194,7 +194,7 @@ fn test_the_hermit_caps_gain_at_20() {
     let mut gs = make_game();
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
     gs.money = 100;
-    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheHermit));
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheHermit).into());
     gs.use_consumable(0, vec![]).unwrap();
     // Cap: gain at most $20 → 100 + 20 = 120
     assert_eq!(gs.money, 120);
@@ -210,7 +210,7 @@ fn test_temperance_gives_money_from_joker_sell_values() {
     gs.jokers.push(joker(11, JokerKind::AbstractJoker)); // sell value ~3
     let expected_total = gs.jokers.iter().map(|j| j.sell_value() as i32).sum::<i32>();
     let capped = expected_total.min(50);
-    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::Temperance));
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::Temperance).into());
     gs.use_consumable(0, vec![]).unwrap();
     assert_eq!(gs.money, capped);
 }
@@ -224,11 +224,11 @@ fn test_the_high_priestess_creates_planet_cards() {
     let mut gs = make_game();
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
     gs.consumables.clear();
-    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheHighPriestess));
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheHighPriestess).into());
     gs.use_consumable(0, vec![]).unwrap();
     // Should have created up to 2 Planet cards
     let planet_count = gs.consumables.iter().filter(|c| {
-        matches!(c, crate::card::ConsumableCard::Planet(_))
+        matches!(c.card, crate::card::ConsumableCard::Planet(_))
     }).count();
     assert!(planet_count <= 2, "TheHighPriestess should create at most 2 Planets");
     assert!(planet_count >= 1, "TheHighPriestess should create at least 1 Planet");
@@ -239,11 +239,11 @@ fn test_the_emperor_creates_tarot_cards() {
     let mut gs = make_game();
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
     gs.consumables.clear();
-    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheEmperor));
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheEmperor).into());
     gs.use_consumable(0, vec![]).unwrap();
     // Should have created up to 2 Tarot cards
     let tarot_count = gs.consumables.iter().filter(|c| {
-        matches!(c, crate::card::ConsumableCard::Tarot(_))
+        matches!(c.card, crate::card::ConsumableCard::Tarot(_))
     }).count();
     assert!(tarot_count <= 2, "TheEmperor should create at most 2 Tarots");
     assert!(tarot_count >= 1, "TheEmperor should create at least 1 Tarot");
@@ -253,7 +253,7 @@ fn test_the_emperor_creates_tarot_cards() {
 fn test_judgement_creates_a_joker() {
     let mut gs = make_game();
     setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
-    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::Judgement));
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::Judgement).into());
     let before = gs.jokers.len();
     gs.use_consumable(0, vec![]).unwrap();
     assert_eq!(gs.jokers.len(), before + 1, "Judgement should create 1 joker");
@@ -271,7 +271,7 @@ fn test_the_wheel_of_fortune_may_add_edition_to_joker() {
         );
         setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
         gs.jokers.push(joker(99, JokerKind::Joker));
-        gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheWheelOfFortune));
+        gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheWheelOfFortune).into());
         gs.use_consumable(0, vec![]).unwrap();
         if gs.jokers[0].edition != Edition::None {
             let ed = gs.jokers[0].edition;
@@ -293,14 +293,14 @@ fn test_the_fool_recreates_last_tarot() {
 
     // First use TheHermit so it's the "last used"
     gs.money = 5;
-    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheHermit));
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheHermit).into());
     gs.use_consumable(0, vec![]).unwrap();
     // Now use TheFool
-    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheFool));
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheFool).into());
     gs.use_consumable(0, vec![]).unwrap();
     // TheFool should have recreated TheHermit in consumables
     let has_hermit = gs.consumables.iter().any(|c| {
-        matches!(c, crate::card::ConsumableCard::Tarot(TarotCard::TheHermit))
+        matches!(c.card, crate::card::ConsumableCard::Tarot(TarotCard::TheHermit))
     });
     assert!(has_hermit, "TheFool should have recreated TheHermit");
 }

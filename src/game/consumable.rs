@@ -9,7 +9,7 @@ impl GameState {
             return Err(BalatroError::IndexOutOfRange(consumable_index, self.consumables.len()));
         }
 
-        let consumable = self.consumables[consumable_index].clone();
+        let consumable = self.consumables[consumable_index].card.clone();
         match &consumable {
             ConsumableCard::Planet(p) => {
                 self.apply_planet(*p);
@@ -33,7 +33,6 @@ impl GameState {
         }
 
         self.consumables.remove(consumable_index);
-        self.release_negative_consumable_slots();
         Ok(())
     }
 
@@ -45,7 +44,6 @@ impl GameState {
         let base_cost = self.consumables[consumable_index].base_cost();
         self.money += (base_cost / 2).max(1) as i32;
         self.consumables.remove(consumable_index);
-        self.release_negative_consumable_slots();
 
         // Campfire counts every card sold, consumables included (card.lua:2394).
         self.notify_card_sold();
@@ -281,13 +279,13 @@ impl GameState {
                 // The Fool itself does not count as the "last used" consumable
                 match &self.last_consumable_used.clone() {
                     Some(LastConsumable::Tarot(t)) => {
-                        if self.consumables.len() < self.consumable_slots as usize {
-                            self.consumables.push(ConsumableCard::Tarot(*t));
+                        if self.has_consumable_room() {
+                            self.add_consumable(ConsumableCard::Tarot(*t));
                         }
                     }
                     Some(LastConsumable::Planet(p)) => {
-                        if self.consumables.len() < self.consumable_slots as usize {
-                            self.consumables.push(ConsumableCard::Planet(*p));
+                        if self.has_consumable_room() {
+                            self.add_consumable(ConsumableCard::Planet(*p));
                         }
                     }
                     None => {}
@@ -297,18 +295,18 @@ impl GameState {
             TarotCard::TheHighPriestess => {
                 // Creates up to 2 random Planet cards (must have room)
                 for _ in 0..2 {
-                    if self.consumables.len() < self.consumable_slots as usize {
+                    if self.has_consumable_room() {
                         let planet = self.random_planet();
-                        self.consumables.push(ConsumableCard::Planet(planet));
+                        self.add_consumable(ConsumableCard::Planet(planet));
                     }
                 }
             }
             TarotCard::TheEmperor => {
                 // Creates up to 2 random Tarot cards (must have room)
                 for _ in 0..2 {
-                    if self.consumables.len() < self.consumable_slots as usize {
+                    if self.has_consumable_room() {
                         let tarot = self.random_tarot();
-                        self.consumables.push(ConsumableCard::Tarot(tarot));
+                        self.add_consumable(ConsumableCard::Tarot(tarot));
                     }
                 }
             }

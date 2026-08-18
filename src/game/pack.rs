@@ -42,12 +42,12 @@ impl GameState {
             1.0_f64
         };
         for _ in 0..hallucinations {
-            if self.consumables.len() >= self.consumable_slots as usize {
+            if !self.has_consumable_room() {
                 break;
             }
             if self.rng.next_bool_prob("halu", (0.5 * oops).min(1.0)) {
                 let tarot = self.random_tarot();
-                self.consumables.push(ConsumableCard::Tarot(tarot));
+                self.add_consumable(ConsumableCard::Tarot(tarot));
             }
         }
     }
@@ -209,8 +209,8 @@ impl GameState {
                 }
             }
             PackCard::Consumable(c) => {
-                if self.consumables.len() < self.consumable_slots as usize {
-                    self.consumables.push(c.clone());
+                if self.has_consumable_room() {
+                    self.add_consumable(c.clone());
                     // Note: planet_cards_used / tarot_cards_used are incremented in use_consumable,
                     // not here — counting on pick would double-count when the card is later used.
                 } else {
