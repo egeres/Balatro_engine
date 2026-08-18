@@ -302,3 +302,89 @@ fn test_rerolling_cannot_fish_for_a_different_voucher() {
     }
     assert_eq!(gs.shop_voucher, offered);
 }
+
+// =========================================================
+// Prices are computed once, from the base cost
+// =========================================================
+
+/// Put one known offer on the shelf so the price is unambiguous.
+fn shop_with(gs: &mut GameState, item: crate::card::ShopItem, base: u32) {
+    gs.state = GameStateKind::Shop;
+    gs.shop_offers.clear();
+    gs.shop_offers.push(crate::card::ShopOffer::new(item, base));
+}
+
+#[test]
+fn test_a_discount_is_not_applied_twice_to_jokers() {
+    // Blueprint is $10. Clearance Sale takes 25% off exactly once: floor((10 + 0.5) * 0.75) = 7.
+    // Discounting the shelf price and then discounting again at the till gave $5.
+    let mut gs = make_game();
+    gs.vouchers.push(VoucherKind::ClearanceSale);
+    let j = joker(1, JokerKind::Blueprint);
+    shop_with(&mut gs, crate::card::ShopItem::Joker(j), JokerKind::Blueprint.base_cost());
+
+    assert_eq!(gs.offer_price(0), Some(7));
+
+    gs.money = 50;
+    gs.buy_joker(0).unwrap();
+    assert_eq!(gs.money, 43, "charged the sticker price, once");
+}
+
+#[test]
+fn test_liquidation_halves_a_joker_once() {
+    let mut gs = make_game();
+    gs.vouchers.push(VoucherKind::Liquidation);
+    let j = joker(1, JokerKind::Blueprint);
+    shop_with(&mut gs, crate::card::ShopItem::Joker(j), JokerKind::Blueprint.base_cost());
+    assert_eq!(gs.offer_price(0), Some(5), "floor(10.5 * 0.5)");
+}
+
+#[test]
+fn test_a_couponed_offer_is_free_not_a_dollar() {
+    // The override lands after the max(1) floor (card.lua:383).
+    let mut gs = make_game();
+    let j = joker(1, JokerKind::Blueprint);
+    shop_with(&mut gs, crate::card::ShopItem::Joker(j), JokerKind::Blueprint.base_cost());
+    gs.shop_offers[0].free = true;
+
+    assert_eq!(gs.offer_price(0), Some(0));
+    gs.money = 0;
+    gs.buy_joker(0).unwrap();
+    assert_eq!(gs.money, 0, "free means free");
+}
+
+#[test]
+fn test_an_edition_surcharge_rides_on_the_base_cost() {
+    let mut gs = make_game();
+    let mut j = joker(1, JokerKind::Joker); // base $2
+    j.edition = Edition::Polychrome;        // +$5
+    shop_with(&mut gs, crate::card::ShopItem::Joker(j), JokerKind::Joker.base_cost());
+    assert_eq!(gs.offer_price(0), Some(7), "floor(2 + 5 + 0.5)");
+}
+
+#[test]
+fn test_a_coupon_beats_a_rental() {
+    // set_cost applies rental then coupon, so the coupon wins (card.lua:381-383).
+    let mut gs = make_game();
+    let mut j = joker(1, JokerKind::Blueprint);
+    j.rental = true;
+    shop_with(&mut gs, crate::card::ShopItem::Joker(j), JokerKind::Blueprint.base_cost());
+    assert_eq!(gs.offer_price(0), Some(1), "a rental is $1");
+
+    gs.shop_offers[0].free = true;
+    assert_eq!(gs.offer_price(0), Some(0), "unless it is couponed");
+}
+
+#[test]
+fn test_buying_clearance_sale_reprices_what_is_still_on_the_shelf() {
+    let mut gs = make_game();
+    let j = joker(1, JokerKind::Blueprint);
+    shop_with(&mut gs, crate::card::ShopItem::Joker(j), JokerKind::Blueprint.base_cost());
+    assert_eq!(gs.offer_price(0), Some(10));
+
+    gs.money = 50;
+    gs.shop_voucher = Some(VoucherKind::ClearanceSale);
+    gs.buy_voucher().unwrap();
+
+    assert_eq!(gs.offer_price(0), Some(7), "prices follow the discount live");
+}

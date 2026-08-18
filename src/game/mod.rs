@@ -645,8 +645,13 @@ impl GameState {
     }
 
     /// Whether there is room for one more consumable.
-    pub(crate) fn has_consumable_room(&self) -> bool {
+    pub fn has_room_for_consumable(&self) -> bool {
         self.consumables.len() < self.effective_consumable_slots()
+    }
+
+    /// Alias kept for the internal call sites.
+    pub(crate) fn has_consumable_room(&self) -> bool {
+        self.has_room_for_consumable()
     }
 
     /// Put a consumable into the slots. Callers gate on [`Self::has_consumable_room`] first.

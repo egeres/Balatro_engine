@@ -116,10 +116,10 @@ fn test_rental_jokers_are_priced_at_one_dollar_in_the_shop() {
     gs.state = GameStateKind::Shop;
     for _ in 0..40 {
         gs.generate_shop();
-        for offer in &gs.shop_offers {
+        for (i, offer) in gs.shop_offers.iter().enumerate() {
             if let crate::card::ShopItem::Joker(j) = &offer.kind {
                 if j.rental {
-                    assert_eq!(offer.price, 1, "a rental joker costs $1 to buy");
+                    assert_eq!(gs.offer_price(i), Some(1), "a rental joker costs $1 to buy");
                 }
             }
         }

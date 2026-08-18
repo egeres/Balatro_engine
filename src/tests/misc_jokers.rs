@@ -19,11 +19,7 @@ fn test_astronomer_makes_planet_cards_free() {
     gs.jokers.push(joker(1, JokerKind::Astronomer));
 
     // Manually add a planet card to shop
-    let offer = crate::card::ShopOffer {
-        kind: crate::card::ShopItem::Consumable(crate::card::ConsumableCard::Planet(PlanetCard::Mercury)),
-        price: 3,
-        sold: false,
-    };
+    let offer = crate::card::ShopOffer::new(crate::card::ShopItem::Consumable(crate::card::ConsumableCard::Planet(PlanetCard::Mercury)), 3);
     gs.shop_offers.clear();
     gs.shop_offers.push(offer);
     gs.consumable_slots = 5;
@@ -42,11 +38,7 @@ fn test_astronomer_makes_celestial_packs_free() {
     gs.jokers.push(joker(1, JokerKind::Astronomer));
     gs.money = 10;
     gs.shop_offers.clear();
-    gs.shop_offers.push(crate::card::ShopOffer {
-        kind: crate::card::ShopItem::Pack(PackKind::CelestialPackJumbo),
-        price: 6,
-        sold: false,
-    });
+    gs.shop_offers.push(crate::card::ShopOffer::new(crate::card::ShopItem::Pack(PackKind::CelestialPackJumbo), 6));
 
     gs.buy_pack(0).expect("Celestial packs are free with Astronomer");
     assert_eq!(gs.money, 10, "Astronomer covers Celestial packs, not just loose Planet cards");
@@ -59,11 +51,7 @@ fn test_astronomer_does_not_discount_other_packs() {
     gs.jokers.push(joker(1, JokerKind::Astronomer));
     gs.money = 10;
     gs.shop_offers.clear();
-    gs.shop_offers.push(crate::card::ShopOffer {
-        kind: crate::card::ShopItem::Pack(PackKind::ArcanaPack),
-        price: 4,
-        sold: false,
-    });
+    gs.shop_offers.push(crate::card::ShopOffer::new(crate::card::ShopItem::Pack(PackKind::ArcanaPack), 4));
 
     gs.buy_pack(0).unwrap();
     assert_eq!(gs.money, 6, "Arcana packs still cost money with Astronomer");
@@ -76,11 +64,7 @@ fn test_astronomer_does_not_affect_tarot_price() {
     gs.jokers.push(joker(1, JokerKind::Astronomer));
     gs.money = 10;
 
-    let offer = crate::card::ShopOffer {
-        kind: crate::card::ShopItem::Consumable(crate::card::ConsumableCard::Tarot(TarotCard::TheFool)),
-        price: 3,
-        sold: false,
-    };
+    let offer = crate::card::ShopOffer::new(crate::card::ShopItem::Consumable(crate::card::ConsumableCard::Tarot(TarotCard::TheFool)), 3);
     gs.shop_offers.clear();
     gs.shop_offers.push(offer);
     gs.consumable_slots = 5;
@@ -857,11 +841,7 @@ fn test_hallucination_fires_when_a_pack_is_opened() {
     gs.money = 100;
     gs.state = GameStateKind::Shop;
     gs.shop_offers.clear();
-    gs.shop_offers.push(crate::card::ShopOffer {
-        kind: crate::card::ShopItem::Pack(PackKind::StandardPack),
-        price: 4,
-        sold: false,
-    });
+    gs.shop_offers.push(crate::card::ShopOffer::new(crate::card::ShopItem::Pack(PackKind::StandardPack), 4));
 
     gs.buy_pack(0).unwrap();
 

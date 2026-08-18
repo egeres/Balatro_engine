@@ -168,7 +168,7 @@ impl GameState {
                 TagKind::Coupon => {
                     self.shop_is_free = true;
                     for offer in self.shop_offers.iter_mut() {
-                        offer.price = 0;
+                        offer.free = true;
                     }
                 }
                 TagKind::D6 => {
@@ -178,11 +178,7 @@ impl GameState {
                 TagKind::Voucher => {
                     // A second voucher on offer this shop.
                     let v = self.random_voucher();
-                    self.shop_offers.push(ShopOffer {
-                        kind: ShopItem::Voucher(v),
-                        price: 10,
-                        sold: false,
-                    });
+                    self.shop_offers.push(ShopOffer::new(ShopItem::Voucher(v), 10));
                 }
                 _ => {
                     if let Some(rarity) = tag.forced_rarity() {
@@ -216,7 +212,7 @@ impl GameState {
                 if let ShopItem::Joker(j) = &mut self.shop_offers[idx].kind {
                     j.edition = edition;
                 }
-                self.shop_offers[idx].price = 0;
+                self.shop_offers[idx].free = true;
                 return;
             }
         }
@@ -227,15 +223,13 @@ impl GameState {
         let id = self.next_id();
         let mut joker = JokerInstance::new(id, kind, edition.unwrap_or(Edition::None));
         joker.edition = edition.unwrap_or(Edition::None);
-        let price = if edition.is_some() { 0 } else { kind.base_cost() };
+        let mut offer = ShopOffer::new(ShopItem::Joker(joker), kind.base_cost());
+        // The edition tags hand the joker over for free (tag.lua:382).
+        offer.free = edition.is_some();
 
         match slot {
-            Some(idx) => {
-                self.shop_offers[idx] = ShopOffer { kind: ShopItem::Joker(joker), price, sold: false };
-            }
-            None => {
-                self.shop_offers.push(ShopOffer { kind: ShopItem::Joker(joker), price, sold: false });
-            }
+            Some(idx) => self.shop_offers[idx] = offer,
+            None => self.shop_offers.push(offer),
         }
     }
 
@@ -257,14 +251,13 @@ impl GameState {
         for i in 0..card_slots {
             if let Some(item) = self.roll_shop_slot() {
                 let price = match &item {
-                    ShopItem::Joker(j) => self.joker_shop_price(j),
+                    ShopItem::Joker(j) => j.kind.base_cost(),
                     ShopItem::Consumable(c) => c.base_cost(),
                     ShopItem::PlayingCard(_) => 1,
                     ShopItem::Pack(p) => p.base_cost(),
                     ShopItem::Voucher(_) => 10,
                 };
-                self.shop_offers
-                    .insert(i, ShopOffer { kind: item, price, sold: false });
+                self.shop_offers.insert(i, ShopOffer::new(item, price));
             }
         }
     }
@@ -277,11 +270,7 @@ impl GameState {
         for _ in 0..2 {
             if let Some(pack) = self.weighted_pick("booster_pool", &Self::PACK_POOL) {
                 let price = pack.base_cost();
-                self.shop_offers.push(ShopOffer {
-                    kind: ShopItem::Pack(pack),
-                    price,
-                    sold: false,
-                });
+                self.shop_offers.push(ShopOffer::new(ShopItem::Pack(pack), price));
             }
         }
 
@@ -540,16 +529,14 @@ impl GameState {
         if shop_index >= self.shop_offers.len() {
             return Err(BalatroError::IndexOutOfRange(shop_index, self.shop_offers.len()));
         }
-        let offer = &self.shop_offers[shop_index];
-        if offer.sold {
+        if self.shop_offers[shop_index].sold {
             return Err(BalatroError::AlreadySold);
         }
-        if !matches!(offer.kind, ShopItem::Joker(_)) {
+        if !matches!(self.shop_offers[shop_index].kind, ShopItem::Joker(_)) {
             return Err(BalatroError::WrongItemType("Expected joker".to_string()));
         }
 
-        // Calculate price with voucher discounts
-        let price = self.calculate_shop_price(offer.price);
+        let price = self.offer_price(shop_index).unwrap_or(0);
         if !self.can_afford(price as i32) {
             return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
         }
@@ -631,28 +618,17 @@ impl GameState {
         if shop_index >= self.shop_offers.len() {
             return Err(BalatroError::IndexOutOfRange(shop_index, self.shop_offers.len()));
         }
-        let offer = &self.shop_offers[shop_index];
-        if offer.sold {
+        if self.shop_offers[shop_index].sold {
             return Err(BalatroError::AlreadySold);
         }
-        if !matches!(offer.kind, ShopItem::Consumable(_)) {
+        if !matches!(self.shop_offers[shop_index].kind, ShopItem::Consumable(_)) {
             return Err(BalatroError::WrongItemType("Expected consumable".to_string()));
         }
         if !self.has_consumable_room() {
             return Err(BalatroError::ConsumableSlotsFull);
         }
 
-        let base_price = self.calculate_shop_price(offer.price);
-        // Astronomer: planet cards are free
-        let price = if self.jokers.iter().any(|j| j.kind == JokerKind::Astronomer && j.active) {
-            if let ShopItem::Consumable(ConsumableCard::Planet(_)) = &self.shop_offers[shop_index].kind {
-                0
-            } else {
-                base_price
-            }
-        } else {
-            base_price
-        };
+        let price = self.offer_price(shop_index).unwrap_or(0);
         if !self.can_afford(price as i32) {
             return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
         }
@@ -672,23 +648,15 @@ impl GameState {
         if shop_index >= self.shop_offers.len() {
             return Err(BalatroError::IndexOutOfRange(shop_index, self.shop_offers.len()));
         }
-        let offer = &self.shop_offers[shop_index];
-        if offer.sold {
+        if self.shop_offers[shop_index].sold {
             return Err(BalatroError::AlreadySold);
         }
-        let pack_kind = match &offer.kind {
+        let pack_kind = match &self.shop_offers[shop_index].kind {
             ShopItem::Pack(p) => *p,
             _ => return Err(BalatroError::WrongItemType("Expected pack".to_string())),
         };
 
-        // Astronomer makes every Celestial pack free too, not just loose Planet cards.
-        let price = if self.is_celestial_pack(pack_kind)
-            && self.jokers.iter().any(|j| j.kind == JokerKind::Astronomer && j.active)
-        {
-            0
-        } else {
-            self.calculate_shop_price(offer.price)
-        };
+        let price = self.offer_price(shop_index).unwrap_or(0);
         if !self.can_afford(price as i32) {
             return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
         }
@@ -713,7 +681,7 @@ impl GameState {
             None => return Err(BalatroError::NoVoucherAvailable),
         };
 
-        let price = self.calculate_shop_price(10);
+        let price = self.voucher_price();
         if !self.can_afford(price as i32) {
             return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
         }
@@ -825,22 +793,20 @@ impl GameState {
         }
     }
 
-    /// `Card:set_cost` (card.lua:368): editions add a flat surcharge, then the discount applies,
-    /// with a +0.5 nudge before the floor.
-    fn calculate_shop_price(&self, base_price: u32) -> u32 {
-        self.calculate_shop_price_with_edition(base_price, Edition::None, false)
-    }
-
-    fn calculate_shop_price_with_edition(
+    /// `Card:set_cost` (card.lua:369), in the game's order.
+    ///
+    /// The discount is applied **once**, to the base cost — recomputing it from an
+    /// already-discounted price would compound it. The three overrides then land *after* the
+    /// `max(1)` floor, which is why an Astronomer's Planet or a couponed card costs nothing
+    /// rather than a dollar, and why a coupon beats a rental.
+    fn price_card(
         &self,
-        base_price: u32,
+        base_cost: u32,
         edition: Edition,
         rental: bool,
+        astronomer_free: bool,
+        couponed: bool,
     ) -> u32 {
-        // A rental costs a flat $1 whatever it is (card.lua:381).
-        if rental {
-            return 1;
-        }
         let extra = match edition {
             Edition::Foil => 2.0,
             Edition::Holographic => 3.0,
@@ -855,22 +821,52 @@ impl GameState {
         } else {
             0.0
         };
-        let cost = ((base_price as f64 + extra + 0.5) * (100.0 - discount_percent) / 100.0).floor();
-        (cost.max(1.0)) as u32
+        let cost = ((base_cost as f64 + extra + 0.5) * (100.0 - discount_percent) / 100.0).floor();
+        let mut cost = cost.max(1.0) as u32;
+
+        if astronomer_free {
+            cost = 0;
+        }
+        if rental {
+            cost = 1;
+        }
+        if couponed {
+            cost = 0;
+        }
+        cost
+    }
+
+    /// What buying shop slot `index` actually costs right now.
+    ///
+    /// Live rather than stored, because it moves under the player's feet: redeeming Clearance
+    /// Sale or buying an Astronomer mid-shop reprices what is still on the shelf, which is what
+    /// Balatro's `set_cost` recomputation does.
+    pub fn offer_price(&self, index: usize) -> Option<u32> {
+        let offer = self.shop_offers.get(index)?;
+        let (edition, rental) = match &offer.kind {
+            ShopItem::Joker(j) => (j.edition, j.rental),
+            _ => (Edition::None, false),
+        };
+        let astronomer = self
+            .jokers
+            .iter()
+            .any(|j| j.kind == JokerKind::Astronomer && j.active)
+            && match &offer.kind {
+                ShopItem::Consumable(ConsumableCard::Planet(_)) => true,
+                ShopItem::Pack(p) => self.is_celestial_pack(*p),
+                _ => false,
+            };
+        Some(self.price_card(offer.price, edition, rental, astronomer, offer.free))
+    }
+
+    /// What the voucher on offer costs. Vouchers are a flat $10 before discounts.
+    pub fn voucher_price(&self) -> u32 {
+        self.price_card(10, Edition::None, false, false, false)
     }
 
     /// Test hook for the pricing rule.
     pub fn debug_joker_price(&self, joker: &JokerInstance) -> u32 {
-        self.joker_shop_price(joker)
-    }
-
-    /// The shop price of a joker, including its edition surcharge and rental discount.
-    fn joker_shop_price(&self, joker: &JokerInstance) -> u32 {
-        self.calculate_shop_price_with_edition(
-            joker.kind.base_cost(),
-            joker.edition,
-            joker.rental,
-        )
+        self.price_card(joker.kind.base_cost(), joker.edition, joker.rental, false, false)
     }
 
     pub fn reroll_shop(&mut self) -> Result<(), BalatroError> {
@@ -915,14 +911,13 @@ impl GameState {
         if shop_index >= self.shop_offers.len() {
             return Err(BalatroError::IndexOutOfRange(shop_index, self.shop_offers.len()));
         }
-        let offer = &self.shop_offers[shop_index];
-        if offer.sold {
+        if self.shop_offers[shop_index].sold {
             return Err(BalatroError::AlreadySold);
         }
-        let ShopItem::PlayingCard(card) = offer.kind.clone() else {
+        let ShopItem::PlayingCard(card) = self.shop_offers[shop_index].kind.clone() else {
             return Err(BalatroError::WrongItemType("Expected playing card".to_string()));
         };
-        let price = self.calculate_shop_price(offer.price);
+        let price = self.offer_price(shop_index).unwrap_or(0);
         if !self.can_afford(price as i32) {
             return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
         }
@@ -948,6 +943,22 @@ impl GameState {
 
     /// Re-roll the upcoming Boss blind for $10. Director's Cut allows one per ante;
     /// Retcon lifts the limit (game.lua:606, :620).
+    /// Whether a Boss reroll is available: the right screen, an unlock, an unspent allowance
+    /// this ante, and the $10 to hand.
+    pub fn can_reroll_boss_blind(&self) -> bool {
+        if !matches!(self.state, GameStateKind::BlindSelect) {
+            return false;
+        }
+        let unlimited = self.has_voucher(VoucherKind::Retcon);
+        if !unlimited && !self.has_voucher(VoucherKind::DirectorsCut) {
+            return false;
+        }
+        if !unlimited && self.boss_rerolled_this_ante {
+            return false;
+        }
+        self.can_afford(10)
+    }
+
     pub fn reroll_boss_blind(&mut self) -> Result<(), BalatroError> {
         // The reroll button lives on the blind-select screen (button_callbacks.lua:2784).
         if !matches!(self.state, GameStateKind::BlindSelect) {

@@ -93,11 +93,7 @@ fn run_joker_economy_across_three_blinds() {
     assert_eq!(gs.money, 8, "after small blind win: expected $8");
 
     // Inject AbstractJoker (base_cost=4) at the front of shop offers.
-    gs.shop_offers.insert(0, ShopOffer {
-        kind: ShopItem::Joker(JokerInstance::new(1000, JokerKind::AbstractJoker, Edition::None)),
-        price: 4,
-        sold: false,
-    });
+    gs.shop_offers.insert(0, ShopOffer::new(ShopItem::Joker(JokerInstance::new(1000, JokerKind::AbstractJoker, Edition::None)), 4));
 
     gs.buy_joker(0).unwrap();
     assert_eq!(gs.money, 4, "after buying AbstractJoker ($4): expected $4");
@@ -121,11 +117,7 @@ fn run_joker_economy_across_three_blinds() {
     assert!(gs.jokers.is_empty());
 
     // Inject Scholar (base_cost=4) at the front.
-    gs.shop_offers.insert(0, ShopOffer {
-        kind: ShopItem::Joker(JokerInstance::new(1001, JokerKind::Scholar, Edition::None)),
-        price: 4,
-        sold: false,
-    });
+    gs.shop_offers.insert(0, ShopOffer::new(ShopItem::Joker(JokerInstance::new(1001, JokerKind::Scholar, Edition::None)), 4));
 
     gs.buy_joker(0).unwrap();
     assert_eq!(gs.money, 7, "after buying Scholar ($4): expected $7");
@@ -182,11 +174,7 @@ fn run_pack_opening_and_consumable_chain() {
 
     // ── Shop: buy Celestial pack with known contents ─────────────
     // Replace shop offers entirely so buy_pack(0) is deterministic.
-    gs.shop_offers = vec![ShopOffer {
-        kind: ShopItem::Pack(PackKind::CelestialPack),
-        price: 4,
-        sold: false,
-    }];
+    gs.shop_offers = vec![ShopOffer::new(ShopItem::Pack(PackKind::CelestialPack), 4)];
 
     gs.buy_pack(0).unwrap();
     assert_eq!(gs.money, 4, "after buying CelestialPack ($4) from $8: expected $4");

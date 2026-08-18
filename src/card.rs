@@ -123,17 +123,6 @@ impl CardInstance {
         self.suit == suit
     }
 
-    /// Effective suit (Wild counts as all suits, Stone counts as none)
-    pub fn effective_suits(&self) -> Vec<Suit> {
-        if self.is_stone() {
-            return Vec::new();
-        }
-        match self.enhancement {
-            Enhancement::Wild => vec![Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds],
-            _ => vec![self.suit],
-        }
-    }
-
     pub fn is_face(&self, pareidolia: bool) -> bool {
         if pareidolia {
             return true;
@@ -466,8 +455,20 @@ impl HandLevelData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShopOffer {
     pub kind: ShopItem,
+    /// The item's **base** cost, before editions, discounts and the free-item overrides.
+    /// What the player is actually charged is `GameState::offer_price`, which applies those
+    /// once — Balatro recomputes from the base every time (`Card:set_cost`, card.lua:369).
     pub price: u32,
     pub sold: bool,
+    /// Coupon Tag: this one is free. Held as a flag rather than a price of 0 because the
+    /// override lands *after* the `max(1)` floor, so it really is free and not a dollar.
+    pub free: bool,
+}
+
+impl ShopOffer {
+    pub fn new(kind: ShopItem, price: u32) -> Self {
+        Self { kind, price, sold: false, free: false }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -230,7 +230,8 @@ fn test_coupon_tag_makes_the_shop_free() {
     gs.tags.push(TagKind::Coupon);
     gs.state = GameStateKind::Shop;
     gs.generate_shop();
-    assert!(gs.shop_offers.iter().all(|o| o.price == 0));
+    assert!((0..gs.shop_offers.len()).all(|i| gs.offer_price(i) == Some(0)),
+        "Coupon really is free, not a dollar");
     assert!(gs.tags.is_empty());
 }
 
@@ -290,12 +291,12 @@ fn test_edition_tags_stamp_a_free_joker() {
         gs.tags.push(tag);
         gs.state = GameStateKind::Shop;
         gs.generate_shop();
-        let offer = gs
+        let idx = gs
             .shop_offers
             .iter()
-            .find(|o| matches!(&o.kind, ShopItem::Joker(j) if j.edition == edition));
-        let offer = offer.unwrap_or_else(|| panic!("{:?} should stamp a joker", tag));
-        assert_eq!(offer.price, 0, "{:?} hands the joker over for free", tag);
+            .position(|o| matches!(&o.kind, ShopItem::Joker(j) if j.edition == edition))
+            .unwrap_or_else(|| panic!("{:?} should stamp a joker", tag));
+        assert_eq!(gs.offer_price(idx), Some(0), "{:?} hands the joker over for free", tag);
     }
 }
 
@@ -305,12 +306,13 @@ fn test_shop_tags_do_not_carry_into_the_next_shop() {
     gs.tags.push(TagKind::Coupon);
     gs.state = GameStateKind::Shop;
     gs.generate_shop();
-    assert!(gs.shop_offers.iter().all(|o| o.price == 0));
+    assert!((0..gs.shop_offers.len()).all(|i| gs.offer_price(i) == Some(0)));
 
     gs.leave_shop().unwrap();
     gs.state = GameStateKind::Shop;
     gs.generate_shop();
-    assert!(gs.shop_offers.iter().any(|o| o.price > 0), "the next shop charges again");
+    assert!((0..gs.shop_offers.len()).any(|i| gs.offer_price(i).unwrap_or(0) > 0),
+        "the next shop charges again");
 }
 
 // =========================================================

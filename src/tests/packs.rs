@@ -107,7 +107,7 @@ fn test_buffoon_pack_generates_2_cards() {
     gs.state = GameStateKind::Shop;
     gs.shop_offers = vec![ShopItem::Pack(PackKind::BuffoonPack)]
         .into_iter()
-        .map(|kind| crate::card::ShopOffer { kind, price: 4, sold: false })
+        .map(|kind| crate::card::ShopOffer::new(kind, 4))
         .collect();
     gs.money = 10;
     gs.joker_slots = 10;
@@ -124,7 +124,7 @@ fn test_buffoon_jumbo_pack_generates_4_cards() {
     gs.state = GameStateKind::Shop;
     gs.shop_offers = vec![ShopItem::Pack(PackKind::BuffoonPackJumbo)]
         .into_iter()
-        .map(|kind| crate::card::ShopOffer { kind, price: 6, sold: false })
+        .map(|kind| crate::card::ShopOffer::new(kind, 6))
         .collect();
     gs.money = 10;
     gs.joker_slots = 10;
@@ -141,7 +141,7 @@ fn test_spectral_pack_generates_2_cards() {
     gs.state = GameStateKind::Shop;
     gs.shop_offers = vec![ShopItem::Pack(PackKind::SpectralPack)]
         .into_iter()
-        .map(|kind| crate::card::ShopOffer { kind, price: 4, sold: false })
+        .map(|kind| crate::card::ShopOffer::new(kind, 4))
         .collect();
     gs.money = 10;
     gs.buy_pack(0).unwrap();
@@ -157,7 +157,7 @@ fn test_arcana_pack_generates_3_cards() {
     gs.state = GameStateKind::Shop;
     gs.shop_offers = vec![ShopItem::Pack(PackKind::ArcanaPack)]
         .into_iter()
-        .map(|kind| crate::card::ShopOffer { kind, price: 4, sold: false })
+        .map(|kind| crate::card::ShopOffer::new(kind, 4))
         .collect();
     gs.money = 10;
     gs.buy_pack(0).unwrap();
@@ -173,7 +173,7 @@ fn test_arcana_jumbo_pack_generates_5_cards() {
     gs.state = GameStateKind::Shop;
     gs.shop_offers = vec![ShopItem::Pack(PackKind::ArcanaPackJumbo)]
         .into_iter()
-        .map(|kind| crate::card::ShopOffer { kind, price: 6, sold: false })
+        .map(|kind| crate::card::ShopOffer::new(kind, 6))
         .collect();
     gs.money = 10;
     gs.buy_pack(0).unwrap();
@@ -193,7 +193,7 @@ fn test_planet_card_picked_from_pack_not_counted_until_used() {
     gs.state = GameStateKind::Shop;
     gs.shop_offers = vec![ShopItem::Pack(PackKind::CelestialPack)]
         .into_iter()
-        .map(|kind| crate::card::ShopOffer { kind, price: 4, sold: false })
+        .map(|kind| crate::card::ShopOffer::new(kind, 4))
         .collect();
     gs.money = 10;
     gs.buy_pack(0).unwrap();
@@ -212,7 +212,7 @@ fn test_tarot_card_picked_from_pack_not_counted_until_used() {
     gs.state = GameStateKind::Shop;
     gs.shop_offers = vec![ShopItem::Pack(PackKind::ArcanaPack)]
         .into_iter()
-        .map(|kind| crate::card::ShopOffer { kind, price: 4, sold: false })
+        .map(|kind| crate::card::ShopOffer::new(kind, 4))
         .collect();
     gs.money = 10;
     gs.buy_pack(0).unwrap();

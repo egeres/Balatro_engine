@@ -372,124 +372,151 @@ fn history_json(gs: &GameState) -> Value {
     Value::Array(events)
 }
 
+/// The actions that would actually succeed right now.
+///
+/// This is a legal-action mask, so an action only appears if applying it returns `Ok`: prices
+/// are the live amounts (`offer_price`), affordability goes through `can_afford` so Credit Card
+/// debt counts, and anything needing a free slot is gated on there being one.
 fn available_actions_json(gs: &GameState) -> Value {
     use game::GameStateKind;
     let mut actions: Vec<Value> = Vec::new();
+
+    let consumable_actions = |actions: &mut Vec<Value>, sellable: bool| {
+        for (i, c) in gs.consumables.iter().enumerate() {
+            actions.push(serde_json::json!({
+                "action": "UseConsumable",
+                "index": i,
+                "name": c.display_name(),
+                "type": c.card_type(),
+                "negative": c.negative,
+            }));
+            if sellable {
+                actions.push(serde_json::json!({
+                    "action": "SellConsumable",
+                    "index": i,
+                    "name": c.display_name(),
+                    "type": c.card_type(),
+                }));
+            }
+        }
+    };
+
+    let sell_joker_actions = |actions: &mut Vec<Value>| {
+        for (i, j) in gs.jokers.iter().enumerate() {
+            if !j.eternal {
+                actions.push(serde_json::json!({
+                    "action": "SellJoker",
+                    "index": i,
+                    "kind": format!("{:?}", j.kind),
+                    "sell_value": j.sell_value(),
+                }));
+            }
+        }
+    };
 
     match gs.state {
         GameStateKind::BlindSelect => {
             actions.push(serde_json::json!({ "action": "SelectBlind" }));
             if !matches!(gs.current_blind, game::BlindKind::Boss) {
-                actions.push(serde_json::json!({ "action": "SkipBlind" }));
-            }
-            // Consumables can be used in blind select
-            for (i, c) in gs.consumables.iter().enumerate() {
                 actions.push(serde_json::json!({
-                    "action": "UseConsumable",
-                    "index": i,
-                    "name": c.display_name(),
-                    "type": c.card_type(),
-                }));
-                actions.push(serde_json::json!({
-                    "action": "SellConsumable",
-                    "index": i,
-                    "name": c.display_name(),
+                    "action": "SkipBlind",
+                    "tag": gs.tag_on_offer().map(|t| t.display_name()),
                 }));
             }
+            if gs.pending_free_pack.is_some() {
+                actions.push(serde_json::json!({ "action": "OpenPendingFreePack" }));
+            }
+            // Director's Cut / Retcon put a Boss reroll on this screen.
+            if gs.can_reroll_boss_blind() {
+                actions.push(serde_json::json!({ "action": "RerollBossBlind", "cost": 10 }));
+            }
+            consumable_actions(&mut actions, true);
+            sell_joker_actions(&mut actions);
         }
         GameStateKind::Round => {
-            // Card selection
             for i in 0..gs.hand.len() {
                 if gs.selected_indices.contains(&i) {
                     actions.push(serde_json::json!({ "action": "DeselectCard", "index": i }));
-                } else {
+                } else if gs.selected_indices.len() < 5 {
                     actions.push(serde_json::json!({ "action": "SelectCard", "index": i }));
                 }
             }
             if !gs.selected_indices.is_empty() {
-                if gs.hands_remaining > 0 && gs.selected_indices.len() <= 5 {
+                actions.push(serde_json::json!({ "action": "DeselectAll" }));
+                if gs.hands_remaining > 0 {
                     actions.push(serde_json::json!({ "action": "PlaySelectedHand" }));
                 }
                 if gs.discards_remaining > 0 {
                     actions.push(serde_json::json!({ "action": "DiscardSelected" }));
                 }
             }
-            // Consumables
-            for (i, c) in gs.consumables.iter().enumerate() {
-                actions.push(serde_json::json!({
-                    "action": "UseConsumable",
-                    "index": i,
-                    "name": c.display_name(),
-                    "type": c.card_type(),
-                }));
-            }
-            // Sell jokers
-            for (i, j) in gs.jokers.iter().enumerate() {
-                if !j.eternal {
-                    actions.push(serde_json::json!({
-                        "action": "SellJoker",
-                        "index": i,
-                        "kind": format!("{:?}", j.kind),
-                        "sell_value": j.sell_value(),
-                    }));
-                }
-            }
+            consumable_actions(&mut actions, true);
+            sell_joker_actions(&mut actions);
         }
         GameStateKind::Shop => {
             for (i, offer) in gs.shop_offers.iter().enumerate() {
-                if !offer.sold {
+                if offer.sold {
+                    continue;
+                }
+                let price = gs.offer_price(i).unwrap_or(0);
+                if !gs.can_afford(price as i32) {
+                    continue;
+                }
+                let (action, room) = match &offer.kind {
+                    card::ShopItem::Joker(_) => {
+                        ("BuyJoker", gs.jokers.len() < gs.effective_joker_slots())
+                    }
+                    card::ShopItem::Consumable(_) => ("BuyConsumable", gs.has_room_for_consumable()),
+                    card::ShopItem::Pack(_) => ("BuyPack", true),
+                    card::ShopItem::PlayingCard(_) => ("BuyPlayingCard", true),
+                    card::ShopItem::Voucher(_) => ("BuyVoucher", true),
+                };
+                if !room {
+                    continue;
+                }
+                actions.push(serde_json::json!({
+                    "action": action,
+                    "index": i,
+                    "price": price,
+                }));
+            }
+            // The ante's voucher lives in its own slot, not among the card offers.
+            if gs.shop_voucher.is_some() {
+                let price = gs.voucher_price();
+                if gs.can_afford(price as i32) {
                     actions.push(serde_json::json!({
-                        "action": match &offer.kind {
-                            card::ShopItem::Joker(_) => "BuyJoker",
-                            card::ShopItem::Pack(_) => "BuyPack",
-                            card::ShopItem::Consumable(_) => "BuyConsumable",
-                            card::ShopItem::PlayingCard(_) => "BuyPlayingCard",
-                            card::ShopItem::Voucher(_) => "BuyVoucher",
-                        },
-                        "price": offer.price,
+                        "action": "BuyVoucher",
+                        "voucher": gs.shop_voucher.map(|v| format!("{:?}", v)),
+                        "price": price,
                     }));
                 }
             }
-            if gs.free_rerolls > 0 || gs.money >= gs.reroll_cost as i32 {
+            if gs.can_afford(gs.reroll_cost as i32) {
                 actions.push(serde_json::json!({
                     "action": "RerollShop",
-                    "cost": if gs.free_rerolls > 0 { 0 } else { gs.reroll_cost },
+                    "cost": gs.reroll_cost,
                 }));
             }
             actions.push(serde_json::json!({ "action": "LeaveShop" }));
-            for (i, j) in gs.jokers.iter().enumerate() {
-                if !j.eternal {
-                    actions.push(serde_json::json!({
-                        "action": "SellJoker",
-                        "index": i,
-                        "kind": format!("{:?}", j.kind),
-                        "sell_value": j.sell_value(),
-                    }));
-                }
-            }
-            for (i, c) in gs.consumables.iter().enumerate() {
-                actions.push(serde_json::json!({
-                    "action": "UseConsumable",
-                    "index": i,
-                    "name": c.display_name(),
-                }));
-                actions.push(serde_json::json!({
-                    "action": "SellConsumable",
-                    "index": i,
-                    "name": c.display_name(),
-                }));
-            }
+            consumable_actions(&mut actions, true);
+            sell_joker_actions(&mut actions);
         }
         GameStateKind::BoosterPack => {
             if let Some(pack) = &gs.current_pack {
-                for (i, _) in pack.cards.iter().enumerate() {
-                    actions.push(serde_json::json!({
-                        "action": "TakePackCard",
-                        "index": i,
-                    }));
+                for (i, c) in pack.cards.iter().enumerate() {
+                    // Taking a card needs somewhere to put it.
+                    let room = match c {
+                        card::PackCard::PlayingCard(_) => true,
+                        card::PackCard::Joker(_) => gs.jokers.len() < gs.effective_joker_slots(),
+                        card::PackCard::Consumable(_) => gs.has_room_for_consumable(),
+                    };
+                    if room {
+                        actions.push(serde_json::json!({ "action": "TakePackCard", "index": i }));
+                    }
                 }
                 actions.push(serde_json::json!({ "action": "SkipPack" }));
             }
+            consumable_actions(&mut actions, false);
         }
         GameStateKind::GameOver => {
             // No actions available
