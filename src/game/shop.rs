@@ -596,7 +596,14 @@ impl GameState {
         let is_invisible = self.jokers[joker_index].kind == JokerKind::InvisibleJoker;
         let invisible_rounds = self.jokers[joker_index].get_counter_i64("rounds");
 
+        // Diet Cola: selling it hands you a free Double Tag (card.lua:2361, `selling_self`).
+        let is_diet_cola = self.jokers[joker_index].kind == JokerKind::DietCola;
+
         self.jokers.remove(joker_index);
+
+        if is_diet_cola {
+            self.gain_tag(TagKind::DoubleFun);
+        }
 
         if is_invisible && invisible_rounds >= 2 && self.jokers.len() < self.effective_joker_slots() {
             let candidates: Vec<usize> = (0..self.jokers.len())
@@ -679,7 +686,14 @@ impl GameState {
             _ => return Err(BalatroError::WrongItemType("Expected pack".to_string())),
         };
 
-        let price = self.calculate_shop_price(offer.price);
+        // Astronomer makes every Celestial pack free too, not just loose Planet cards.
+        let price = if self.is_celestial_pack(pack_kind)
+            && self.jokers.iter().any(|j| j.kind == JokerKind::Astronomer && j.active)
+        {
+            0
+        } else {
+            self.calculate_shop_price(offer.price)
+        };
         if !self.can_afford(price as i32) {
             return Err(BalatroError::NotEnoughMoney(price, self.money.max(0) as u32));
         }
@@ -689,6 +703,7 @@ impl GameState {
 
         // Generate pack contents
         let contents = self.generate_pack_contents(pack_kind);
+        self.on_booster_opened();
         self.current_pack = Some(contents);
         self.state = GameStateKind::BoosterPack;
         Ok(())
@@ -962,15 +977,16 @@ impl GameState {
             return Err(BalatroError::NotInShop);
         }
 
-        // Perkeo: at end of shop, creates a Negative copy of 1 random consumable in possession
-        // The Negative copy always fits (it grants +1 consumable slot)
+        // Perkeo: at end of shop, creates a Negative copy of 1 random consumable in possession.
+        // The Negative copy always fits, because it brings its own slot — one that goes away
+        // again once the consumables are spent (`release_negative_consumable_slots`).
         if self.jokers.iter().any(|j| j.kind == JokerKind::Perkeo && j.active)
             && !self.consumables.is_empty()
         {
             let idx = self.rng.range_usize("perkeo", 0, self.consumables.len() - 1);
-            let mut copy = self.consumables[idx].clone();
-            // The copy is "Negative" — represented by expanding consumable slots and adding it
+            let copy = self.consumables[idx].clone();
             self.consumable_slots += 1;
+            self.negative_consumable_slots += 1;
             self.consumables.push(copy);
         }
 

@@ -64,6 +64,10 @@ pub struct GameState {
     pub max_discards: u32,
     pub joker_slots: u32,
     pub consumable_slots: u32,
+    /// How much of `consumable_slots` is on loan from Negative consumables (Perkeo's copy).
+    /// In Balatro the slot belongs to the card and leaves with it, so this is released as the
+    /// consumables are spent rather than accumulating for the rest of the run.
+    pub negative_consumable_slots: u32,
     pub max_interest: i32,
 
     // History
@@ -236,6 +240,7 @@ impl GameState {
             max_discards: 3,
             joker_slots: 5,
             consumable_slots: 2,
+            negative_consumable_slots: 0,
             max_interest: 25,
             history: Vec::new(),
             next_id: 1,
@@ -514,6 +519,17 @@ impl GameState {
             .filter(|j| j.edition == Edition::Negative)
             .count();
         self.joker_slots as usize + negatives
+    }
+
+    /// Hand back the consumable slots Negative consumables were holding open, now that the
+    /// consumables have been spent. Called after anything leaves `consumables`.
+    pub(crate) fn release_negative_consumable_slots(&mut self) {
+        let base = self.consumable_slots - self.negative_consumable_slots;
+        let keep = (self.consumables.len() as u32)
+            .saturating_sub(base)
+            .min(self.negative_consumable_slots);
+        self.consumable_slots = base + keep;
+        self.negative_consumable_slots = keep;
     }
 
     /// The ante that ends the run. Hieroglyph and Petroglyph each knock one off

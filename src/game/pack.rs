@@ -14,6 +14,44 @@ impl GameState {
         planet_for_hand(hand_type)
     }
 
+    /// Whether this pack is a Celestial one, in any size. Astronomer hands these out for free.
+    pub(crate) fn is_celestial_pack(&self, kind: PackKind) -> bool {
+        matches!(
+            kind,
+            PackKind::CelestialPackSmall
+                | PackKind::CelestialPack
+                | PackKind::CelestialPackJumbo
+                | PackKind::CelestialPackMega
+        )
+    }
+
+    /// Joker effects that fire the moment a booster pack is opened (`context.open_booster`,
+    /// card.lua:2334) — once per pack, whatever kind it is, not once per card taken out of it.
+    pub(crate) fn on_booster_opened(&mut self) {
+        let hallucinations = self
+            .jokers
+            .iter()
+            .filter(|j| j.kind == JokerKind::Hallucination && j.active)
+            .count();
+        if hallucinations == 0 {
+            return;
+        }
+        let oops = if self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active) {
+            2.0_f64
+        } else {
+            1.0_f64
+        };
+        for _ in 0..hallucinations {
+            if self.consumables.len() >= self.consumable_slots as usize {
+                break;
+            }
+            if self.rng.next_bool_prob("halu", (0.5 * oops).min(1.0)) {
+                let tarot = self.random_tarot();
+                self.consumables.push(ConsumableCard::Tarot(tarot));
+            }
+        }
+    }
+
     pub(crate) fn generate_pack_contents(&mut self, kind: PackKind) -> PackContents {
         let cards_shown = kind.cards_shown();
         let picks = kind.picks_allowed();
@@ -178,17 +216,6 @@ impl GameState {
                     self.consumables.push(c.clone());
                     // Note: planet_cards_used / tarot_cards_used are incremented in use_consumable,
                     // not here — counting on pick would double-count when the card is later used.
-                    // Apply planet/tarot immediately? No - user uses it separately via use_consumable
-
-                    // Hallucination: 1/2 chance to create a tarot card when picking a consumable from a pack
-                    // (guaranteed with OopsAll6s since 2 * 1/2 = 1)
-                    if self.jokers.iter().any(|j| j.kind == JokerKind::Hallucination && j.active) {
-                        let hall_oops = if self.jokers.iter().any(|j| j.kind == JokerKind::OopsAll6s && j.active) { 2.0_f64 } else { 1.0_f64 };
-                        if self.rng.next_bool_prob("halu", (0.5 * hall_oops).min(1.0)) && self.consumables.len() < self.consumable_slots as usize {
-                            let tarot = self.random_tarot();
-                            self.consumables.push(ConsumableCard::Tarot(tarot));
-                        }
-                    }
                 } else {
                     return Err(BalatroError::ConsumableSlotsFull);
                 }

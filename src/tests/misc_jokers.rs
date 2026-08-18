@@ -36,6 +36,40 @@ fn test_astronomer_makes_planet_cards_free() {
 }
 
 #[test]
+fn test_astronomer_makes_celestial_packs_free() {
+    let mut gs = make_game();
+    gs.state = GameStateKind::Shop;
+    gs.jokers.push(joker(1, JokerKind::Astronomer));
+    gs.money = 10;
+    gs.shop_offers.clear();
+    gs.shop_offers.push(crate::card::ShopOffer {
+        kind: crate::card::ShopItem::Pack(PackKind::CelestialPackJumbo),
+        price: 6,
+        sold: false,
+    });
+
+    gs.buy_pack(0).expect("Celestial packs are free with Astronomer");
+    assert_eq!(gs.money, 10, "Astronomer covers Celestial packs, not just loose Planet cards");
+}
+
+#[test]
+fn test_astronomer_does_not_discount_other_packs() {
+    let mut gs = make_game();
+    gs.state = GameStateKind::Shop;
+    gs.jokers.push(joker(1, JokerKind::Astronomer));
+    gs.money = 10;
+    gs.shop_offers.clear();
+    gs.shop_offers.push(crate::card::ShopOffer {
+        kind: crate::card::ShopItem::Pack(PackKind::ArcanaPack),
+        price: 4,
+        sold: false,
+    });
+
+    gs.buy_pack(0).unwrap();
+    assert_eq!(gs.money, 6, "Arcana packs still cost money with Astronomer");
+}
+
+#[test]
 fn test_astronomer_does_not_affect_tarot_price() {
     let mut gs = make_game();
     gs.state = GameStateKind::Shop;
@@ -129,11 +163,37 @@ fn test_brainstorm_does_not_copy_blueprint() {
 }
 
 // =========================================================
-// Cartomancer: create a tarot card on single-card hands
+// Cartomancer: create a tarot card when the blind is selected
 // =========================================================
 
 #[test]
-fn test_cartomancer_creates_tarot_on_single_card_play() {
+fn test_cartomancer_creates_tarot_on_blind_select() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(100, JokerKind::Cartomancer));
+    gs.consumable_slots = 5;
+
+    gs.select_blind().unwrap();
+
+    assert_eq!(gs.consumables.len(), 1, "Cartomancer should create a tarot on blind select");
+    assert!(matches!(gs.consumables[0], crate::card::ConsumableCard::Tarot(_)),
+        "Cartomancer should specifically create a Tarot");
+}
+
+#[test]
+fn test_cartomancer_needs_a_free_consumable_slot() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(100, JokerKind::Cartomancer));
+    gs.consumable_slots = 1;
+    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Mercury));
+
+    gs.select_blind().unwrap();
+
+    assert_eq!(gs.consumables.len(), 1, "Cartomancer must not overfill the consumable slots");
+}
+
+#[test]
+fn test_cartomancer_does_not_fire_on_playing_a_hand() {
+    // It used to be modelled as "tarot on a single-card hand", which is DNA's trigger, not this one.
     let mut gs = make_game();
     let cards = vec![
         card(0, Rank::Ace, Suit::Spades),
@@ -145,33 +205,10 @@ fn test_cartomancer_creates_tarot_on_single_card_play() {
     gs.consumable_slots = 5;
     gs.score_goal = 1.0;
 
-    // Select only 1 card
     gs.select_card(0).unwrap();
     gs.play_hand().unwrap();
 
-    // Should have created a tarot card
-    assert!(!gs.consumables.is_empty(), "Cartomancer should create a tarot on single-card play");
-}
-
-#[test]
-fn test_cartomancer_does_not_create_tarot_on_multi_card_play() {
-    let mut gs = make_game();
-    let cards = vec![
-        card(0, Rank::Ace, Suit::Spades),
-        card(1, Rank::Ace, Suit::Hearts),
-        card(2, Rank::Three, Suit::Clubs),
-    ];
-    setup_round(&mut gs, cards, 3);
-    gs.jokers.push(joker(100, JokerKind::Cartomancer));
-    gs.consumable_slots = 5;
-    gs.score_goal = 1.0;
-
-    // Select 2 cards
-    gs.select_card(0).unwrap();
-    gs.select_card(1).unwrap();
-    gs.play_hand().unwrap();
-
-    assert!(gs.consumables.is_empty(), "Cartomancer should not fire on multi-card play");
+    assert!(gs.consumables.is_empty(), "Cartomancer should not fire on playing a hand");
 }
 
 // =========================================================
@@ -231,6 +268,19 @@ fn test_certificate_adds_card_to_deck_on_blind_set() {
     let last_card = gs.deck.last().unwrap();
     assert_ne!(last_card.seal, Seal::None,
         "Certificate should add a card with a random seal");
+}
+
+#[test]
+fn test_certificate_puts_the_card_in_hand() {
+    // card.lua:2465 emplaces it into G.hand, so it is playable this round.
+    let mut gs = make_game();
+    gs.jokers.push(joker(1, JokerKind::Certificate));
+
+    gs.select_blind().unwrap();
+
+    let new_id = gs.deck.last().unwrap().id;
+    assert!(gs.hand.iter().any(|&di| gs.deck[di].id == new_id),
+        "Certificate's card should land in hand, not somewhere in the draw pile");
 }
 
 #[test]
@@ -388,23 +438,34 @@ fn test_delayed_gratification_does_not_pay_when_discards_used() {
 }
 
 // =========================================================
-// DietCola: creates a copy of consumable when sold
+// DietCola: sell it to create a free Double Tag
 // =========================================================
 
 #[test]
-fn test_diet_cola_creates_copy_on_sell() {
+fn test_diet_cola_creates_a_double_tag_when_sold() {
+    let mut gs = make_game();
+    gs.state = GameStateKind::Shop;
+    gs.jokers.push(joker(1, JokerKind::DietCola));
+
+    gs.sell_joker(0).unwrap();
+
+    assert_eq!(gs.tags.iter().filter(|t| **t == TagKind::DoubleFun).count(), 1,
+        "selling Diet Cola should hand you a Double Tag");
+}
+
+#[test]
+fn test_diet_cola_does_not_react_to_selling_a_consumable() {
+    // It used to duplicate whatever consumable you sold, which is not an effect it has.
     let mut gs = make_game();
     gs.state = GameStateKind::Shop;
     gs.jokers.push(joker(1, JokerKind::DietCola));
     gs.consumable_slots = 5;
     gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheFool));
 
-    let consumables_before = gs.consumables.len(); // 1
     gs.sell_consumable(0).unwrap();
 
-    // DietCola should have added a copy before selling
-    // After sell: copy was added (+1), then sold one (-1) = net 0
-    assert_eq!(gs.consumables.len(), consumables_before, "DietCola should create a copy before selling");
+    assert!(gs.consumables.is_empty(), "selling a consumable must not duplicate it");
+    assert!(gs.tags.is_empty(), "Diet Cola only reacts to being sold itself");
 }
 
 // =========================================================
@@ -764,8 +825,54 @@ fn test_gros_michel_can_be_destroyed_at_end_of_round() {
 }
 
 // =========================================================
-// Hallucination: 1/2 chance to create a tarot when picking from a pack
+// Hallucination: 1/2 chance to create a tarot when a booster pack is opened
 // =========================================================
+
+#[test]
+fn test_hallucination_fires_when_a_pack_is_opened() {
+    // Balatro rolls on context.open_booster, so a pack that holds no consumables at all
+    // (Standard) can still produce a tarot.
+    let mut gs = make_game();
+    gs.jokers.push(joker(1, JokerKind::Hallucination));
+    gs.jokers.push(joker(2, JokerKind::OopsAll6s)); // 1/2 doubled to a certainty
+    gs.consumable_slots = 5;
+    gs.money = 100;
+    gs.state = GameStateKind::Shop;
+    gs.shop_offers.clear();
+    gs.shop_offers.push(crate::card::ShopOffer {
+        kind: crate::card::ShopItem::Pack(PackKind::StandardPack),
+        price: 4,
+        sold: false,
+    });
+
+    gs.buy_pack(0).unwrap();
+
+    assert_eq!(gs.consumables.len(), 1,
+        "Hallucination should fire on opening the pack, before anything is picked");
+}
+
+#[test]
+fn test_hallucination_does_not_fire_per_card_taken() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(1, JokerKind::Hallucination));
+    gs.jokers.push(joker(2, JokerKind::OopsAll6s));
+    gs.consumable_slots = 5;
+    gs.state = GameStateKind::BoosterPack;
+    gs.current_pack = Some(crate::card::PackContents {
+        kind: PackKind::ArcanaPackMega,
+        cards: vec![
+            crate::card::PackCard::Consumable(crate::card::ConsumableCard::Tarot(TarotCard::TheFool)),
+            crate::card::PackCard::Consumable(crate::card::ConsumableCard::Tarot(TarotCard::TheStar)),
+        ],
+        picks_remaining: 2,
+    });
+
+    gs.take_pack_card(0).unwrap();
+    gs.take_pack_card(0).unwrap();
+
+    // Only the two picked tarots — the pack was never "opened" through buy_pack here.
+    assert_eq!(gs.consumables.len(), 2, "picking cards must not re-roll Hallucination");
+}
 
 #[test]
 fn test_hallucination_does_not_crash_when_picking_consumable_from_pack() {
@@ -1294,17 +1401,28 @@ fn test_reserved_parking_can_earn_per_face_card_in_hand() {
 // =========================================================
 
 #[test]
-fn test_riff_raff_adds_jokers_on_blind_select() {
+fn test_riff_raff_adds_two_commons_on_blind_select() {
     let mut gs = make_game();
     gs.jokers.push(joker(1, JokerKind::RiffRaff));
     gs.joker_slots = 10;
 
-    let jokers_before = gs.jokers.len();
     gs.select_blind().unwrap();
 
-    // Should have added up to 2 common jokers
-    assert!(gs.jokers.len() >= jokers_before,
-        "RiffRaff should add jokers (or attempt to) at blind select");
+    assert_eq!(gs.jokers.len(), 3, "RiffRaff should add exactly 2 jokers");
+    for j in gs.jokers.iter().skip(1) {
+        assert_eq!(j.kind.rarity(), 1, "RiffRaff only makes Common jokers, got {:?}", j.kind);
+    }
+}
+
+#[test]
+fn test_riff_raff_stops_at_the_joker_limit() {
+    let mut gs = make_game();
+    gs.joker_slots = 2;
+    gs.jokers.push(joker(1, JokerKind::RiffRaff));
+
+    gs.select_blind().unwrap();
+
+    assert_eq!(gs.jokers.len(), 2, "RiffRaff must not exceed the joker slots");
 }
 
 // =========================================================
@@ -1376,6 +1494,29 @@ fn test_seance_creates_spectral_on_straight_flush() {
         "Seance should create a spectral card on Straight Flush");
     assert!(gs.consumables.iter().any(|c| matches!(c, crate::card::ConsumableCard::Spectral(_))),
         "Seance should specifically create a Spectral card");
+}
+
+#[test]
+fn test_seance_does_not_fire_on_flush_five() {
+    // Five of the same rank is not a straight, so poker_hands['Straight Flush'] stays empty.
+    let mut gs = make_game();
+    let cards = vec![
+        card(0, Rank::Nine, Suit::Spades),
+        card(1, Rank::Nine, Suit::Spades),
+        card(2, Rank::Nine, Suit::Spades),
+        card(3, Rank::Nine, Suit::Spades),
+        card(4, Rank::Nine, Suit::Spades),
+    ];
+    setup_round(&mut gs, cards, 5);
+    gs.jokers.push(joker(1, JokerKind::Seance));
+    gs.consumable_slots = 5;
+    gs.score_goal = 1.0;
+
+    for i in 0..5 { gs.select_card(i).unwrap(); }
+    let r = gs.play_hand().unwrap();
+
+    assert_eq!(r.hand_type, HandType::FlushFive);
+    assert!(gs.consumables.is_empty(), "Seance should not fire on a Flush Five");
 }
 
 // =========================================================

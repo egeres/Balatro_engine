@@ -480,3 +480,56 @@ fn test_sliced_joker_does_not_fire_its_own_setting_blind_effect() {
     assert_eq!(gs.jokers.len(), 1);
     assert_eq!(gs.deck.len(), deck_before, "sliced Marble Joker must not add a stone card");
 }
+
+// =========================================================
+// Perkeo: a Negative copy of a held consumable when the shop closes
+// =========================================================
+
+#[test]
+fn test_perkeo_copies_a_consumable_when_leaving_the_shop() {
+    let mut gs = make_game();
+    gs.state = crate::game::GameStateKind::Shop;
+    gs.jokers.push(joker(1, JokerKind::Perkeo));
+    gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheFool));
+
+    gs.leave_shop().unwrap();
+
+    assert_eq!(gs.consumables.len(), 2, "Perkeo should copy the held consumable");
+    assert_eq!(gs.consumables[1], crate::card::ConsumableCard::Tarot(TarotCard::TheFool));
+    assert_eq!(gs.consumable_slots, 3, "the Negative copy brings its own slot");
+}
+
+#[test]
+fn test_perkeo_slot_goes_away_with_the_card() {
+    // In Balatro the extra slot belongs to the Negative card, so it must not accumulate across
+    // shops for the rest of the run.
+    let mut gs = make_game();
+    gs.state = crate::game::GameStateKind::Shop;
+    gs.jokers.push(joker(1, JokerKind::Perkeo));
+    gs.consumables.push(crate::card::ConsumableCard::Planet(PlanetCard::Mercury));
+
+    gs.leave_shop().unwrap();
+    assert_eq!(gs.consumable_slots, 3);
+
+    // Spend both consumables; the borrowed slot is handed back.
+    gs.use_consumable(0, vec![]).unwrap();
+    gs.use_consumable(0, vec![]).unwrap();
+    assert_eq!(gs.consumable_slots, 2, "the Negative slot should be released once spent");
+}
+
+#[test]
+fn test_perkeo_slots_do_not_creep_over_many_shops() {
+    let mut gs = make_game();
+    gs.jokers.push(joker(1, JokerKind::Perkeo));
+
+    for _ in 0..5 {
+        gs.state = crate::game::GameStateKind::Shop;
+        gs.consumables.clear();
+        gs.release_negative_consumable_slots();
+        gs.consumables.push(crate::card::ConsumableCard::Tarot(TarotCard::TheFool));
+        gs.leave_shop().unwrap();
+    }
+
+    assert_eq!(gs.consumable_slots, 3,
+        "each shop lends exactly one slot, it should not stack to 7");
+}

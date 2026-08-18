@@ -209,6 +209,7 @@ impl GameState {
             return Err(BalatroError::NotInPack);
         };
         self.current_pack = Some(self.generate_pack_contents(pack));
+        self.on_booster_opened();
         self.state = GameStateKind::BoosterPack;
         Ok(())
     }
@@ -602,8 +603,18 @@ impl GameState {
                         self.jokers.remove(idx);
                     }
                 }
+                JokerKind::Cartomancer => {
+                    // Creates a Tarot when the Blind is selected — nothing to do with what you
+                    // then play (card.lua `first_hand_drawn`, en-us.lua j_cartomancer).
+                    if self.consumables.len() < self.consumable_slots as usize {
+                        let tarot = self.random_tarot();
+                        self.consumables.push(ConsumableCard::Tarot(tarot));
+                    }
+                }
                 JokerKind::Certificate => {
-                    // Add a playing card with a random seal to the hand
+                    // Adds a playing card with a random seal straight to *hand* (card.lua:2465
+                    // emplaces into G.hand), so it is playable this round rather than being
+                    // shuffled somewhere into the draw pile.
                     let suits = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds];
                     let ranks = [
                         Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six,
@@ -619,19 +630,26 @@ impl GameState {
                     new_card.seal = seals[seal_idx];
                     let deck_idx = self.deck.len();
                     self.deck.push(new_card);
-                    self.draw_pile.push(deck_idx);
+                    self.hand.push(deck_idx);
                 }
                 JokerKind::RiffRaff => {
-                    // Add 2 common jokers (rarity 1) at the start of each round
+                    // Two *Common* jokers, drawn from the Common pool directly — rolling the
+                    // whole pool and discarding non-Commons would yield roughly 1.4.
                     for _ in 0..2 {
-                        if self.jokers.len() < self.effective_joker_slots() {
-                            if let Some(new_joker) = self.generate_random_joker() {
-                                // Only add if it's a common joker
-                                if new_joker.kind.rarity() == 1 {
-                                    self.jokers.push(new_joker);
-                                }
-                            }
+                        if self.jokers.len() >= self.effective_joker_slots() {
+                            break;
                         }
+                        let pool: Vec<JokerKind> = JokerKind::ALL
+                            .iter()
+                            .copied()
+                            .filter(|k| k.rarity() == 1 && self.joker_in_pool(*k))
+                            .collect();
+                        if pool.is_empty() {
+                            break;
+                        }
+                        let kind = pool[self.rng.range_usize("rif", 0, pool.len() - 1)];
+                        let id = self.next_id();
+                        self.jokers.push(JokerInstance::new(id, kind, Edition::None));
                     }
                 }
                 JokerKind::TurtleBean => {
@@ -662,5 +680,9 @@ impl GameState {
                 _ => {}
             }
         }
+
+        // Cards these jokers just conjured (Certificate, Marble Joker) still have to answer to
+        // the Boss blind (`G.GAME.blind:debuff_card(_card)`, card.lua:2472).
+        self.apply_boss_blind_debuffs();
     }
 }

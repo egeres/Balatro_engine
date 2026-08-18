@@ -580,16 +580,6 @@ impl GameState {
         // Post-scoring joker updates
         self.post_play_joker_updates(&result, &played_cards, &hand_cards);
 
-        // Cartomancer: create a tarot when playing a single-card hand
-        if played_cards.len() == 1 {
-            if self.jokers.iter().any(|j| j.kind == JokerKind::Cartomancer && j.active) {
-                if self.consumables.len() < self.consumable_slots as usize {
-                    let tarot = self.random_tarot();
-                    self.consumables.push(ConsumableCard::Tarot(tarot));
-                }
-            }
-        }
-
         // Vagabond: create a tarot if money <= $4 when playing a hand
         if self.money <= 4 {
             if self.jokers.iter().any(|j| j.kind == JokerKind::Vagabond && j.active) {
@@ -815,8 +805,9 @@ impl GameState {
                     }
                 }
                                 JokerKind::Seance => {
-                    // Create a spectral card if a Straight Flush is played
-                    if matches!(result.hand_type, HandType::StraightFlush | HandType::FlushFive) {
+                    // Straight Flush only. A Flush Five is five of the same rank, which is not a
+                    // straight, so `poker_hands['Straight Flush']` stays empty for it.
+                    if matches!(result.hand_type, HandType::StraightFlush) {
                         if self.consumables.len() < self.consumable_slots as usize {
                             let spectrals = [
                                 SpectralCard::Familiar, SpectralCard::Grim, SpectralCard::Incantation,
