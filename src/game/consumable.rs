@@ -525,22 +525,19 @@ impl GameState {
                 }
             }
             SpectralCard::Wraith => {
-                // Creates a random Rare Joker; sets money to $0
+                // Creates a random Rare Joker; sets money to $0. Drawn from the live Rare pool,
+                // so Showman, the enhancement gates and the duplicate rule all still apply.
                 if self.jokers.len() < self.effective_joker_slots() {
-                    // Pick a random Rare joker
-                    let rare_jokers = vec![
-                        JokerKind::Dna, JokerKind::Vagabond, JokerKind::Baron,
-                        JokerKind::Obelisk, JokerKind::BaseballCard, JokerKind::AncientJoker,
-                        JokerKind::Campfire, JokerKind::Blueprint, JokerKind::WeeJoker,
-                        JokerKind::HitTheRoad, JokerKind::TheDuo, JokerKind::TheTrio,
-                        JokerKind::TheFamily, JokerKind::TheOrder, JokerKind::TheTribe,
-                        JokerKind::Stuntman, JokerKind::InvisibleJoker, JokerKind::Brainstorm,
-                        JokerKind::DriversLicense, JokerKind::BurntJoker,
-                    ];
-                    let idx = self.rng.range_usize("wraith", 0, rare_jokers.len() - 1);
-                    let kind = rare_jokers[idx];
-                    let id = self.next_id();
-                    self.jokers.push(JokerInstance::new(id, kind, Edition::None));
+                    let pool: Vec<JokerKind> = JokerKind::ALL
+                        .iter()
+                        .copied()
+                        .filter(|k| k.rarity() == 3 && self.joker_in_pool(*k))
+                        .collect();
+                    if !pool.is_empty() {
+                        let kind = pool[self.rng.range_usize("wraith", 0, pool.len() - 1)];
+                        let id = self.next_id();
+                        self.jokers.push(JokerInstance::new(id, kind, Edition::None));
+                    }
                 }
                 self.money = 0;
             }
@@ -584,16 +581,19 @@ impl GameState {
                 }
             }
             SpectralCard::TheSoul => {
-                // Creates a Legendary Joker (requires open Joker slot)
+                // Creates a Legendary Joker (requires open Joker slot). The legendary pool is
+                // still subject to the duplicate rule — no second Perkeo without Showman.
                 if self.jokers.len() < self.effective_joker_slots() {
-                    let legendaries = vec![
-                        JokerKind::Canio, JokerKind::Triboulet, JokerKind::Yorick,
-                        JokerKind::Chicot, JokerKind::Perkeo,
-                    ];
-                    let idx = self.rng.range_usize("soul_", 0, legendaries.len() - 1);
-                    let kind = legendaries[idx];
-                    let id = self.next_id();
-                    self.jokers.push(JokerInstance::new(id, kind, Edition::None));
+                    let pool: Vec<JokerKind> = JokerKind::ALL
+                        .iter()
+                        .copied()
+                        .filter(|k| self.legendary_in_pool(*k))
+                        .collect();
+                    if !pool.is_empty() {
+                        let kind = pool[self.rng.range_usize("soul_", 0, pool.len() - 1)];
+                        let id = self.next_id();
+                        self.jokers.push(JokerInstance::new(id, kind, Edition::None));
+                    }
                 }
             }
             SpectralCard::BlackHole => {

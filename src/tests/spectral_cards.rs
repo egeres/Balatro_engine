@@ -487,3 +487,58 @@ fn test_seltzer_is_removed_when_it_runs_out() {
     gs.play_hand().unwrap();
     assert!(gs.jokers.is_empty(), "Seltzer should free its joker slot");
 }
+
+#[test]
+fn test_the_soul_will_not_hand_you_a_second_copy_of_a_legendary() {
+    // The legendary pool still honours the duplicate rule (common_events.lua:1987).
+    for seed in 0..40 {
+        let mut gs = GameState::new(
+            DeckType::Red, Stake::White, Some(format!("SOULDUP{}", seed)));
+        gs.joker_slots = 10;
+        // Hold every legendary but Perkeo; only Perkeo can come out.
+        for (i, k) in [JokerKind::Canio, JokerKind::Triboulet, JokerKind::Yorick,
+                       JokerKind::Chicot].iter().enumerate() {
+            gs.jokers.push(joker(100 + i as u64, *k));
+        }
+        gs.consumable_slots = 5;
+        gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::TheSoul).into());
+        gs.use_consumable(0, vec![]).unwrap();
+
+        assert_eq!(gs.jokers.last().unwrap().kind, JokerKind::Perkeo,
+            "the four held legendaries are out of the pool");
+    }
+}
+
+#[test]
+fn test_wraith_respects_the_rare_pool_gates() {
+    // Glass Joker is Rare-adjacent but enhancement-gated; Wraith must not conjure a joker whose
+    // gate is closed, and must not hand out a duplicate.
+    for seed in 0..40 {
+        let mut gs = GameState::new(
+            DeckType::Red, Stake::White, Some(format!("WRAITHP{}", seed)));
+        gs.joker_slots = 10;
+        gs.consumable_slots = 5;
+        gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Wraith).into());
+        gs.use_consumable(0, vec![]).unwrap();
+
+        let made = gs.jokers.last().unwrap().kind;
+        assert_eq!(made.rarity(), 3, "Wraith makes a Rare joker, got {:?}", made);
+    }
+}
+
+#[test]
+fn test_wraith_will_not_duplicate_a_rare_you_already_hold() {
+    let mut gs = GameState::new(DeckType::Red, Stake::White, Some("WRAITHDUP".to_string()));
+    gs.joker_slots = 30;
+    // Hold every Rare but Burnt Joker.
+    for (i, k) in JokerKind::ALL.iter().filter(|k| k.rarity() == 3
+        && **k != JokerKind::BurntJoker).enumerate() {
+        gs.jokers.push(joker(200 + i as u64, *k));
+    }
+    gs.consumable_slots = 5;
+    gs.consumables.push(crate::card::ConsumableCard::Spectral(SpectralCard::Wraith).into());
+    gs.use_consumable(0, vec![]).unwrap();
+
+    assert_eq!(gs.jokers.last().unwrap().kind, JokerKind::BurntJoker,
+        "only the Rare you do not hold is left in the pool");
+}

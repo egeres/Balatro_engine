@@ -309,9 +309,22 @@ impl GameState {
     /// need the matching enhancement somewhere in the deck, and Gros Michel / Cavendish swap
     /// places once Gros Michel has gone extinct (`no_pool_flag` / `yes_pool_flag`).
     pub(crate) fn joker_in_pool(&self, kind: JokerKind) -> bool {
+        // Legendaries are reachable only through The Soul, which asks `legendary_in_pool`.
         if kind.rarity() == 4 {
             return false;
         }
+        self.joker_pool_gates_ok(kind)
+    }
+
+    /// Whether a Legendary can be drawn. The Soul goes straight to the legendary pool, but the
+    /// usual gates still apply — you cannot be handed a second Perkeo without Showman
+    /// (common_events.lua:1987).
+    pub(crate) fn legendary_in_pool(&self, kind: JokerKind) -> bool {
+        kind.rarity() == 4 && self.joker_pool_gates_ok(kind)
+    }
+
+    /// The gates every pool draw honours, whatever its rarity.
+    fn joker_pool_gates_ok(&self, kind: JokerKind) -> bool {
         // Balatro flags a joker key as used while a copy of it exists anywhere — owned, sitting in
         // the shop, or inside an open pack (card.lua:352, cleared at :4745) — and only Showman
         // lifts the restriction (common_events.lua:1987).
@@ -320,6 +333,7 @@ impl GameState {
         {
             return false;
         }
+
         let deck_has = |e: Enhancement| self.deck.iter().any(|c| c.enhancement == e);
         match kind {
             JokerKind::SteelJoker => deck_has(Enhancement::Steel),
@@ -569,13 +583,8 @@ impl GameState {
         // Luchador: selling it disables the current Boss blind's ability for the rest of the round
         if self.jokers[joker_index].kind == JokerKind::Luchador
             && matches!(self.current_blind, BlindKind::Boss)
-            && !self.boss_blind_disabled()
         {
-            self.boss_blind_manually_disabled = true;
-            // Debuffs were applied when the round began; lift them now that the blind is off.
-            for card in self.deck.iter_mut() {
-                card.debuffed = false;
-            }
+            self.disable_boss_blind();
         }
 
         // InvisibleJoker: when sold after 2+ rounds, duplicate a random other joker
@@ -940,6 +949,10 @@ impl GameState {
     /// Re-roll the upcoming Boss blind for $10. Director's Cut allows one per ante;
     /// Retcon lifts the limit (game.lua:606, :620).
     pub fn reroll_boss_blind(&mut self) -> Result<(), BalatroError> {
+        // The reroll button lives on the blind-select screen (button_callbacks.lua:2784).
+        if !matches!(self.state, GameStateKind::BlindSelect) {
+            return Err(BalatroError::NotInBlindSelect);
+        }
         let unlimited = self.has_voucher(VoucherKind::Retcon);
         if !unlimited && !self.has_voucher(VoucherKind::DirectorsCut) {
             return Err(BalatroError::NoVoucherAvailable);

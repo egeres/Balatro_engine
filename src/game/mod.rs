@@ -450,13 +450,11 @@ impl GameState {
         let mult = match self.current_blind {
             BlindKind::Small => 1.0,
             BlindKind::Big => 1.5,
-            BlindKind::Boss => {
-                if let Some(boss) = self.boss_blind {
-                    boss.chip_multiplier()
-                } else {
-                    2.0
-                }
-            }
+            BlindKind::Boss => match self.boss_blind {
+                Some(boss) if self.boss_blind_disabled() => boss.chip_multiplier_disabled(),
+                Some(boss) => boss.chip_multiplier(),
+                None => 2.0,
+            },
         };
         (base as f64) * mult * ante_scaling
     }
@@ -568,6 +566,48 @@ impl GameState {
                 j.set_counter_f64("x_mult", cur + 0.25);
             }
         }
+    }
+
+    /// Switch the current Boss blind's ability off for the rest of the round, undoing what it
+    /// had already taken (`Blind:disable()`, blind.lua:356).
+    ///
+    /// Chicot does this passively and every `boss_blind_disabled()` check follows it for free.
+    /// Luchador does it at the moment it is sold, part-way through a round that the blind has
+    /// already shaped, so the damage has to be handed back: the discards The Water took, the
+    /// hands The Needle took, the cards turned face down, Cerulean Bell's forced selection, The
+    /// Manacle's hand slot, and the inflated requirement of The Wall or Violet Vessel.
+    pub(crate) fn disable_boss_blind(&mut self) {
+        if self.boss_blind_disabled() {
+            return;
+        }
+        let hands_before = self.effective_max_hands();
+        let discards_before = self.effective_max_discards();
+
+        self.boss_blind_manually_disabled = true;
+
+        // Nothing else to undo outside a round — selling Luchador in the shop still latches the
+        // blind off, but there is no hand to redraw or requirement to restate.
+        if !matches!(self.state, GameStateKind::Round) {
+            return;
+        }
+
+        self.hands_remaining += self.effective_max_hands().saturating_sub(hands_before);
+        self.discards_remaining += self.effective_max_discards().saturating_sub(discards_before);
+
+        for card in self.deck.iter_mut() {
+            card.debuffed = false;
+            card.face_down = false;
+        }
+        self.fish_prepped = false;
+
+        // Cerulean Bell stops forcing its card, which can then be deselected like any other.
+        self.cerulean_forced_card_id = None;
+
+        // The Wall and Violet Vessel drop back to an ordinary Boss requirement.
+        self.score_goal = self.get_blind_chip_goal();
+
+        // The Manacle gives its hand slot back, and a card is drawn into it.
+        self.draw_to_hand();
     }
 
     /// Draw the tags for the ante about to start. Called at run start and once the Boss falls.

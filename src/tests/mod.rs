@@ -11,6 +11,7 @@
 ///   - stickers:         Sticker mechanics (eternal, rental, perishable)
 ///   - gamestate:        GameState round-play integration
 
+mod blind_disable;
 mod boss_blinds;
 mod card_effects;
 mod common_jokers;

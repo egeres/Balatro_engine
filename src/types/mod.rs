@@ -537,6 +537,18 @@ impl BossBlind {
             _ => 2.0,
         }
     }
+
+    /// The requirement once the blind's ability has been switched off.
+    ///
+    /// `Blind:disable()` halves The Wall's chips and cuts Violet Vessel's to a third
+    /// (blind.lua:377, :393). Nothing else is touched, so a disabled Needle keeps its easy 1x —
+    /// the small requirement is the blind, not the ability.
+    pub fn chip_multiplier_disabled(&self) -> f64 {
+        match self {
+            BossBlind::TheWall | BossBlind::VioletVessel => 2.0,
+            other => other.chip_multiplier(),
+        }
+    }
 }
 
 impl Edition {

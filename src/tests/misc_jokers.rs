@@ -2225,3 +2225,22 @@ fn test_sixth_sense_destroys_the_six_with_no_consumable_room() {
     assert!(gs.consumables.is_empty());
     assert!(gs.deck.is_empty(), "the 6 should still be destroyed");
 }
+
+#[test]
+fn test_mr_bones_destroys_only_itself() {
+    // A second copy has to survive to save you again.
+    let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Two, Suit::Spades)], 1);
+    gs.joker_slots = 5;
+    gs.jokers.push(joker(1, JokerKind::MrBones));
+    gs.jokers.push(joker(2, JokerKind::MrBones));
+    gs.hands_remaining = 1;
+    gs.score_goal = 20.0; // a lone 2 scores 7, comfortably over a quarter
+
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
+
+    assert!(!matches!(gs.state, GameStateKind::GameOver), "Mr. Bones should have saved the run");
+    assert_eq!(gs.jokers.iter().filter(|j| j.kind == JokerKind::MrBones).count(), 1,
+        "exactly one Mr. Bones is spent");
+}

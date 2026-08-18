@@ -575,3 +575,18 @@ fn test_discounts_apply_after_the_edition_surcharge() {
     // (10 + 5 + 0.5) * 0.75 = 11.625 -> 11
     assert_eq!(gs.debug_joker_price(&poly), 11);
 }
+
+#[test]
+fn test_the_boss_can_only_be_rerolled_from_the_blind_select_screen() {
+    let mut gs = make_game();
+    gs.vouchers.push(VoucherKind::DirectorsCut);
+    gs.money = 100;
+
+    gs.state = GameStateKind::Shop;
+    assert!(matches!(gs.reroll_boss_blind(), Err(crate::game::BalatroError::NotInBlindSelect)),
+        "the reroll button lives on the blind-select screen");
+
+    gs.state = GameStateKind::BlindSelect;
+    assert!(gs.reroll_boss_blind().is_ok());
+    assert_eq!(gs.money, 90, "and it costs $10");
+}

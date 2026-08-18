@@ -752,10 +752,14 @@ impl GameState {
         } else if self.hands_remaining == 0 {
             // Out of hands, didn't meet goal
             // Check Mr. Bones joker
-            let mr_bones = self.jokers.iter().any(|j| j.kind == JokerKind::MrBones && !j.eternal);
-            if mr_bones && self.score_accumulated >= self.score_goal / 4.0 {
-                // Mr. Bones saves you (then gets destroyed)
-                self.jokers.retain(|j| j.kind != JokerKind::MrBones);
+            let mr_bones = self
+                .jokers
+                .iter()
+                .position(|j| j.kind == JokerKind::MrBones && !j.eternal);
+            if let (Some(pos), true) = (mr_bones, self.score_accumulated >= self.score_goal / 4.0) {
+                // Mr. Bones saves you and destroys *itself* — a second copy is still on the board
+                // for the next brush with death.
+                self.jokers.remove(pos);
                 self.win_round();
             } else {
                 self.state = GameStateKind::GameOver;
