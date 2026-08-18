@@ -381,31 +381,13 @@ fn test_credit_card_does_not_modify_game_parameters() {
 // DelayedGratification: +$2 per discard if no discards used
 // =========================================================
 
-#[test]
-fn test_delayed_gratification_pays_when_no_discards_used() {
-    let mut gs = make_game();
-    let cards = vec![
-        card(0, Rank::Ace, Suit::Spades),
-        card(1, Rank::Two, Suit::Hearts),
-    ];
-    setup_round(&mut gs, cards, 1);
-    gs.jokers.push(joker(1, JokerKind::DelayedGratification));
-    gs.score_goal = 1.0;
-    gs.discards_remaining = 3;
-
-    let money_before = gs.money;
-    // Don't use any discards, play to win
-    gs.select_card(0).unwrap();
-    gs.play_hand().unwrap();
-
-    assert!(matches!(gs.state, GameStateKind::Shop));
-    // +$2 per 3 discards = +$6 from DG
-    let money_gained = gs.money - money_before;
-    assert!(money_gained >= 6, "DelayedGratification should pay $6 for 3 unused discards, gained: {}", money_gained);
-}
-
-#[test]
-fn test_delayed_gratification_does_not_pay_when_discards_used() {
+/// Win one round with three discards available, optionally spending one first, and optionally
+/// with a Delayed Gratification on the board. Returns the money the round ended on.
+///
+/// Everything but the joker is fixed — same seed, same cards, same play — so running it both ways
+/// and taking the difference isolates what the joker paid. That beats asserting an absolute
+/// figure, which would mean restating the blind reward and the interest rule inside the test.
+fn delayed_gratification_round(with_joker: bool, spend_a_discard: bool) -> i32 {
     let mut gs = make_game();
     let cards = vec![
         card(0, Rank::Ace, Suit::Spades),
@@ -413,23 +395,49 @@ fn test_delayed_gratification_does_not_pay_when_discards_used() {
         card(2, Rank::Three, Suit::Clubs),
     ];
     setup_round(&mut gs, cards, 3);
-    gs.jokers.push(joker(1, JokerKind::DelayedGratification));
-    gs.score_goal = 100000.0; // won't win from one hand
-    gs.discards_remaining = 3;
+    if with_joker {
+        gs.jokers.push(joker(1, JokerKind::DelayedGratification));
+    }
     gs.max_discards = 3;
+    gs.discards_remaining = 3;
 
-    // Use a discard
-    gs.select_card(0).unwrap();
-    gs.discard_hand().unwrap();
+    if spend_a_discard {
+        gs.score_goal = 100_000.0; // out of reach, so the round does not end early
+        gs.select_card(0).unwrap();
+        gs.discard_hand().unwrap();
+    }
 
-    // Now win by setting score goal low
     gs.score_goal = 1.0;
     gs.select_card(0).unwrap();
     gs.play_hand().unwrap();
 
-    // discards were used, so DG should not pay its +$6
-    // Just make sure it ran without panicking
-    assert!(matches!(gs.state, GameStateKind::Shop));
+    assert!(matches!(gs.state, GameStateKind::Shop), "the round should have been won");
+    gs.money
+}
+
+#[test]
+fn test_delayed_gratification_pays_when_no_discards_used() {
+    let with = delayed_gratification_round(true, false);
+    let without = delayed_gratification_round(false, false);
+    // $2 per unused discard, three of them. The gap can exceed $6, because the payout lands
+    // before interest is worked out and so can earn a little interest of its own.
+    assert!(
+        with - without >= 6,
+        "DelayedGratification should pay at least $6 for 3 unused discards; \
+         with={with} without={without}"
+    );
+}
+
+#[test]
+fn test_delayed_gratification_does_not_pay_when_discards_used() {
+    let with = delayed_gratification_round(true, true);
+    let without = delayed_gratification_round(false, true);
+    // Spending even one discard forfeits the whole payout, so the joker should make no
+    // difference at all — not merely a smaller one.
+    assert_eq!(
+        with, without,
+        "spending a discard should forfeit the entire DelayedGratification payout"
+    );
 }
 
 // =========================================================
