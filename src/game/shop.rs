@@ -116,8 +116,8 @@ impl GameState {
         self.poll_edition_at_rate(rate, allow_negative)
     }
 
-    /// Poll an edition at an explicit rate. Standard packs use a fixed 2 rather than the run's
-    /// `edition_rate` (card.lua:1761).
+    /// Poll an edition at an explicit rate (`poll_edition`'s `_mod`, common_events.lua:2055).
+    /// Negative is never scaled — only Foil, Holographic and Polychrome are.
     pub(crate) fn poll_edition_at_rate(&mut self, rate: f64, allow_negative: bool) -> Edition {
         let roll = self.rng.next_f64("edition_generic");
         if allow_negative && roll > 1.0 - 0.003 {
@@ -173,7 +173,7 @@ impl GameState {
                 }
                 TagKind::D6 => {
                     self.shop_rerolls_free = true;
-                    self.reroll_cost = 0;
+                    self.recalculate_reroll_cost(true);
                 }
                 TagKind::Voucher => {
                     // A second voucher on offer this shop.
@@ -239,17 +239,22 @@ impl GameState {
         }
     }
 
-    pub(crate) fn generate_shop(&mut self) {
+    /// Fill the shop's card slots. This is all a reroll touches: the booster packs and the
+    /// voucher stay put (button_callbacks.lua:2871 only rebuilds `G.shop_jokers`).
+    fn restock_shop_cards(&mut self) {
         // Card slots: base 2, +1 per Overstock voucher (game.lua:1885).
         let card_slots = 2
             + if self.has_voucher(VoucherKind::Overstock) { 1 } else { 0 }
             + if self.has_voucher(VoucherKind::OverstockPlus) { 1 } else { 0 };
 
-        // Cleared up front and filled in place, so each joker rolled is visible to the pool
-        // filter and cannot be rolled twice in the same shop.
-        self.shop_offers.clear();
+        // Card slots are dropped and refilled; packs and the voucher survive the reroll.
+        self.shop_offers
+            .retain(|o| matches!(o.kind, ShopItem::Pack(_) | ShopItem::Voucher(_)));
 
-        for _ in 0..card_slots {
+        // Filled one at a time so each joker rolled is visible to the pool filter and cannot be
+        // rolled twice into the same shop. Inserted at the front to keep the cards ahead of the
+        // packs, which is the order callers index by.
+        for i in 0..card_slots {
             if let Some(item) = self.roll_shop_slot() {
                 let price = match &item {
                     ShopItem::Joker(j) => self.joker_shop_price(j),
@@ -258,9 +263,15 @@ impl GameState {
                     ShopItem::Pack(p) => p.base_cost(),
                     ShopItem::Voucher(_) => 10,
                 };
-                self.shop_offers.push(ShopOffer { kind: item, price, sold: false });
+                self.shop_offers
+                    .insert(i, ShopOffer { kind: item, price, sold: false });
             }
         }
+    }
+
+    pub(crate) fn generate_shop(&mut self) {
+        self.shop_offers.clear();
+        self.restock_shop_cards();
 
         // Two booster pack slots, drawn from the full weighted pool.
         for _ in 0..2 {
@@ -275,31 +286,22 @@ impl GameState {
         }
 
         self.shop_voucher = Some(self.random_voucher());
-        self.reroll_cost = self.base_reroll_cost;
+        self.recalculate_reroll_cost(true);
         self.apply_shop_tags();
+    }
 
-        // ChaosTheClown: +1 free reroll per shop visit
-        let chaos_count = self.jokers.iter().filter(|j| j.kind == JokerKind::ChaosTheClown && j.active).count();
-        self.free_rerolls += chaos_count as u32;
-
-        // Egg: gains $3 sell value each time the shop is visited
-        for j in self.jokers.iter_mut() {
-            if j.kind == JokerKind::Egg && j.active {
-                let cur = j.get_counter_i64("sell_bonus");
-                j.set_counter_i64("sell_bonus", cur + 3);
-            }
+    /// `calculate_reroll_cost` (common_events.lua:2263). A free reroll costs nothing and does not
+    /// escalate the price; a paid one adds a dollar to the running increase for the rest of the
+    /// round.
+    pub(crate) fn recalculate_reroll_cost(&mut self, skip_increment: bool) {
+        if self.free_rerolls > 0 || self.shop_rerolls_free {
+            self.reroll_cost = 0;
+            return;
         }
-
-        // GiftCard: +$1 sell value to all other jokers held
-        let has_gift_card = self.jokers.iter().any(|j| j.kind == JokerKind::GiftCard && j.active);
-        if has_gift_card {
-            for j in self.jokers.iter_mut() {
-                if j.kind != JokerKind::GiftCard {
-                    let cur = j.get_counter_i64("sell_bonus");
-                    j.set_counter_i64("sell_bonus", cur + 1);
-                }
-            }
+        if !skip_increment {
+            self.reroll_cost_increase += 1;
         }
+        self.reroll_cost = self.base_reroll_cost + self.reroll_cost_increase;
     }
 
     /// Whether `kind` can currently appear in a shop / pack / random-joker roll.
@@ -387,19 +389,9 @@ impl GameState {
         let kind = pool[idx];
         let id = self.next_id();
 
-        // Random edition
-        let edition_roll = self.rng.next_f64("edition_deck");
-        let edition = if edition_roll < 0.003 {
-            Edition::Negative
-        } else if edition_roll < 0.006 {
-            Edition::Polychrome
-        } else if edition_roll < 0.02 {
-            Edition::Holographic
-        } else if edition_roll < 0.04 {
-            Edition::Foil
-        } else {
-            Edition::None
-        };
+        // Editions are polled through the run's `edition_rate` (common_events.lua:2149), which is
+        // what makes Hone and Glow Up worth buying. Negative is not scaled by it.
+        let edition = self.poll_edition(true);
 
         let mut joker = JokerInstance::new(id, kind, edition);
 
@@ -408,19 +400,20 @@ impl GameState {
         // would trigger. Rental (Gold+) is independent and can combine with either.
         // A joker only takes a sticker its definition allows (`eternal_compat` /
         // `perishable_compat`, card.lua:517).
+        // One roll decides both (common_events.lua:2138): above 0.7 is Eternal, 0.4 to 0.7 is
+        // Perishable. Two independent 30% rolls left Perishable at 21% once Eternal won ties.
         let stake_level = self.stake as u8;
-        if stake_level >= Stake::Black as u8
-            && kind.eternal_compat()
-            && self.rng.next_bool_prob("eternal", 0.30)
-        {
-            joker.eternal = true;
-        } else if stake_level >= Stake::Orange as u8
-            && kind.perishable_compat()
-            && self.rng.next_bool_prob("perishable", 0.30)
-        {
-            joker.perishable = true;
+        let eternals_enabled = stake_level >= Stake::Black as u8;
+        let perishables_enabled = stake_level >= Stake::Orange as u8;
+        if eternals_enabled || perishables_enabled {
+            let poll = self.rng.next_f64("etperpoll");
+            if eternals_enabled && poll > 0.7 && kind.eternal_compat() {
+                joker.eternal = true;
+            } else if perishables_enabled && poll > 0.4 && poll <= 0.7 && kind.perishable_compat() {
+                joker.perishable = true;
+            }
         }
-        if stake_level >= Stake::Gold as u8 && self.rng.next_bool_prob("rental", 0.30) {
+        if stake_level >= Stake::Gold as u8 && self.rng.next_f64("ssjr") > 0.7 {
             joker.rental = true;
         }
 
@@ -803,7 +796,8 @@ impl GameState {
                 self.playing_card_rate = 4.0;
             }
             VoucherKind::Hieroglyph => {
-                // -1 Ante, at the cost of a hand each round (card.lua:1957).
+                // -1 Ante, at the cost of a hand each round (card.lua:1957). The ante you have to
+                // *reach* is untouched, so this lengthens the run and shrinks its blinds.
                 self.ante = self.ante.saturating_sub(1).max(1);
                 self.max_hands = self.max_hands.saturating_sub(1);
                 self.hands_remaining = self.hands_remaining.saturating_sub(1);
@@ -882,24 +876,22 @@ impl GameState {
             return Err(BalatroError::NotInShop);
         }
 
-        let actual_cost = if self.shop_rerolls_free {
-            0
-        } else if self.free_rerolls > 0 {
-            self.free_rerolls -= 1;
-            0
-        } else {
-            self.reroll_cost
-        };
+        let was_free = self.shop_rerolls_free || self.free_rerolls > 0;
+        let actual_cost = if was_free { 0 } else { self.reroll_cost };
 
         if !self.can_afford(actual_cost as i32) {
             return Err(BalatroError::NotEnoughMoney(actual_cost, self.money.max(0) as u32));
         }
 
         self.money -= actual_cost as i32;
-        self.reroll_cost += 1; // Escalates by $1 per reroll within a shop
+        if !self.shop_rerolls_free && self.free_rerolls > 0 {
+            self.free_rerolls -= 1;
+        }
+        // Spending a free reroll does not push the price up (`calculate_reroll_cost(final_free)`).
+        self.recalculate_reroll_cost(was_free);
 
-        // Regenerate joker offers
-        self.generate_shop();
+        // Only the card slots are replaced — the packs and the voucher are not rerollable.
+        self.restock_shop_cards();
 
         // Flash Card joker: +2 mult per reroll
         for j in self.jokers.iter_mut() {

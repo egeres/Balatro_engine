@@ -233,6 +233,17 @@ impl GameState {
             data.played_this_round = 0;
         }
 
+        // Chaos the Clown's free rerolls are *set*, not accumulated, and the reroll price starts
+        // over (state_events.lua:312). Both belong to `G.GAME.current_round`, so they are pinned
+        // here and then carried into the shop that follows this round.
+        self.free_rerolls = self
+            .jokers
+            .iter()
+            .filter(|j| j.kind == JokerKind::ChaosTheClown && j.active)
+            .count() as u32;
+        self.reroll_cost_increase = 0;
+        self.recalculate_reroll_cost(true);
+
         // Juggle Tag: +3 hand size for this round only.
         let juggles = self.tags.iter().filter(|t| **t == TagKind::Juggle).count();
         self.tags.retain(|t| *t != TagKind::Juggle);

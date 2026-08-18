@@ -144,7 +144,10 @@ impl GameState {
                             enhancements[self.rng.range_usize(&stdset, 0, enhancements.len() - 1)];
                     }
 
-                    card.edition = self.poll_edition_at_rate(2.0, false);
+                    // Standard packs pass a local rate of 2 as `_mod`, which multiplies with the
+                    // run's own `edition_rate` (card.lua:1760), so Hone and Glow Up stack on top.
+                    let rate = 2.0 * self.edition_rate;
+                    card.edition = self.poll_edition_at_rate(rate, false);
 
                     if self.rng.next_f64(&stdseal) > 0.8 {
                         let seal_roll = self.rng.next_f64("stdsealtype");

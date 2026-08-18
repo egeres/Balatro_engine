@@ -299,15 +299,13 @@ fn test_certificate_card_has_no_enhancement() {
 // =========================================================
 
 #[test]
-fn test_chaos_the_clown_gives_free_reroll_on_shop_visit() {
+fn test_chaos_the_clown_gives_one_free_reroll_per_round() {
+    // free_rerolls is *set* at the start of a round (state_events.lua:312), not accumulated.
     let mut gs = make_game();
     gs.jokers.push(joker(1, JokerKind::ChaosTheClown));
-    gs.state = GameStateKind::Shop;
 
-    let free_rerolls_before = gs.free_rerolls;
-    gs.generate_shop();
-    assert_eq!(gs.free_rerolls, free_rerolls_before + 1,
-        "ChaosTheClown should give +1 free reroll per shop visit");
+    gs.select_blind().unwrap();
+    assert_eq!(gs.free_rerolls, 1, "ChaosTheClown should give 1 free reroll per round");
 }
 
 #[test]
@@ -315,11 +313,25 @@ fn test_chaos_the_clown_stacks_multiple() {
     let mut gs = make_game();
     gs.jokers.push(joker(1, JokerKind::ChaosTheClown));
     gs.jokers.push(joker(2, JokerKind::ChaosTheClown));
-    gs.state = GameStateKind::Shop;
 
+    gs.select_blind().unwrap();
+    assert_eq!(gs.free_rerolls, 2);
+}
+
+#[test]
+fn test_chaos_the_clown_does_not_hand_out_a_reroll_per_reroll() {
+    // Restocking the shop used to re-add the free reroll, which made them unlimited.
+    let mut gs = make_game();
+    gs.jokers.push(joker(1, JokerKind::ChaosTheClown));
+    gs.select_blind().unwrap();
+    gs.state = GameStateKind::Shop;
     gs.generate_shop();
-    // 2 ChaosTheClown → +2 free rerolls
-    assert!(gs.free_rerolls >= 2);
+    gs.money = 100;
+
+    gs.reroll_shop().unwrap();
+    assert_eq!(gs.free_rerolls, 0, "the single free reroll should be spent, not renewed");
+    gs.reroll_shop().unwrap();
+    assert!(gs.money < 100, "the second reroll costs money");
 }
 
 // =========================================================
@@ -570,31 +582,35 @@ fn test_dusk_does_not_retrigger_on_non_last_hand() {
 // =========================================================
 
 #[test]
-fn test_egg_gains_sell_value_on_shop_visit() {
+fn test_egg_gains_sell_value_at_end_of_round() {
     let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
     gs.jokers.push(joker(1, JokerKind::Egg));
-    gs.state = GameStateKind::Shop;
+    gs.score_goal = 1.0;
 
     let sell_before = gs.jokers[0].sell_value();
-    gs.generate_shop();
-    let sell_after = gs.jokers[0].sell_value();
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
 
-    assert_eq!(sell_after, sell_before + 3,
-        "Egg should gain $3 sell value per shop visit");
+    assert_eq!(gs.jokers[0].sell_value(), sell_before + 3,
+        "Egg gains $3 of sell value at the end of the round");
 }
 
 #[test]
-fn test_egg_stacks_sell_value_over_multiple_visits() {
+fn test_egg_does_not_gain_sell_value_per_reroll() {
+    // It used to be wired to shop generation, so rerolling farmed it.
     let mut gs = make_game();
     gs.jokers.push(joker(1, JokerKind::Egg));
     gs.state = GameStateKind::Shop;
-
-    let sell_initial = gs.jokers[0].sell_value();
     gs.generate_shop();
-    gs.generate_shop();
-    let sell_after = gs.jokers[0].sell_value();
+    gs.money = 100;
 
-    assert_eq!(sell_after, sell_initial + 6, "Egg should accumulate sell value over visits");
+    let sell_before = gs.jokers[0].sell_value();
+    gs.reroll_shop().unwrap();
+    gs.reroll_shop().unwrap();
+
+    assert_eq!(gs.jokers[0].sell_value(), sell_before,
+        "rerolling the shop must not feed Egg");
 }
 
 // =========================================================
@@ -706,29 +722,31 @@ fn test_faceless_joker_does_not_pay_for_fewer_than_3_face_cards() {
 #[test]
 fn test_gift_card_increases_other_joker_sell_values() {
     let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
     gs.jokers.push(joker(1, JokerKind::GiftCard));
     gs.jokers.push(joker(2, JokerKind::Joker));
-    gs.state = GameStateKind::Shop;
+    gs.score_goal = 1.0;
 
     let joker_sell_before = gs.jokers[1].sell_value();
-    gs.generate_shop();
-    let joker_sell_after = gs.jokers[1].sell_value();
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
 
-    assert_eq!(joker_sell_after, joker_sell_before + 1,
-        "GiftCard should increase other jokers' sell value by $1");
+    assert_eq!(gs.jokers[1].sell_value(), joker_sell_before + 1,
+        "GiftCard adds $1 of sell value at the end of the round");
 }
 
 #[test]
 fn test_gift_card_does_not_increase_own_sell_value() {
     let mut gs = make_game();
+    setup_round(&mut gs, vec![card(0, Rank::Ace, Suit::Spades)], 1);
     gs.jokers.push(joker(1, JokerKind::GiftCard));
-    gs.state = GameStateKind::Shop;
+    gs.score_goal = 1.0;
 
     let own_sell_before = gs.jokers[0].sell_value();
-    gs.generate_shop();
-    let own_sell_after = gs.jokers[0].sell_value();
+    gs.select_card(0).unwrap();
+    gs.play_hand().unwrap();
 
-    assert_eq!(own_sell_after, own_sell_before,
+    assert_eq!(gs.jokers[0].sell_value(), own_sell_before,
         "GiftCard should not increase its own sell value");
 }
 

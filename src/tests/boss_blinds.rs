@@ -2163,11 +2163,13 @@ fn test_boss_selection_cycles_before_repeating() {
 }
 
 #[test]
-fn test_hieroglyph_shortens_the_run() {
+fn test_hieroglyph_does_not_move_the_winning_ante() {
+    // It calls ease_ante(-1) — it lowers the ante you are *on*, not the one you have to reach
+    // (card.lua:1958). G.GAME.win_ante stays at 8, which is what makes the run longer.
     let mut gs = GameState::new(DeckType::Red, Stake::White, Some("ANTE".to_string()));
     assert_eq!(gs.win_ante(), 8);
     gs.vouchers.push(VoucherKind::Hieroglyph);
-    assert_eq!(gs.win_ante(), 7);
+    assert_eq!(gs.win_ante(), 8);
     gs.vouchers.push(VoucherKind::Petroglyph);
-    assert_eq!(gs.win_ante(), 6);
+    assert_eq!(gs.win_ante(), 8);
 }

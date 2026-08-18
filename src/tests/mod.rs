@@ -27,6 +27,7 @@ mod planet_cards;
 mod rare_jokers;
 mod spectral_cards;
 mod selling;
+mod shop_economy;
 mod stakes;
 mod stickers;
 mod tags;

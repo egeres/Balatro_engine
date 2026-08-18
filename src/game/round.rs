@@ -1124,6 +1124,23 @@ impl GameState {
         let golden_joker_count = self.jokers.iter().filter(|j| j.kind == JokerKind::GoldenJoker && j.active).count();
         self.money += 4 * golden_joker_count as i32;
 
+        // Egg and Gift Card gain sell value at the *end of the round* (card.lua:2985, :2993).
+        // Doing it when the shop is stocked let a player farm them by rerolling.
+        for i in 0..self.jokers.len() {
+            if self.jokers[i].kind == JokerKind::Egg && self.jokers[i].active {
+                let cur = self.jokers[i].get_counter_i64("sell_bonus");
+                self.jokers[i].set_counter_i64("sell_bonus", cur + 3);
+            }
+        }
+        if self.jokers.iter().any(|j| j.kind == JokerKind::GiftCard && j.active) {
+            for j in self.jokers.iter_mut() {
+                if j.kind != JokerKind::GiftCard {
+                    let cur = j.get_counter_i64("sell_bonus");
+                    j.set_counter_i64("sell_bonus", cur + 1);
+                }
+            }
+        }
+
         // Rocket: earns dollars equal to its counter; +$2 per boss blind beaten
         let is_boss = matches!(self.current_blind, BlindKind::Boss);
         for i in 0..self.jokers.len() {

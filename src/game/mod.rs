@@ -137,6 +137,10 @@ pub struct GameState {
     /// Reroll Surplus and Reroll Glut each knock $2 off it.
     pub base_reroll_cost: u32,
 
+    /// How much the reroll price has escalated this round (`reroll_cost_increase`,
+    /// common_events.lua:2267). Reset when a round begins, +$1 per paid reroll.
+    pub reroll_cost_increase: u32,
+
     /// Whether the Boss blind has already been rerolled this ante (Director's Cut allows one).
     pub boss_rerolled_this_ante: bool,
 
@@ -267,6 +271,7 @@ impl GameState {
             playing_card_rate: 0.0,
             edition_rate: 1.0,
             base_reroll_cost: 5,
+            reroll_cost_increase: 0,
             boss_rerolled_this_ante: false,
             played_card_ids_this_ante: Vec::new(),
         };
@@ -544,17 +549,13 @@ impl GameState {
         self.negative_consumable_slots = keep;
     }
 
-    /// The ante that ends the run. Hieroglyph and Petroglyph each knock one off
-    /// (`G.GAME.win_ante`, base 8).
+    /// The ante that ends the run (`G.GAME.win_ante`).
+    ///
+    /// It is a flat 8 in a vanilla run. Hieroglyph and Petroglyph do *not* lower it — they lower
+    /// the ante you are currently on (`ease_ante(-1)`, card.lua:1958), which is why they make a
+    /// run longer and its blinds smaller rather than shorter. Only Challenges move this.
     pub fn win_ante(&self) -> u32 {
-        let mut ante = 8;
-        if self.has_voucher(VoucherKind::Hieroglyph) {
-            ante -= 1;
-        }
-        if self.has_voucher(VoucherKind::Petroglyph) {
-            ante -= 1;
-        }
-        ante
+        8
     }
 
     /// Returns `true` if the current Boss blind's ability is disabled.
